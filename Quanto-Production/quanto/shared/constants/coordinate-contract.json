@@ -1,0 +1,9 @@
+{
+  "version": "coordinate-contract-v1",
+  "canonical_page_geometry": "integer_page_milli_points",
+  "page_units": "points",
+  "measurement_units": "millimetres",
+  "model_coordinates": "norm_1000_top_left",
+  "render_transform": "page_from_image_affine_2x3",
+  "rotation_rule": "transform_all_corners_then_take_envelope"
+}

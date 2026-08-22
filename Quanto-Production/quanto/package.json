@@ -1,0 +1,11 @@
+{
+  "name": "quanto-production",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "web:dev": "npm --prefix frontend run dev",
+    "web:build": "npm --prefix frontend run build",
+    "web:typecheck": "npm --prefix frontend run typecheck",
+    "web:syntax": "npm --prefix frontend run test:syntax"
+  }
+}

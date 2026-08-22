@@ -1,0 +1,60 @@
+Quanto/
+├── frontend/                         # Exact demo UI, production-organised
+│   ├── public/
+│   ├── scripts/
+│   └── src/
+│       ├── app/                      # Next.js routes
+│       ├── features/
+│       │   ├── pre/                  # Production-connected NOW
+│       │   │   ├── upload/
+│       │   │   ├── plans/
+│       │   │   ├── scale/
+│       │   │   ├── height/
+│       │   │   ├── specifications/
+│       │   │   ├── start-takeoff/
+│       │   │   ├── project-frame/
+│       │   │   ├── components/
+│       │   │   ├── hooks/
+│       │   │   ├── services/
+│       │   │   ├── state/
+│       │   │   └── types/
+│       │   ├── takeoff/              # Demo/product boundary; production later
+│       │   ├── review/               # Demo/product boundary; production later
+│       │   ├── boq/                  # Demo/product boundary; production later
+│       │   ├── quanto/               # Shared product shell/navigation
+│       │   └── drawing/              # Shared drawing/canvas systems
+│       └── shared/                    # Providers, services, constants, types
+│
+├── backend/                          # FastAPI production backend
+│   ├── app/
+│   │   ├── api/v1/routes/
+│   │   ├── modules/
+│   │   │   ├── pre/                  # Production Pre business logic
+│   │   │   ├── takeoff/              # Reserved for later
+│   │   │   ├── review/               # Reserved for later
+│   │   │   └── boq/                  # Reserved for later
+│   │   ├── services/
+│   │   │   ├── ai/
+│   │   │   ├── pdf/
+│   │   │   └── storage/
+│   │   ├── database/
+│   │   ├── core/
+│   │   └── shared/
+│   └── tests/
+│
+├── database/                         # PostgreSQL schema/migrations
+│   ├── migrations/
+│   ├── schema/
+│   ├── seeds/
+│   └── indexes/
+├── storage/                          # Local persistent project files
+│   ├── projects/
+│   └── temp/
+├── shared/                           # Cross-service contracts/schemas
+├── infrastructure/                   # Docker/deployment/scripts/monitoring
+├── docs/                             # Plan + implementation/runbooks
+├── tests/                            # E2E fixtures/boundaries
+├── .github/workflows/                # CI
+├── docker-compose.yml
+├── .env.example
+└── README.md

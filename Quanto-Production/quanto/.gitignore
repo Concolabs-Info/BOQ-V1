@@ -1,0 +1,40 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+frontend/.env.local
+backend/.env
+
+# Node
+node_modules/
+frontend/.next/
+frontend/out/
+npm-debug.log*
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Runtime storage — keep only directory markers and README files
+storage/projects/*
+!storage/projects/.gitkeep
+storage/temp/*
+!storage/temp/.gitkeep
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Generated archives and reports
+*.zip
+coverage/
+htmlcov/

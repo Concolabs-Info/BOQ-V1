@@ -1,0 +1,70 @@
+name: quanto
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-quanto}
+      POSTGRES_USER: ${POSTGRES_USER:-quanto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quanto}
+    ports:
+      - "5432:5432"
+    volumes:
+      - quanto_postgres:/var/lib/postgresql/data
+      - ./database/schema/001_pre.sql:/docker-entrypoint-initdb.d/001_pre.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quanto} -d ${POSTGRES_DB:-quanto}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-quanto}:${POSTGRES_PASSWORD:-quanto}@db:5432/${POSTGRES_DB:-quanto}
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      STORAGE_ROOT: /data/storage
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
+      RENDER_THUMBNAIL_DPI: ${RENDER_THUMBNAIL_DPI:-72}
+      RENDER_WORKING_DPI: ${RENDER_WORKING_DPI:-150}
+      AI_PROVIDER: ${AI_PROVIDER:-local}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-latest}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      MODEL_RETRIES: ${MODEL_RETRIES:-2}
+      MODEL_CONCURRENCY: ${MODEL_CONCURRENCY:-4}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage:/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  quanto_postgres:
