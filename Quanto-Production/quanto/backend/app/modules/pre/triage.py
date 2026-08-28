@@ -17,7 +17,7 @@ from .prompts import SYSTEM, TRIAGE_PROMPT
 
 
 def _analyze_page(page: dict, settings) -> tuple[TriageOutput, str | None]:
-    if settings.ai_provider.lower().strip() in {"local", "manual"}:
+    if settings.pre_ai_provider.lower().strip() in {"local", "manual"}:
         return (
             triage_from_pdf(
                 resolve_key(page["document_storage_key"]),
@@ -28,7 +28,7 @@ def _analyze_page(page: dict, settings) -> tuple[TriageOutput, str | None]:
         )
 
     try:
-        output = get_model_client().parse_image(
+        output = get_model_client("pre").parse_image(
             Path(resolve_key(page["render_storage_key"])),
             TRIAGE_PROMPT.format(page_number=page["page_number"], filename=page["filename"]),
             TriageOutput,
@@ -62,7 +62,7 @@ def triage_project(project_id: UUID | str) -> None:
         raise ValueError("No ready pages to triage")
 
     settings = get_settings()
-    if settings.ai_provider.lower().strip() in {"local", "manual"}:
+    if settings.pre_ai_provider.lower().strip() in {"local", "manual"}:
         analyses = [_analyze_page(page, settings) for page in pages]
     else:
         worker_count = max(1, min(settings.model_concurrency, 4, len(pages)))

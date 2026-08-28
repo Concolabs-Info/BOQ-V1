@@ -87,7 +87,7 @@ def _measure_reading(viewport_id: UUID | str, storeys: list[dict]) -> tuple[list
     vp = fetch_one("SELECT name, view_kind FROM viewport WHERE id=%s", (str(viewport_id),))
     stack_text = "\n".join(f"{i+1}. {s['name']}" for i, s in enumerate(storeys)) or "(no storeys)"
     prompt = HEIGHT_PROMPT.format(source_kind=vp["view_kind"], storey_stack=stack_text)
-    reading = get_model_client().parse_image(Path(crop_path), prompt, HeightReading, system=SYSTEM)
+    reading = get_model_client("pre").parse_image(Path(crop_path), prompt, HeightReading, system=SYSTEM)
     measured: list[dict] = []
     for band in reading.model_dump(mode="json")["bands"]:
         top = norm_crop_point_to_page_pt(ctx, 500, band["y_top"])

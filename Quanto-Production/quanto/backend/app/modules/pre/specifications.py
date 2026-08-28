@@ -142,14 +142,14 @@ def _expected_seen(items: list[dict]) -> set[str]:
 
 def extract_specs(project_id: UUID | str) -> list[dict]:
     settings = get_settings()
-    model = get_model_client()
+    model = get_model_client("pre")
     pages = _text_heavy_pages(project_id)
     harvested: list[dict] = []
 
     for page in pages:
         image_path = resolve_key(page["render_storage_key"])
         local_reading = specs_from_pdf(resolve_key(page["document_storage_key"]), page["page_number"])
-        if settings.ai_provider.lower().strip() in {"local", "manual"}:
+        if settings.pre_ai_provider.lower().strip() in {"local", "manual"}:
             reading = local_reading
         else:
             reading = model.parse_image(Path(image_path), SPEC_PROMPT, SpecReading, system=SYSTEM)

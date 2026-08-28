@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     render_thumbnail_dpi: int = 72
     render_working_dpi: int = 150
 
-    ai_provider: str = "local"
+    pre_ai_provider: str = "local"
+    takeoff_ai_provider: str = "local"
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-flash-latest"
     openai_api_key: str | None = None

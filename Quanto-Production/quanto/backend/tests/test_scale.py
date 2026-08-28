@@ -1,7 +1,10 @@
 from decimal import Decimal
+from contextlib import contextmanager
+from uuid import uuid4
 
-from app.modules.pre.scale import parse_length_mm, parse_normalized_ratio, parse_scale_note, parse_word_scale, roundness_score
+from app.modules.pre.scale import is_scale_eligible, parse_length_mm, parse_normalized_ratio, parse_scale_note, parse_word_scale, requires_primary_scale, roundness_score
 from app.api.v1.routes.scale import _requires_primary_scale
+from app.api.v1.routes import scale as scale_route
 
 
 def test_metric_and_imperial_lengths():
@@ -53,5 +56,44 @@ def test_primary_scale_workflow_eligibility():
     assert not _requires_primary_scale({"view_kind": "notes", "name": "General Notes"})
 
 
+def test_takeoff_scale_gate_only_requires_measurement_plans():
+    assert requires_primary_scale({"view_kind": "plan", "discipline": "architectural", "name": "First Floor Plan"})
+    assert requires_primary_scale({"view_kind": "plan", "discipline": "architectural", "name": "Roof Plan"})
+    assert not requires_primary_scale({"view_kind": "section", "discipline": "architectural", "name": "Section A-A"})
+    assert not requires_primary_scale({"view_kind": "elevation", "discipline": "architectural", "name": "Front Elevation"})
+    assert not requires_primary_scale({"view_kind": "plan", "discipline": "structural", "name": "General Arrangement of Columns & Walls"})
+    assert not requires_primary_scale({"view_kind": "plan", "discipline": "civil_site", "name": "Site Plan"})
+    assert is_scale_eligible({"view_kind": "section", "name": "Section A-A"})
+
+
 def test_roundness_score_is_supplementary():
     assert roundness_score(Decimal("96"), [9.0, 18.0], "in") == Decimal("1")
+
+
+def test_scale_propagation_requires_matching_target_printed_evidence(monkeypatch):
+    source_id, matching_id, conflicting_id = uuid4(), uuid4(), uuid4()
+    source_scale_id, propagated_scale_id = uuid4(), uuid4()
+    source = {"id": source_id, "view_kind": "plan", "discipline": "architectural", "name": "First Floor Plan"}
+    candidates = [
+        {"id": matching_id, "view_kind": "plan", "discipline": "architectural", "name": "Typical Floor Plan", "crop_version": 1, "latest_status": "proposed", "latest_checks": {"printed": {"factor": 96}}},
+        {"id": conflicting_id, "view_kind": "plan", "discipline": "architectural", "name": "Roof Plan", "crop_version": 1, "latest_status": "proposed", "latest_checks": {"printed": {"factor": 48}}},
+    ]
+    monkeypatch.setattr(scale_route, "fetch_one", lambda *_: {"project_id": uuid4()})
+    monkeypatch.setattr(scale_route, "fetch_all", lambda *_: candidates)
+    confirmed = []
+    monkeypatch.setattr(scale_route, "confirm", lambda entity_type, entity_id, actor="user": confirmed.append((entity_type, entity_id, actor)))
+
+    class Connection:
+        def execute(self, *_):
+            return self
+        def fetchone(self):
+            return {"id": propagated_scale_id}
+
+    @contextmanager
+    def fake_transaction():
+        yield Connection()
+
+    monkeypatch.setattr(scale_route, "transaction", fake_transaction)
+    propagated = scale_route._propagate_matching_plan_scales(source, source_scale_id, Decimal("96"))
+    assert propagated == [str(matching_id)]
+    assert confirmed == [("scale", propagated_scale_id, "scale_propagation")]

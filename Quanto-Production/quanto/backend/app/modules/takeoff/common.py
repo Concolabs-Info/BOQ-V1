@@ -85,13 +85,16 @@ def ensure_takeoff_floors(project_id: UUID | str) -> list[dict[str, Any]]:
            JOIN sheet s ON s.id=v.sheet_id JOIN page p ON p.id=s.page_id
            JOIN document d ON d.id=p.document_id
            WHERE d.project_id=%s AND s.included=true AND v.relevant=true AND v.view_kind='plan'
+             AND (v.discipline='architectural' OR v.name ~* '(floor|roof|roof terrace|reflected ceiling|ceiling plan|rcp)')
+             AND v.discipline NOT IN ('structural','civil_site')
            ORDER BY p.page_number,v.display_order""",
         (pid,),
     )
 
     def choose_viewport(storey: dict[str, Any]) -> str | None:
-        if storey.get("source_viewport_id"):
-            return str(storey["source_viewport_id"])
+        source_id = str(storey.get("source_viewport_id") or "")
+        if source_id and any(str(plan["id"]) == source_id for plan in plans):
+            return source_id
         label = (storey.get("name") or "").lower()
         scored: list[tuple[int, dict[str, Any]]] = []
         for vp in plans:
@@ -280,7 +283,7 @@ def model_for_quality(quality: str | None) -> str | None:
     from ...core.config import get_settings
 
     settings = get_settings()
-    provider = settings.ai_provider.lower().strip()
+    provider = settings.takeoff_ai_provider.lower().strip()
     if provider != "openai":
         return None
     q = (quality or "medium").strip().lower()

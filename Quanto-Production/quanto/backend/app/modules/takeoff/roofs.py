@@ -337,7 +337,7 @@ def _targeted_repair(image_path: Path, output: RoofGeometryOutput, issue: dict[s
         repair_path = image_path.with_name(f"{image_path.stem}-roof-repair.png")
         crop.save(repair_path)
     try:
-        repair = get_model_client().parse_image(
+        repair = get_model_client("takeoff").parse_image(
             repair_path,
             ROOF_REPAIR_PROMPT.format(
                 entity_kind=issue["entity_kind"], entity_id=issue["entity_id"], problem=issue["problem"],
@@ -368,7 +368,7 @@ def _start_run(project_id: str, level_id: str | None, task: str, model: str | No
             """INSERT INTO takeoff_analysis_run(project_id,floor_id,module,task_type,provider,model_id,prompt_version,
                    status,progress,message,request_hash)
                VALUES (%s,%s,'roof',%s,%s,%s,'roof-v1','running',5,%s,%s) RETURNING id""",
-            (project_id, floor_id, task, settings.ai_provider, model, "Starting roof analysis", request_hash),
+            (project_id, floor_id, task, settings.takeoff_ai_provider, model, "Starting roof analysis", request_hash),
         ).fetchone()
     return str(row["id"])
 
@@ -710,13 +710,13 @@ def analyze_project_roofs(project_id: UUID | str, quality: str = "medium", force
     pid = str(project_id)
     require_frozen_project(pid)
     settings = get_settings()
-    if settings.ai_provider.lower().strip() != "openai":
-        raise RuntimeError("Automatic Roof detection requires AI_PROVIDER=openai and a backend OPENAI_API_KEY. Manual Roof editing remains available without AI.")
+    if settings.takeoff_ai_provider.lower().strip() != "openai":
+        raise RuntimeError("Automatic Roof detection requires TAKEOFF_AI_PROVIDER=openai and a backend OPENAI_API_KEY. Manual Roof editing remains available without AI.")
     levels = _ensure_roof_levels(pid)
     if not levels:
         raise RuntimeError("No confirmed roof plan / roof terrace / roof crop was found in the frozen Pre Project Frame. Review Plans and include the roof drawing first.")
     model = model_for_quality(quality)
-    client = get_model_client()
+    client = get_model_client("takeoff")
     analysed = 0
     skipped = 0
     for level in levels:
@@ -883,7 +883,7 @@ def roof_demo_state(project_id: UUID | str) -> dict[str, Any]:
         "sheets": base["sheets"], "viewports": base["viewports"], "storeys": base["storeys"],
         "families": families, "upstandFamilies": upstand_families, "zones": zones,
         "uiState": (ui or {}).get("state_json") or {}, "analysis": run,
-        "provider": get_settings().ai_provider.lower().strip(),
+        "provider": get_settings().takeoff_ai_provider.lower().strip(),
         "reviewItems": fetch_all("SELECT * FROM roof_review_item WHERE project_id=%s AND resolved=false ORDER BY severity DESC,created_at", (pid,)),
     }
 

@@ -10,6 +10,7 @@ from ...database.json_value import Jsonb
 from ...database.connection import fetch_all, fetch_one, transaction
 from .confirmations import is_confirmed
 from .height import confirmed_scale
+from .scale import requires_primary_scale
 
 
 def readiness(project_id: UUID | str) -> dict:
@@ -40,7 +41,7 @@ def readiness(project_id: UUID | str) -> dict:
     for vp in viewports:
         if not is_confirmed("viewport", vp["id"]):
             issues.append({"stage": "plans", "message": f"Viewport not confirmed: {vp['name']}", "entity_id": str(vp["id"])})
-        if vp["view_kind"] != "notes":
+        if requires_primary_scale(vp):
             scale = confirmed_scale(vp["id"])
             if not scale or not is_confirmed("scale", scale["id"]):
                 issues.append({"stage": "scale", "message": f"Scale not confirmed: {vp['name']}", "entity_id": str(vp["id"])})

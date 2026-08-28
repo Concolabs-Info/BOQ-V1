@@ -114,7 +114,7 @@ def _start_run(project_id: str, floor_id: str | None, task: str, model: str | No
             """INSERT INTO takeoff_analysis_run(project_id,floor_id,module,task_type,provider,model_id,prompt_version,
                    status,progress,message,request_hash)
                VALUES (%s,%s,'ceiling',%s,%s,%s,'ceiling-v1','running',5,%s,%s) RETURNING id""",
-            (project_id, floor_id, task, settings.ai_provider, model, "Starting ceiling analysis", request_hash),
+            (project_id, floor_id, task, settings.takeoff_ai_provider, model, "Starting ceiling analysis", request_hash),
         ).fetchone()
     return str(row["id"])
 
@@ -214,7 +214,7 @@ def _section_observations(project_id: str, quality: str) -> list[dict[str, Any]]
     if not sections:
         return []
     model = model_for_quality(quality)
-    client = get_model_client()
+    client = get_model_client("takeoff")
     storeys = fetch_all("SELECT name,level_index,height_mm FROM storey WHERE project_id=%s ORDER BY level_index", (project_id,))
     observations: list[dict[str, Any]] = []
     for section in sections:
@@ -358,7 +358,7 @@ def _analyze_rcp(project_id: str, floor: dict[str, Any], rcp: dict[str, Any], qu
     rooms = fetch_all("SELECT id,name,room_type,geometry FROM floor_space WHERE floor_id=%s AND excluded=false", (str(floor["id"]),))
     room_context = "\n".join(f"{r.get('name') or r.get('room_type')} | {r.get('geometry')}" for r in rooms[:100])
     model = model_for_quality(quality)
-    output = get_model_client().parse_image(
+    output = get_model_client("takeoff").parse_image(
         image,
         CEILING_GEOMETRY_PROMPT.format(
             width=ctx["crop_width_px"], height=ctx["crop_height_px"], floor_name=floor["name"], rooms=room_context,
@@ -452,7 +452,7 @@ def analyze_project_ceilings(project_id: UUID | str, quality: str = "medium") ->
         specs = project_text_evidence(pid)
         catalog = CeilingCatalogOutput()
         if specs.strip():
-            catalog = get_model_client().parse_text(
+            catalog = get_model_client("takeoff").parse_text(
                 CEILING_CATALOG_PROMPT.format(spec_text=specs), CeilingCatalogOutput,
                 system=CEILING_CATALOG_SYSTEM, model=model,
             )
@@ -540,7 +540,7 @@ def ceiling_demo_state(project_id: UUID | str) -> dict[str, Any]:
     run = fetch_one("SELECT status,progress,message,error_message FROM takeoff_analysis_run WHERE project_id=%s AND module='ceiling' ORDER BY created_at DESC LIMIT 1", (pid,))
     return {**context, "families": families, "zones": zones, "uiState": (ui or {}).get("state_json") or {},
             "analysis": run or {"status": "not_started", "progress": 0, "message": None, "error_message": None},
-            "provider": get_settings().ai_provider}
+            "provider": get_settings().takeoff_ai_provider}
 
 
 def save_ceiling_demo_state(project_id: UUID | str, payload: dict[str, Any]) -> dict[str, Any]:

@@ -148,7 +148,7 @@ def _start_run(project_id: str, floor_id: str | None, task: str, model: str | No
             """INSERT INTO takeoff_analysis_run(project_id,floor_id,module,task_type,provider,model_id,
                    prompt_version,status,progress,message,request_hash)
                VALUES (%s,%s,'floor',%s,%s,%s,'floor-v1','running',5,%s,%s) RETURNING id""",
-            (project_id, floor_id, task, settings.ai_provider, model, "Starting floor analysis", request_hash),
+            (project_id, floor_id, task, settings.takeoff_ai_provider, model, "Starting floor analysis", request_hash),
         ).fetchone()
     return str(row["id"])
 
@@ -464,7 +464,7 @@ def analyze_floor(project_id: UUID | str, floor_id: UUID | str, quality: str = "
     request_payload = {"project": pid, "floor": fid, "crop_version": ctx["crop_version"], "quality": quality}
     run_id = _start_run(pid, fid, "geometry_and_finish", model, content_hash(request_payload))
     try:
-        model_client = get_model_client()
+        model_client = get_model_client("takeoff")
         words = extract_viewport_text(ctx["viewport_id"])
         prompt = FLOOR_GEOMETRY_PROMPT.format(
             width=ctx["drawing_width"], height=ctx["drawing_height"], floor_name=ctx["name"],
@@ -554,7 +554,7 @@ def floor_demo_state(project_id: UUID | str) -> dict[str, Any]:
     return {
         **context, "families": families, "zones": zones, "uiState": (ui or {}).get("state_json") or {},
         "analysis": runs or {"status": "not_started", "progress": 0, "message": None, "error_message": None},
-        "provider": get_settings().ai_provider,
+        "provider": get_settings().takeoff_ai_provider,
     }
 
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import re
 from decimal import Decimal, InvalidOperation
 from math import hypot
 from pathlib import Path
+import re
 from uuid import UUID
 
 import pymupdf
@@ -15,6 +15,34 @@ from .schemas import ScaleKind, ScaleReading
 from ...services.pdf.media import ensure_viewport_crop, norm_crop_point_to_page_pt
 from ...services.ai.model_client import get_model_client
 from ...services.storage.paths import resolve_key
+
+
+def is_scale_eligible(viewport: dict) -> bool:
+    """Return whether the viewport can be calibrated in the Scale workspace."""
+    kind = viewport.get("view_kind")
+    if kind in {"elevation", "section"}:
+        return True
+    if kind != "plan":
+        return False
+    return not re.search(r"\b(site|location|key)\s+plan\b", viewport.get("name") or "", re.I)
+
+
+def requires_primary_scale(viewport: dict) -> bool:
+    """Return whether current production Floor/Ceiling/Roof measurement needs this scale.
+
+    Height uses explicit dimension readings and a selected source; it does not
+    require every section/elevation to be calibrated. Structural modules are
+    still editable shells and must not block the production Floor/Roof handoff.
+    """
+    if viewport.get("view_kind") != "plan":
+        return False
+    name = viewport.get("name") or ""
+    if re.search(r"\b(site|location|key)\s+plan\b", name, re.I):
+        return False
+    discipline = (viewport.get("discipline") or "").lower()
+    if discipline == "architectural":
+        return True
+    return bool(re.search(r"\b(floor|roof|roof terrace|reflected ceiling|ceiling plan|rcp)\b", name, re.I)) and discipline not in {"structural", "civil_site"}
 from .prompts import SCALE_PROMPT, SYSTEM
 
 TOLERANCE = Decimal("0.01")
@@ -360,7 +388,7 @@ def _roundness_evidence(ctx: dict, candidates: dict[str, Decimal | None], scale_
 
 def suggest_scale(viewport_id: UUID | str) -> dict:
     crop_path, ctx = ensure_viewport_crop(viewport_id)
-    reading = get_model_client().parse_image(Path(crop_path), SCALE_PROMPT, ScaleReading, system=SYSTEM)
+    reading = get_model_client("pre").parse_image(Path(crop_path), SCALE_PROMPT, ScaleReading, system=SYSTEM)
     raw = reading.model_dump(mode="json")
     parsed = parse_scale_note(ctx.get("stated_scale") or ctx.get("title_block_scale"))
     printed = parsed["factor"]

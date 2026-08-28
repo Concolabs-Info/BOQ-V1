@@ -32,6 +32,32 @@ def test_readiness_requires_a_storey_stack(monkeypatch):
     assert any(issue["message"] == "No storeys are defined" for issue in state["issues"])
 
 
+def test_readiness_does_not_require_scale_for_schedules(monkeypatch):
+    project_id = uuid4()
+    viewport_id = uuid4()
+
+    def fake_fetch_all(sql: str, params=()):
+        if "FROM document" in sql and "JOIN" not in sql:
+            return [{"id": uuid4(), "status": "ready", "filename": "A.pdf"}]
+        if "FROM sheet s" in sql and "SELECT s.*" in sql:
+            return [{"id": uuid4()}]
+        if "FROM viewport v" in sql:
+            return [{"id": viewport_id, "name": "Schedule of Finishes", "view_kind": "schedule"}]
+        if "FROM storey" in sql:
+            return [{"id": uuid4(), "height_mm": 3000}]
+        if "FROM spec_item" in sql:
+            return [{"id": uuid4(), "name": "Finishes"}]
+        raise AssertionError(sql)
+
+    monkeypatch.setattr(project_frame, "fetch_all", fake_fetch_all)
+    monkeypatch.setattr(project_frame, "is_confirmed", lambda *_: True)
+    monkeypatch.setattr(project_frame, "confirmed_scale", lambda *_: None)
+
+    state = project_frame.readiness(project_id)
+    assert state["ready"]
+    assert not any(issue["stage"] == "scale" for issue in state["issues"])
+
+
 def test_freeze_json_encodes_database_values(monkeypatch):
     project_id = uuid4()
     captured = {}

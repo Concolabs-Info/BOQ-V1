@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from decimal import Decimal
-import re
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -9,21 +8,65 @@ from ....database.json_value import Jsonb
 
 from ....modules.pre.confirmations import confirm
 from ....modules.pre.access import ensure_project_mutable, project_for_viewport
-from ....modules.pre.scale import manual_calibration_factor, suggest_scale
-from ....database.connection import fetch_one, transaction
+from ....modules.pre.scale import is_scale_eligible as _requires_primary_scale, manual_calibration_factor, requires_primary_scale, suggest_scale
+from ....database.connection import fetch_all, fetch_one, transaction
 from ..schemas import ScaleConfirm
 
 router = APIRouter(tags=["scale"])
 
 
-def _requires_primary_scale(viewport: dict) -> bool:
-    kind = viewport.get("view_kind")
-    if kind in {"elevation", "section"}:
-        return True
-    if kind != "plan":
-        return False
-    return not re.search(r"\b(site|location|key)\s+plan\b", viewport.get("name") or "", re.I)
-
+def _propagate_matching_plan_scales(source_viewport: dict, source_scale_id: UUID | str, factor: Decimal) -> list[str]:
+    """Confirm the same scale on compatible plans with matching printed evidence."""
+    project = fetch_one(
+        """SELECT d.project_id FROM viewport v JOIN sheet s ON s.id=v.sheet_id
+           JOIN page p ON p.id=s.page_id JOIN document d ON d.id=p.document_id WHERE v.id=%s""",
+        (str(source_viewport["id"]),),
+    )
+    if not project or not requires_primary_scale(source_viewport):
+        return []
+    candidates = fetch_all(
+        """SELECT v.*,sf.id AS latest_scale_id,sf.checks AS latest_checks,sf.status AS latest_status,
+                  sf.crop_version AS latest_crop_version
+           FROM viewport v JOIN sheet s ON s.id=v.sheet_id JOIN page p ON p.id=s.page_id
+           JOIN document d ON d.id=p.document_id
+           LEFT JOIN LATERAL (
+             SELECT id,checks,status,crop_version FROM scale_fit
+             WHERE viewport_id=v.id ORDER BY created_at DESC LIMIT 1
+           ) sf ON true
+           WHERE d.project_id=%s AND s.included=true AND v.relevant=true AND v.id<>%s""",
+        (str(project["project_id"]), str(source_viewport["id"])),
+    )
+    propagated: list[str] = []
+    for target in candidates:
+        if not requires_primary_scale(target) or target.get("latest_status") == "confirmed":
+            continue
+        checks = dict(target.get("latest_checks") or {})
+        printed = (checks.get("printed") or {}).get("factor")
+        if printed is None or Decimal(str(printed)) <= 0:
+            continue
+        printed_factor = Decimal(str(printed))
+        if abs(printed_factor - factor) / factor > Decimal("0.01"):
+            continue
+        propagated_checks = {
+            **checks,
+            "confirmed_factor": float(factor),
+            "confirmed_axis": "propagated_matching_printed",
+            "propagation": {
+                "source_viewport_id": str(source_viewport["id"]),
+                "source_scale_fit_id": str(source_scale_id),
+                "target_printed_factor": float(printed_factor),
+                "tolerance": 0.01,
+            },
+        }
+        with transaction() as conn:
+            row = conn.execute(
+                """INSERT INTO scale_fit(viewport_id,method,factor_x,factor_y,anisotropy_ratio,checks,status,crop_version)
+                   VALUES (%s,'propagated_matching_printed',%s,%s,1,%s,'confirmed',%s) RETURNING id""",
+                (str(target["id"]), factor, factor, Jsonb(propagated_checks), target["crop_version"]),
+            ).fetchone()
+        confirm("scale", row["id"], "scale_propagation")
+        propagated.append(str(target["id"]))
+    return propagated
 
 @router.post("/viewports/{viewport_id}/scale/suggest")
 def suggest(viewport_id: UUID):
@@ -74,7 +117,8 @@ def set_scale(viewport_id: UUID, body: ScaleConfirm):
                 (str(viewport_id), factor, factor, Jsonb(checks), viewport["crop_version"]),
             ).fetchone()
         confirmation = confirm("scale", row["id"])
-        return {"scale_fit": dict(row), "confirmation": confirmation}
+        propagated = _propagate_matching_plan_scales(viewport, row["id"], factor)
+        return {"scale_fit": dict(row), "confirmation": confirmation, "propagated_viewport_ids": propagated}
 
     if not body.scale_fit_id:
         raise HTTPException(400, "scale_fit_id is required for suggested confirmation")
@@ -107,4 +151,5 @@ def set_scale(viewport_id: UUID, body: ScaleConfirm):
             (Jsonb(checks), str(body.scale_fit_id)),
         ).fetchone()
     confirmation = confirm("scale", row["id"])
-    return {"scale_fit": dict(row), "confirmation": confirmation}
+    propagated = _propagate_matching_plan_scales(viewport, row["id"], factor)
+    return {"scale_fit": dict(row), "confirmation": confirmation, "propagated_viewport_ids": propagated}

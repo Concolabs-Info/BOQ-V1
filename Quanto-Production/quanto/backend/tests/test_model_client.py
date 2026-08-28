@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.core.config import get_settings
+from app.modules.takeoff.common import model_for_quality
 from app.modules.pre.schemas import ScaleReading
 from app.services.ai import model_client
 from app.services.ai.model_client import GeminiModelClient, OpenAIModelClient, _gemini_json_schema
@@ -78,19 +79,47 @@ def test_gemini_schema_removes_unsupported_additional_properties():
     assert schema["type"] == "object"
 
 
-def test_gemini_provider_selection(monkeypatch):
+def test_pre_gemini_provider_selection(monkeypatch):
     sentinel = object()
-    monkeypatch.setenv("AI_PROVIDER", "gemini")
+    monkeypatch.setenv("PRE_AI_PROVIDER", "gemini")
     monkeypatch.setattr(model_client, "GeminiModelClient", lambda: sentinel)
     get_settings.cache_clear()
     try:
-        assert model_client.get_model_client() is sentinel
+        assert model_client.get_model_client("pre") is sentinel
+    finally:
+        get_settings.cache_clear()
+
+
+def test_takeoff_openai_provider_selection_is_independent(monkeypatch):
+    pre_sentinel = object()
+    takeoff_sentinel = object()
+    monkeypatch.setenv("PRE_AI_PROVIDER", "gemini")
+    monkeypatch.setenv("TAKEOFF_AI_PROVIDER", "openai")
+    monkeypatch.setattr(model_client, "GeminiModelClient", lambda: pre_sentinel)
+    monkeypatch.setattr(model_client, "OpenAIModelClient", lambda: takeoff_sentinel)
+    get_settings.cache_clear()
+    try:
+        assert model_client.get_model_client("pre") is pre_sentinel
+        assert model_client.get_model_client("takeoff") is takeoff_sentinel
+    finally:
+        get_settings.cache_clear()
+
+
+def test_takeoff_quality_mapping(monkeypatch):
+    monkeypatch.setenv("TAKEOFF_AI_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5.6-terra")
+    get_settings.cache_clear()
+    try:
+        assert model_for_quality("easy") == "gpt-5.6-luna"
+        assert model_for_quality("medium") == "gpt-5.6-terra"
+        assert model_for_quality("expert") == "gpt-5.6-sol"
+        assert model_for_quality("maximum") == "gpt-5.6-sol"
     finally:
         get_settings.cache_clear()
 
 
 def test_gemini_requires_api_key(monkeypatch):
-    monkeypatch.setenv("AI_PROVIDER", "gemini")
+    monkeypatch.setenv("PRE_AI_PROVIDER", "gemini")
     monkeypatch.setenv("GEMINI_API_KEY", "")
     get_settings.cache_clear()
     try:

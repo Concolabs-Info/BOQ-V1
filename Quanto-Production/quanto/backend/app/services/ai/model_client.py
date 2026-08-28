@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel
 
@@ -54,11 +54,11 @@ class OpenAIModelClient(ModelClient):
 
         settings = get_settings()
         if not settings.openai_api_key:
-            raise RuntimeError("OPENAI_API_KEY is required when AI_PROVIDER=openai")
+            raise RuntimeError("OPENAI_API_KEY is required when the selected AI provider is openai")
         self.client = OpenAI(api_key=settings.openai_api_key)
         self.model = settings.openai_model
         if not self.model:
-            raise RuntimeError("OPENAI_MODEL is required when AI_PROVIDER=openai")
+            raise RuntimeError("OPENAI_MODEL is required when the selected AI provider is openai")
 
     def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None, max_schema_retries: int | None = None) -> T:
         mime = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
@@ -161,9 +161,9 @@ class GeminiModelClient(ModelClient):
     def __init__(self) -> None:
         settings = get_settings()
         if not settings.gemini_api_key:
-            raise RuntimeError("GEMINI_API_KEY is required when AI_PROVIDER=gemini")
+            raise RuntimeError("GEMINI_API_KEY is required when the selected AI provider is gemini")
         if not settings.gemini_model:
-            raise RuntimeError("GEMINI_MODEL is required when AI_PROVIDER=gemini")
+            raise RuntimeError("GEMINI_MODEL is required when the selected AI provider is gemini")
         from google import genai
         self.client = genai.Client(api_key=settings.gemini_api_key)
         self.model = settings.gemini_model
@@ -269,18 +269,22 @@ class LocalReviewModelClient(ModelClient):
             return HeightReading(bands=[])  # type: ignore[return-value]
         if schema is SpecReading:
             return SpecReading(items=[])  # type: ignore[return-value]
-        raise TypeError(f"Local provider cannot automatically extract {schema.__name__}; set AI_PROVIDER=openai for Floor/Ceiling analysis")
+        raise TypeError(f"Local provider cannot automatically extract {schema.__name__}; configure the appropriate AI provider")
 
     def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None, max_schema_retries: int | None = None) -> T:
-        raise TypeError(f"Local provider cannot automatically extract {schema.__name__}; set AI_PROVIDER=openai")
+        raise TypeError(f"Local provider cannot automatically extract {schema.__name__}; configure the appropriate AI provider")
 
 
-def get_model_client() -> ModelClient:
-    provider = get_settings().ai_provider.lower().strip()
+def get_model_client(scope: Literal["pre", "takeoff"]) -> ModelClient:
+    settings = get_settings()
+    provider = (
+        settings.pre_ai_provider if scope == "pre" else settings.takeoff_ai_provider
+    ).lower().strip()
     if provider in {"gemini", "google", "google_genai"}:
         return GeminiModelClient()
     if provider == "openai":
         return OpenAIModelClient()
     if provider in {"local", "manual"}:
         return LocalReviewModelClient()
-    raise RuntimeError(f"Unsupported AI_PROVIDER={provider}")
+    setting_name = "PRE_AI_PROVIDER" if scope == "pre" else "TAKEOFF_AI_PROVIDER"
+    raise RuntimeError(f"Unsupported {setting_name}={provider}")
