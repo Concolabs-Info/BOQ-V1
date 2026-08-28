@@ -8,7 +8,7 @@ import { appRoutes } from "@/shared/constants/appRoutes";
 const DESKTOP_NAV_KEY = "quanto:navigation:collapsed";
 let rememberedDesktopCollapsed: boolean | null = null;
 
-export function PlatformShell({ title, eyebrow, children, headerNavigation, lockContent = false }: { title: string; eyebrow?: string; children: ReactNode; headerNavigation?: ReactNode; activeNavHref?: string; lockContent?: boolean }) {
+export function PlatformShell({ title, eyebrow, children, headerNavigation, lockContent = false, flushContent = false, officeHeader = false }: { title: string; eyebrow?: string; children: ReactNode; headerNavigation?: ReactNode; activeNavHref?: string; lockContent?: boolean; flushContent?: boolean; officeHeader?: boolean }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopCollapsed, setDesktopCollapsed] = useState(rememberedDesktopCollapsed ?? false);
@@ -54,15 +54,15 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
       </aside>
       {mobileOpen ? <div className="fixed inset-0 z-50 xl:hidden"><button aria-label="Close navigation" className="absolute inset-0 bg-slate-950/35" onClick={() => setMobileOpen(false)} /><aside className="relative h-full w-[290px] overflow-y-auto border-r border-slate-200 bg-white px-5 py-6 shadow-2xl"><button className="ml-auto block rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600" onClick={() => setMobileOpen(false)}>Close</button><div className="mt-4">{navigation}</div></aside></div> : null}
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex min-h-[72px] shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 lg:px-8">
-          <div className="flex shrink-0 items-center gap-3">
-            <button aria-label="Open navigation" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 xl:hidden" onClick={() => setMobileOpen(true)}><MenuIcon className="h-5 w-5" /></button>
-            <button aria-label={desktopCollapsed ? "Show navigation" : "Hide navigation"} className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 xl:inline-flex" onClick={toggleDesktopNavigation}><SidebarIcon className="h-5 w-5" /></button>
-            <div className="min-w-0">{eyebrow ? <p className="truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-blue-700">{eyebrow}</p> : null}<h1 className="mt-0.5 truncate text-lg font-semibold tracking-tight text-slate-950 sm:text-xl">{title}</h1></div>
+        <header className={officeHeader ? "flex h-[58px] shrink-0 items-stretch gap-3 border-b border-slate-300 bg-[#f8f9fb] px-2" : `flex min-h-[72px] shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 ${flushContent ? "lg:px-7" : "lg:px-8"}`}>
+          <div className={officeHeader ? "flex shrink-0 items-center gap-2 border-r border-slate-300 pr-3" : "flex shrink-0 items-center gap-3"}>
+            <button aria-label="Open navigation" className={officeHeader ? "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 xl:hidden" : "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 xl:hidden"} onClick={() => setMobileOpen(true)}><MenuIcon className="h-5 w-5" /></button>
+            <button aria-label={desktopCollapsed ? "Show navigation" : "Hide navigation"} className={officeHeader ? "hidden h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:bg-blue-50 hover:text-blue-700 xl:inline-flex" : "hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 xl:inline-flex"} onClick={toggleDesktopNavigation}><SidebarIcon className="h-5 w-5" /></button>
+            <div className="min-w-0">{eyebrow ? <p className={officeHeader ? "truncate text-[9px] font-bold uppercase tracking-[0.22em] text-blue-700" : "truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-blue-700"}>{eyebrow}</p> : null}<h1 className={officeHeader ? "truncate text-lg font-semibold tracking-tight text-slate-950" : "mt-0.5 truncate text-lg font-semibold tracking-tight text-slate-950 sm:text-xl"}>{title}</h1></div>
           </div>
-          {headerNavigation ? <div className="min-w-0 flex-1 border-l border-slate-200 pl-4">{headerNavigation}</div> : <div className="flex-1" />}
+          {headerNavigation ? <div className={officeHeader ? "min-w-0 flex flex-1 items-stretch" : "min-w-0 flex-1 border-l border-slate-200 pl-4"}>{headerNavigation}</div> : <div className="flex-1" />}
         </header>
-        <div className={`min-h-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 ${lockContent ? "overflow-hidden" : "overflow-y-auto overscroll-contain"}`}>{children}</div>
+        <div className={`min-h-0 flex-1 ${flushContent ? "p-0" : "px-4 py-6 sm:px-6 lg:px-8"} ${lockContent ? "overflow-hidden" : "overflow-y-auto overscroll-contain"}`}>{children}</div>
       </section>
     </div>
   </main>;

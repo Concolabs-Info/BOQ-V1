@@ -89,6 +89,7 @@ export type DemoState = {
   upstandFamilies: UpstandFamily[];
   selectedViewportId: string;
   selectedEntityId: string | null;
+  selectedEntityIds: string[];
   leftCollapsed: boolean;
   rightTab: "takeoff" | "item";
   chat: Record<string, ChatMessage[]>;
@@ -99,8 +100,12 @@ export type DemoState = {
   exports: BoqExport[];
   boqSetup: BoqDocumentSetup;
   geometryUndo: GeometrySnapshot[];
+  geometryRedo: GeometrySnapshot[];
   setSelectedViewport: (id: string) => void;
   setSelectedEntity: (id: string | null) => void;
+  setSelectedEntities: (ids: string[]) => void;
+  toggleSelectedEntity: (id: string) => void;
+  translateEntities: (ids: string[], dx: number, dy: number) => void;
   setLeftCollapsed: (value: boolean) => void;
   setRightTab: (tab: "takeoff" | "item") => void;
   toggleSheet: (id: string) => void;
@@ -157,6 +162,7 @@ export type DemoState = {
   updateBoqSetup: (setup: BoqDocumentSetup) => void;
   captureGeometryUndo: () => void;
   undoGeometry: () => void;
+  redoGeometry: () => void;
   invalidateDerived: () => void;
   reset: () => void;
 };
@@ -222,6 +228,7 @@ export const useDemoStore = create<DemoState>()(
       ...s,
       selectedViewportId: "VP-GROUND",
       selectedEntityId: null,
+      selectedEntityIds: [],
       leftCollapsed: false,
       rightTab: "takeoff",
       workbookOverrides: {},
@@ -231,8 +238,22 @@ export const useDemoStore = create<DemoState>()(
       exports: [],
       boqSetup: clone(initialSetup),
       geometryUndo: [],
-      setSelectedViewport: (id) => { if (id === get().selectedViewportId) return; requestGuardedAction(() => set({ selectedViewportId: id, selectedEntityId: null }), "change viewport"); },
-      setSelectedEntity: (id) => { if (id === get().selectedEntityId) return; requestGuardedAction(() => set({ selectedEntityId: id, rightTab: id ? "item" : get().rightTab }), "select another item"); },
+      geometryRedo: [],
+      setSelectedViewport: (id) => { if (id === get().selectedViewportId) return; requestGuardedAction(() => set({ selectedViewportId: id, selectedEntityId: null, selectedEntityIds: [] }), "change viewport"); },
+      setSelectedEntity: (id) => { if (id === get().selectedEntityId && get().selectedEntityIds.length <= 1) return; requestGuardedAction(() => set({ selectedEntityId: id, selectedEntityIds: id ? [id] : [], rightTab: id ? "item" : get().rightTab }), "select another item"); },
+      setSelectedEntities: (ids) => { const unique=[...new Set(ids)]; requestGuardedAction(() => set({ selectedEntityIds: unique, selectedEntityId: unique.at(-1)||null, rightTab: unique.length ? "item" : get().rightTab }), "change selection"); },
+      toggleSelectedEntity: (id) => { const current=get().selectedEntityIds; const next=current.includes(id)?current.filter((value)=>value!==id):[...current,id]; requestGuardedAction(() => set({ selectedEntityIds:next,selectedEntityId:next.at(-1)||null,rightTab:next.length?"item":get().rightTab }), "change selection"); },
+      translateEntities: (ids, dx, dy) => set((st) => {
+        const selected=new Set(ids),movePoint=(point:{x:number;y:number})=>({x:point.x+dx,y:point.y+dy}),moveRings=(rings:{x:number;y:number}[][])=>rings.map((ring)=>ring.map(movePoint));
+        return {
+          openings:st.openings.map((item)=>selected.has(item.id)&&!item.locked?{...item,bbox:{...item.bbox,x:item.bbox.x+dx,y:item.bbox.y+dy}}:item),
+          floorZones:st.floorZones.map((item)=>selected.has(item.id)&&!item.locked?{...item,points:item.points.map(movePoint),deducts:moveRings(item.deducts)}:item),
+          ceilingZones:st.ceilingZones.map((item)=>selected.has(item.id)&&!item.locked?{...item,points:item.points.map(movePoint),deducts:moveRings(item.deducts)}:item),
+          walls:st.walls.map((item)=>selected.has(item.id)&&!item.locked?{...item,start:movePoint(item.start),end:movePoint(item.end)}:item),
+          roofZones:st.roofZones.map((item)=>selected.has(item.id)&&!item.locked?{...item,points:item.points.map(movePoint),deducts:moveRings(item.deducts)}:item),
+          workbookConfirmed:{},
+        };
+      }),
       setLeftCollapsed: (value) => set({ leftCollapsed: value }),
       setRightTab: (tab) => set({ rightTab: tab }),
       toggleSheet: (id) =>
@@ -306,7 +327,7 @@ export const useDemoStore = create<DemoState>()(
       addOpening: (o) => {
         const selected = get().selectedEntityId;
         if (!stageLiveChange(`demo:create:opening:${o.id}`, `new ${o.kind} ${o.id}`, selected, (value) => set((st) => ({ openings: st.openings.filter((x) => x.id !== o.id), selectedEntityId: value })))) return;
-        set((st) => ({ openings: [...st.openings, o], selectedEntityId: o.id, rightTab: "item" }));
+        set((st) => ({ openings: [...st.openings, o], selectedEntityId: o.id, selectedEntityIds:[o.id], rightTab: "item" }));
       },
       deleteOpening: (id) => {
         const original = get().openings.find((x) => x.id === id), selected = get().selectedEntityId;
@@ -315,6 +336,7 @@ export const useDemoStore = create<DemoState>()(
           openings: st.openings.filter((x) => x.id !== id),
           selectedEntityId:
             st.selectedEntityId === id ? null : st.selectedEntityId,
+          selectedEntityIds: st.selectedEntityIds.filter((value)=>value!==id),
         }));
       },
       updateOpeningFamily: (id, patch) => {
@@ -367,8 +389,8 @@ export const useDemoStore = create<DemoState>()(
         if (!stageLiveChange(`demo:create:${kind}:${zone.id}`, `new ${kind} ${zone.id}`, selected, (value) => set((st) => kind === "floor" ? { floorZones: st.floorZones.filter((x) => x.id !== zone.id), selectedEntityId: value } : { ceilingZones: st.ceilingZones.filter((x) => x.id !== zone.id), selectedEntityId: value }))) return;
         set((st) =>
           kind === "floor"
-            ? { floorZones: [...st.floorZones, zone], selectedEntityId: zone.id, rightTab: "item" }
-            : { ceilingZones: [...st.ceilingZones, zone], selectedEntityId: zone.id, rightTab: "item" },
+            ? { floorZones: [...st.floorZones, zone], selectedEntityId: zone.id, selectedEntityIds:[zone.id], rightTab: "item" }
+            : { ceilingZones: [...st.ceilingZones, zone], selectedEntityId: zone.id, selectedEntityIds:[zone.id], rightTab: "item" },
         );
       },
       deleteZone: (kind, id) => {
@@ -376,8 +398,8 @@ export const useDemoStore = create<DemoState>()(
         if (!original || !stageLiveChange(`demo:delete:${kind}:${id}`, `delete ${kind} ${id}`, original, (value) => set((st) => kind === "floor" ? { floorZones: [...st.floorZones, value] } : { ceilingZones: [...st.ceilingZones, value] }))) return;
         set((st) =>
           kind === "floor"
-            ? { floorZones: st.floorZones.filter((x) => x.id !== id), selectedEntityId: st.selectedEntityId === id ? null : st.selectedEntityId }
-            : { ceilingZones: st.ceilingZones.filter((x) => x.id !== id), selectedEntityId: st.selectedEntityId === id ? null : st.selectedEntityId },
+            ? { floorZones: st.floorZones.filter((x) => x.id !== id), selectedEntityId: st.selectedEntityId === id ? null : st.selectedEntityId, selectedEntityIds:st.selectedEntityIds.filter((value)=>value!==id) }
+            : { ceilingZones: st.ceilingZones.filter((x) => x.id !== id), selectedEntityId: st.selectedEntityId === id ? null : st.selectedEntityId, selectedEntityIds:st.selectedEntityIds.filter((value)=>value!==id) },
         );
       },
       updateFinishFamily: (kind, id, patch) => {
@@ -421,8 +443,8 @@ export const useDemoStore = create<DemoState>()(
           ),
         }));
       },
-      addWall: (wall) => { const selected = get().selectedEntityId; if (!stageLiveChange(`demo:create:wall:${wall.id}`, `new wall ${wall.id}`, selected, (value) => set((st) => ({ walls: st.walls.filter((x) => x.id !== wall.id), selectedEntityId: value })))) return; set((st) => ({ walls: [...st.walls, wall], selectedEntityId: wall.id, rightTab: "item" })); },
-      deleteWall: (id) => { const original = get().walls.find((x) => x.id === id); if (!original || !stageLiveChange(`demo:delete:wall:${id}`, `delete wall ${id}`, original, (value) => set((st) => ({ walls: [...st.walls, value] })))) return; set((st) => ({ walls: st.walls.filter((x) => x.id !== id), selectedEntityId: st.selectedEntityId === id ? null : st.selectedEntityId })); },
+      addWall: (wall) => { const selected = get().selectedEntityId; if (!stageLiveChange(`demo:create:wall:${wall.id}`, `new wall ${wall.id}`, selected, (value) => set((st) => ({ walls: st.walls.filter((x) => x.id !== wall.id), selectedEntityId: value })))) return; set((st) => ({ walls: [...st.walls, wall], selectedEntityId: wall.id, selectedEntityIds:[wall.id], rightTab: "item" })); },
+      deleteWall: (id) => { const original = get().walls.find((x) => x.id === id); if (!original || !stageLiveChange(`demo:delete:wall:${id}`, `delete wall ${id}`, original, (value) => set((st) => ({ walls: [...st.walls, value] })))) return; set((st) => ({ walls: st.walls.filter((x) => x.id !== id), selectedEntityId: st.selectedEntityId === id ? null : st.selectedEntityId, selectedEntityIds:st.selectedEntityIds.filter((value)=>value!==id) })); },
       updateWallFamily: (id, patch) => {
         const original = get().wallFamilies.find((x) => x.id === id);
         if (original && hasBoqField(original, patch) && !stageLiveChange(`demo:family:wall:${id}`, `wall family ${original.mark}`, original, (value) => set((st) => ({ wallFamilies: st.wallFamilies.map((x) => x.id === id ? value : x) })))) return;
@@ -461,8 +483,8 @@ export const useDemoStore = create<DemoState>()(
           ),
         }));
       },
-      addRoofZone: (zone) => { const selected = get().selectedEntityId; if (!stageLiveChange(`demo:create:roof:${zone.id}`, `new roof ${zone.id}`, selected, (value) => set((st) => ({ roofZones: st.roofZones.filter((x) => x.id !== zone.id), selectedEntityId: value })))) return; set((st) => ({ roofZones: [...st.roofZones, zone], selectedEntityId: zone.id, rightTab: "item" })); },
-      deleteRoofZone: (id) => { const original = get().roofZones.find((x) => x.id === id); if (!original || !stageLiveChange(`demo:delete:roof:${id}`, `delete roof ${id}`, original, (value) => set((st) => ({ roofZones: [...st.roofZones, value] })))) return; set((st) => ({ roofZones: st.roofZones.filter((x) => x.id !== id), selectedEntityId: st.selectedEntityId === id ? null : st.selectedEntityId })); },
+      addRoofZone: (zone) => { const selected = get().selectedEntityId; if (!stageLiveChange(`demo:create:roof:${zone.id}`, `new roof ${zone.id}`, selected, (value) => set((st) => ({ roofZones: st.roofZones.filter((x) => x.id !== zone.id), selectedEntityId: value })))) return; set((st) => ({ roofZones: [...st.roofZones, zone], selectedEntityId: zone.id, selectedEntityIds:[zone.id], rightTab: "item" })); },
+      deleteRoofZone: (id) => { const original = get().roofZones.find((x) => x.id === id); if (!original || !stageLiveChange(`demo:delete:roof:${id}`, `delete roof ${id}`, original, (value) => set((st) => ({ roofZones: [...st.roofZones, value] })))) return; set((st) => ({ roofZones: st.roofZones.filter((x) => x.id !== id), selectedEntityId: st.selectedEntityId === id ? null : st.selectedEntityId, selectedEntityIds:st.selectedEntityIds.filter((value)=>value!==id) })); },
       updateRoofFamily: (id, patch) =>
         set((st) => ({
           roofFamilies: st.roofFamilies.map((x) =>
@@ -603,6 +625,7 @@ export const useDemoStore = create<DemoState>()(
               roofZones: clone(st.roofZones),
             },
           ],
+          geometryRedo: [],
         })),
       undoGeometry: () =>
         set((st) => {
@@ -615,7 +638,23 @@ export const useDemoStore = create<DemoState>()(
             walls: clone(snap.walls),
             roofZones: clone(snap.roofZones),
             geometryUndo: st.geometryUndo.slice(0, -1),
+            geometryRedo: [
+              ...(st.geometryRedo || []).slice(-19),
+              { openings: clone(st.openings), floorZones: clone(st.floorZones), ceilingZones: clone(st.ceilingZones), walls: clone(st.walls), roofZones: clone(st.roofZones) },
+            ],
             selectedEntityId: null,
+            selectedEntityIds: [],
+          };
+        }),
+      redoGeometry: () =>
+        set((st) => {
+          const snap = (st.geometryRedo || []).at(-1);
+          if (!snap) return {};
+          return {
+            openings: clone(snap.openings), floorZones: clone(snap.floorZones), ceilingZones: clone(snap.ceilingZones), walls: clone(snap.walls), roofZones: clone(snap.roofZones),
+            geometryUndo: [...st.geometryUndo.slice(-19), { openings: clone(st.openings), floorZones: clone(st.floorZones), ceilingZones: clone(st.ceilingZones), walls: clone(st.walls), roofZones: clone(st.roofZones) }],
+            geometryRedo: st.geometryRedo.slice(0, -1), selectedEntityId: null,
+            selectedEntityIds: [],
           };
         }),
       invalidateDerived: () => set({ workbookConfirmed: {} }),
@@ -625,6 +664,7 @@ export const useDemoStore = create<DemoState>()(
           ...next,
           selectedViewportId: "VP-GROUND",
           selectedEntityId: null,
+          selectedEntityIds: [],
           leftCollapsed: false,
           rightTab: "takeoff",
           workbookOverrides: {},
@@ -634,6 +674,7 @@ export const useDemoStore = create<DemoState>()(
           exports: [],
           boqSetup: clone(initialSetup),
           geometryUndo: [],
+          geometryRedo: [],
         });
       },
     }),
@@ -685,6 +726,8 @@ export const useDemoStore = create<DemoState>()(
         return {
           ...current,
           ...saved,
+          selectedEntityIds: saved.selectedEntityIds || (saved.selectedEntityId ? [saved.selectedEntityId] : []),
+          geometryRedo: saved.geometryRedo || [],
           chat: {},
           viewports: [...builtInViewports, ...customViewports],
           openingFamilies: mergeBuiltIns(saved.openingFamilies, current.openingFamilies),

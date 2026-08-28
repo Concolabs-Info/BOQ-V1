@@ -73,7 +73,7 @@ export function ScopeStatus({ projectId, element }: { projectId: string; element
   if (error) {
     if (!error.setupIncomplete) {
       return (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm">
+        <div className="mb-2 flex min-h-9 items-center justify-between gap-3 border border-red-200 bg-red-50 px-3 py-1.5 text-xs">
           <div>
             <span className="font-semibold text-red-900">This Takeoff section could not be loaded</span>
             <span className="ml-2 text-red-700">Your saved setup is unchanged.</span>
@@ -83,7 +83,7 @@ export function ScopeStatus({ projectId, element }: { projectId: string; element
       );
     }
     return (
-      <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+      <div className="mb-2 flex min-h-9 items-center justify-between gap-3 border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs">
         <div>
           <span className="font-semibold text-amber-900">Takeoff setup not finished</span>
           <span className="ml-2 text-amber-700">Finish the Pre checks and select Start takeoff to prepare this section.</span>
@@ -94,7 +94,7 @@ export function ScopeStatus({ projectId, element }: { projectId: string; element
   }
 
   if (!scope) {
-    return <div className="mb-4 h-12 animate-pulse rounded-xl border border-slate-200 bg-slate-50" aria-label="Checking Takeoff scope" />;
+    return <div className="mb-2 h-9 animate-pulse border border-slate-200 bg-slate-50" aria-label="Checking Takeoff scope" />;
   }
 
   const tone = scope.status === "ready"
@@ -117,13 +117,12 @@ export function ScopeStatus({ projectId, element }: { projectId: string; element
     : `${drawingCount} ${drawingCount === 1 ? "drawing" : "drawings"} selected${levelScopes.length ? ` · ${coveredLevelCount} of ${levelScopes.length} levels covered` : ""}.`;
 
   return (
-    <div className={`mb-4 rounded-xl border ${tone}`}>
-      <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold">{title}</span>
-          </div>
-          <p className="mt-0.5 truncate text-xs opacity-80">{coverageText}</p>
+    <div className={`mb-2 border ${tone}`}>
+      <button type="button" onClick={() => setOpen((value) => !value)} className="flex min-h-9 w-full items-center justify-between gap-4 px-3 py-1.5 text-left">
+        <div className="flex min-w-0 items-center gap-3 text-xs">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-current/10 text-[10px]">{scope.status === "blocked" ? "!" : "✓"}</span>
+          <span className="shrink-0 font-semibold">{title}</span>
+          <span className="truncate border-l border-current/15 pl-3 opacity-80">{coverageText}</span>
         </div>
         <span className="shrink-0 text-xs font-semibold">{open ? "Close" : openQuestions.length ? `Review ${openQuestions.length}` : "View coverage"}</span>
       </button>

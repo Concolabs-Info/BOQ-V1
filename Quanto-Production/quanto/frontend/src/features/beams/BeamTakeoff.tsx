@@ -5,10 +5,13 @@ import Link from "next/link";
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { DrawingCanvas } from "@/features/drawing/components/DrawingCanvas";
+import { ResizableThreePane } from "@/features/quanto/components/ResizablePanels";
 import { useStructuralStore } from "@/features/quanto/structuralStore";
 import type { BeamFamily, BeamRun } from "@/features/quanto/structuralTypes";
 import type { Point } from "@/features/demo/types";
@@ -16,11 +19,44 @@ import { apiUrl } from "@/shared/services/apiClient";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { useProductionBeams } from "./useProductionBeams";
 import type { BeamEditorState, BeamQuestion, BeamWorkbookRow } from "./types";
+import { DemoChat } from "@/features/quanto/components/DemoChat";
+import { dispatchTakeoffStatus, useTakeoffCommand } from "@/features/quanto/takeoffCommands";
+import { findPdfVectorSnap, usePdfSnapModes, usePdfVectorSource, type PdfSnapModes, type PdfVectorSegment } from "@/features/quanto/snapping/pdfVectorSnap";
+import { MeasurementOverlay, useMeasurementTool } from "@/features/quanto/measurements/MeasurementOverlay";
+import type { MeasurementKind } from "@/features/quanto/measurements/measurementStore";
+import { exportTakeoffCsv, type ExportRow } from "@/features/quanto/takeoffExport";
 
 const btn = "rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40";
 const activeBtn = "rounded-lg border border-slate-950 bg-slate-950 px-3 py-2 text-xs font-semibold text-white";
 
-export function BeamTakeoff({ projectId, view }: { projectId: string; view: string }) {
+function beamSnapPoint(point: Point, beams: BeamRun[], snap: boolean, origin: Point | null, ortho: boolean, pdfSegments:PdfVectorSegment[] = [],pdfModes?:PdfSnapModes) {
+  let next = point;
+  if (snap) {
+    const candidates = beams.flatMap((beam) => [beam.start, beam.end, { x:(beam.start.x+beam.end.x)/2, y:(beam.start.y+beam.end.y)/2 }]);
+    let nearest: Point | null = null, nearestDistance = 18;
+    for (const candidate of candidates) { const value=pointDistance(point,candidate); if(value<nearestDistance){nearest=candidate;nearestDistance=value;} }
+    if (nearest) next = nearest;
+    const pdfTarget=findPdfVectorSnap(point,pdfSegments,18,pdfModes);
+    if(pdfTarget&&(!nearest||pdfTarget.distance<nearestDistance))next=pdfTarget.point;
+  }
+  if (origin && ortho) {
+    const dx=next.x-origin.x,dy=next.y-origin.y;
+    if(Math.abs(dx)>=Math.abs(dy)) next={x:next.x,y:origin.y}; else next={x:origin.x,y:next.y};
+  }
+  return next;
+}
+
+export function BeamTakeoff({
+  projectId,
+  view,
+  workbookView,
+  threeDView,
+}: {
+  projectId: string;
+  view: string;
+  workbookView?: ReactNode;
+  threeDView?: ReactNode;
+}) {
   const beam = useProductionBeams(projectId);
   const analysis = beam.state?.analysis;
   const editor = beam.state?.editor;
@@ -29,8 +65,8 @@ export function BeamTakeoff({ projectId, view }: { projectId: string; view: stri
     return <BeamAnalysisPanel projectId={projectId} analysis={analysis} error={beam.error} onRetry={beam.reanalyze} />;
   }
 
-  if (view === "workbook") return <BeamWorkbook projectId={projectId} editor={editor} />;
-  if (view === "3d") return <Beam3D editor={editor} />;
+  if (view === "workbook") return workbookView || <BeamWorkbook projectId={projectId} editor={editor} />;
+  if (view === "3d") return threeDView || <Beam3D editor={editor} />;
   return <BeamDimension projectId={projectId} editor={editor} onReanalyze={beam.reanalyze} onAnswerQuestion={beam.answerQuestion} />;
 }
 
@@ -83,39 +119,65 @@ function BeamAnalysisPanel({
 }
 
 function BeamDimension({ projectId, editor, onReanalyze, onAnswerQuestion }: { projectId: string; editor: BeamEditorState; onReanalyze: () => Promise<void>; onAnswerQuestion: (questionId: string, answer: string) => Promise<void> }) {
+  const router = useRouter();
+  const search = useSearchParams();
   const families = useStructuralStore((s) => s.beamFamilies);
   const beams = useStructuralStore((s) => s.beams);
   const selectedId = useStructuralStore((s) => s.selectedId);
+  const selectedIds = useStructuralStore((s) => s.selectedIds);
   const select = useStructuralStore((s) => s.select);
+  const selectMany = useStructuralStore((s) => s.selectMany);
+  const toggleSelect = useStructuralStore((s) => s.toggleSelect);
+  const translateSelected = useStructuralStore((s) => s.translateSelected);
   const replaceBeamData = useStructuralStore((s) => s.replaceBeamData);
+  const captureUndo = useStructuralStore((s) => s.captureUndo);
+  const undo = useStructuralStore((s) => s.undo);
+  const redo = useStructuralStore((s) => s.redo);
   const [pageId, setPageId] = useState(editor.pages.find((p) => editor.beams.some((b) => b.viewportId === p.id))?.id || editor.pages[0]?.id || "");
   const [leftTab, setLeftTab] = useState<"drawings" | "families">("drawings");
-  const [tool, setTool] = useState<"select" | "pan" | "add" | "split">("select");
+  const [rightTab, setRightTab] = useState<"properties" | "ai">("ai");
+  const [tool, setTool] = useState<"select" | "pan" | "add" | "split" | "measure">("select");
+  const [measurementKind,setMeasurementKind]=useState<MeasurementKind>("distance");
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [hover, setHover] = useState<Point | null>(null);
   const [activeFamilyId, setActiveFamilyId] = useState(families[0]?.id || "");
-  const [visibleFamilyIds, setVisibleFamilyIds] = useState<string[]>(families.map((f) => f.id));
   const [showLabels, setShowLabels] = useState(true);
+  const [snap, setSnap] = useState(true);
+  const [ortho, setOrtho] = useState(false);
+  const [selectionBox,setSelectionBox]=useState<{start:Point;current:Point}|null>(null);
+  const clipboard = useRef<BeamRun[]>([]);
 
   useEffect(() => {
     if (!families.some((f) => f.id === activeFamilyId)) setActiveFamilyId(families[0]?.id || "");
   }, [activeFamilyId, families]);
   useEffect(() => {
-    setVisibleFamilyIds((current) => {
-      const valid = current.filter((id) => families.some((f) => f.id === id));
-      const added = families.map((f) => f.id).filter((id) => !current.includes(id));
-      return [...valid, ...added];
-    });
-  }, [families]);
-  useEffect(() => {
     if (!editor.pages.some((p) => p.id === pageId)) setPageId(editor.pages[0]?.id || "");
   }, [editor.pages, pageId]);
 
   const page = editor.pages.find((p) => p.id === pageId) || editor.pages[0];
+  const pdfVectors=usePdfVectorSource(page?`beam:${projectId}:${page.pageIndex}`:"",page?`/api/v1/projects/${projectId}/takeoff/beams/pages/${page.pageIndex}/vectors`:"");
+  const pdfSnapModes=usePdfSnapModes().modes;
+  const measurement=useMeasurementTool({viewportId:page?`beam:${page.id}`:"beam:none",scale:page?.mmPerPoint?Number(page.mmPerPoint)/1000:.018,active:tool==="measure",deleteEnabled:tool==="select"||tool==="measure",kind:measurementKind});
   const selected = beams.find((b) => b.id === selectedId) || null;
-  const pageBeams = beams.filter((b) => b.viewportId === page?.id && visibleFamilyIds.includes(b.familyId));
-  const netLength = beams.reduce((sum, b) => sum + Number(b.netLengthM || 0), 0);
-  const concrete = beams.reduce((sum, b) => sum + currentBeamVolume(b, families), 0);
+  const pageBeams = beams.filter((b) => b.viewportId === page?.id);
+  const requestedEntity = search.get("entity");
+  useEffect(() => {
+    if (!requestedEntity) return;
+    const requestedBeam = beams.find((beam) => beam.id === requestedEntity);
+    if (!requestedBeam) return;
+    setPageId(requestedBeam.viewportId);
+    select(requestedBeam.id);
+    setLeftTab("families");
+    setRightTab("properties");
+  }, [beams, requestedEntity, select]);
+  useEffect(() => {
+    if (!selected) return;
+    setActiveFamilyId(selected.familyId);
+    setLeftTab("families");
+    setRightTab("properties");
+  }, [selected?.familyId, selected?.id]);
+  useEffect(()=>{const keyDown=(event:KeyboardEvent)=>{const target=event.target as HTMLElement|null;if(target?.closest("input,textarea,select,[contenteditable=true]")||tool!=="select")return;
+    const ids=pageBeams.map((beam)=>beam.id);if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="a"){event.preventDefault();selectMany(ids);return;}if(event.key==="Escape"){selectMany([]);return;}if(event.key!=="Tab"||!ids.length)return;event.preventDefault();const current=ids.indexOf(selectedId||"");select(ids[(current+(event.shiftKey?-1:1)+ids.length)%ids.length]);};window.addEventListener("keydown",keyDown);return()=>window.removeEventListener("keydown",keyDown);},[pageBeams,select,selectMany,selectedId,tool]);
   const needsReview = beams.filter((b) => b.status === "needs_review").length;
 
   function apply(nextBeams: BeamRun[], nextFamilies = families) {
@@ -131,37 +193,44 @@ function BeamDimension({ projectId, editor, onReanalyze, onAnswerQuestion }: { p
     );
   }
   function canvasClick(point: Point) {
+    if(tool==="measure"){
+      measurement.canvasClick(beamSnapPoint(point,beams,snap,measurement.previewPoints.at(-1)||null,ortho,pdfVectors.segments,pdfSnapModes));
+      return;
+    }
     if (tool === "split" && selected) {
       splitSelected(point);
       setTool("select");
       return;
     }
+    if (tool === "select") { select(null); return; }
     if (tool !== "add" || !page) return;
+    const snapped = beamSnapPoint(point, beams, snap, draftStart, ortho,pdfVectors.segments,pdfSnapModes);
     if (!draftStart) {
-      setDraftStart(point); setHover(point); return;
+      setDraftStart(snapped); setHover(snapped); return;
     }
     const mmpt = page.mmPerPoint ?? null;
-    const length = mmpt ? pointDistance(draftStart, point) * mmpt / 1000 : null;
+    const length = mmpt ? pointDistance(draftStart, snapped) * mmpt / 1000 : null;
     const id = `beam_manual_${Date.now().toString(36)}`;
     const family = families.find((f) => f.id === activeFamilyId) || families[0];
     if (!family) return;
     const item: BeamRun = {
       id, mark: `Manual ${beams.filter((b) => b.id.startsWith("beam_manual_")).length + 1}`,
       familyId: family.id, kind: "Downstand", floorId: page.floorLabel || page.name,
-      floorLabel: page.floorLabel || page.name, viewportId: page.id, start: draftStart, end: point,
+      floorLabel: page.floorLabel || page.name, viewportId: page.id, start: draftStart, end: snapped,
       dropMm: family.depthMm, status: "needs_review", grossLengthM: length, netLengthM: length,
       engineVolumeM3: length == null ? null : length * family.widthMm / 1000 * family.depthMm / 1000,
       mmPerPoint: mmpt, pageIndex: page.pageIndex, sourcePageNumber: page.sourcePageNumber,
       sourceDocument: page.sourceDocument, dimensionSource: "user", dimensionMethod: "manual",
       detectionMethod: "manual", deductions: [], reviewMessages: ["Manually added beam — confirm before BOQ."],
     };
-    apply([...beams, item]);
+    captureUndo(); apply([...beams, item]);
     select(id); setDraftStart(null); setHover(null); setTool("select");
   }
   function splitSelected(point?: Point) {
     if (!selected) return;
     const split = point ? pointOnBeam(selected, point) : { x: (selected.start.x + selected.end.x) / 2, y: (selected.start.y + selected.end.y) / 2 };
     if (pointDistance(split, selected.start) < 2 || pointDistance(split, selected.end) < 2) return;
+    captureUndo();
     const a = normalizeEditedBeam({ ...selected, end: split, status: "needs_review" });
     const b = normalizeEditedBeam({ ...selected, id: `${selected.id}-split-${Date.now().toString(36)}`, mark: `${selected.mark || selected.id} B`, start: split, status: "needs_review", deductions: [] });
     apply(beams.map((x) => x.id === selected.id ? a : x).concat(b));
@@ -171,6 +240,7 @@ function BeamDimension({ projectId, editor, onReanalyze, onAnswerQuestion }: { p
     if (!selected) return;
     const neighbour = mergeCandidate(selected, beams);
     if (!neighbour) return;
+    captureUndo();
     const endpoints = [selected.start, selected.end, neighbour.start, neighbour.end];
     let pair: [Point, Point] = [selected.start, selected.end];
     let longest = -1;
@@ -196,12 +266,77 @@ function BeamDimension({ projectId, editor, onReanalyze, onAnswerQuestion }: { p
   }
   const canMerge = selected ? Boolean(mergeCandidate(selected, beams)) : false;
   function deleteSelected() {
-    if (!selected) return;
-    apply(beams.filter((b) => b.id !== selected.id)); select(null);
+    if (!selectedIds.length) return;
+    captureUndo(); apply(beams.filter((b) => !selectedIds.includes(b.id))); selectMany([]);
   }
   function confirmAll() {
     apply(beams.map((b) => ({ ...b, status: "confirmed" as const, reviewMessages: [] })));
   }
+  function copySelected() {
+    const items = beams.filter((beam) => selectedIds.includes(beam.id));
+    if (!items.length) { dispatchTakeoffStatus({ message: "Select a beam first" }); return false; }
+    clipboard.current = JSON.parse(JSON.stringify(items));
+    dispatchTakeoffStatus({ message: `Copied ${items.length} beam${items.length === 1 ? "" : "s"}` });
+    return true;
+  }
+  function pasteSelected() {
+    if (!clipboard.current.length) { dispatchTakeoffStatus({ message: "Nothing to paste" }); return; }
+    const copied: BeamRun[] = JSON.parse(JSON.stringify(clipboard.current));
+    const suffix=Date.now().toString(36);
+    const next=copied.map((beam,index)=>normalizeEditedBeam({ ...beam, id: `${String(beam.id).replace(/-COPY-[^-]+(?:-\d+)?$/,"")}-COPY-${suffix}-${index+1}`, mark: `${beam.mark || beam.id} copy`, viewportId: page.id, start: { x:beam.start.x+20,y:beam.start.y+20 }, end: { x:beam.end.x+20,y:beam.end.y+20 }, status:"needs_review", deductions:[] }));
+    captureUndo(); apply([...beams,...next]); selectMany(next.map((beam)=>beam.id)); setRightTab("properties");
+  }
+  function stepPage(direction:-1|1){const index=Math.max(0,editor.pages.findIndex((item)=>item.id===page.id));const next=editor.pages[(index+direction+editor.pages.length)%Math.max(1,editor.pages.length)];if(next){setPageId(next.id);select(null);}}
+  function stepIssue(direction:-1|1){const rows=beams.filter((item)=>item.status==="needs_review");if(!rows.length){dispatchTakeoffStatus({message:"No beam issues"});return;}const index=rows.findIndex((item)=>item.id===selectedId),next=rows[(Math.max(0,index)+direction+rows.length)%rows.length];setPageId(next.viewportId);select(next.id);setRightTab("properties");}
+  function exportCurrentTakeoff(){
+    const rows:ExportRow[]=beams.map((item)=>({ID:item.id,Element:"Beams",Family:item.familyId,Level:item.floorLabel||item.floorId,Drawing:editor.pages.find((value)=>value.id===item.viewportId)?.name||item.viewportId,Length_m:item.netLengthM==null?null:Number(item.netLengthM.toFixed(3)),Concrete_m3:Number(currentBeamVolume(item,families).toFixed(4)),Status:item.status,Source:item.sourceDocument||"Project drawing"}));
+    if(exportTakeoffCsv("quanto-beams-takeoff.csv",rows))dispatchTakeoffStatus({message:`Exported ${rows.length} beam row${rows.length===1?"":"s"}`});
+    else dispatchTakeoffStatus({message:"There is no beam data to export"});
+  }
+  useEffect(()=>{dispatchTakeoffStatus({selected:selectedIds.length>1?`${selectedIds.length} items`:selectedId,snap,ortho,saving:"saved"});},[ortho,selectedId,selectedIds.length,snap]);
+  useEffect(()=>{if(snap&&pdfVectors.vectorAvailable)dispatchTakeoffStatus({message:`${pdfVectors.segments.length.toLocaleString()} PDF snap edges ready`});},[pdfVectors.segments.length,pdfVectors.vectorAvailable,snap]);
+  useTakeoffCommand((command)=>{
+    if(command.element!=="beams")return;
+    const label=command.label.toLowerCase();
+    const notify=(message:string)=>dispatchTakeoffStatus({message});
+    if(["select","move","edit points","endpoints"].includes(label)){setTool("select");setDraftStart(null);}
+    else if(label==="pan")setTool("pan");
+    else if(label==="open"||label==="search")setLeftTab("drawings");
+    else if(label==="previous")stepPage(-1);
+    else if(label==="next")stepPage(1);
+    else if(label==="bookmarks"){setLeftTab("drawings");notify("Viewports opened");}
+    else if(["families","materials","assemblies","project","company","section"].includes(label))setLeftTab("families");
+    else if(label==="copy")copySelected();
+    else if(label==="cut"){if(copySelected())deleteSelected();}
+    else if(label==="paste")pasteSelected();
+    else if(label==="duplicate"){if(copySelected())pasteSelected();}
+    else if(label==="delete"||label==="remove"){if(measurement.selected)measurement.deleteSelected();else deleteSelected();}
+    else if(label==="split"){if(selected)setTool("split");else notify("Select a beam to split");}
+    else if(label==="merge"||label==="join")mergeSelected();
+    else if(["linear","segment","multi segment","continue","add existing","new section"].includes(label)){setTool("add");setDraftStart(null);}
+    else if(["distance","horizontal","vertical","angle","area","perimeter","radius","dimension","verify scale"].includes(label)&&command.tab==="measure"){setMeasurementKind((["area","perimeter","radius","angle"].includes(label)?label:"distance") as MeasurementKind);setTool("measure");measurement.clearDraft();notify(`${label[0].toUpperCase()+label.slice(1)} measurement active`);}
+    else if(label==="snap")setSnap((value)=>!value);
+    else if(label==="ortho")setOrtho((value)=>!value);
+    else if(label==="layers")setLeftTab("families");
+    else if(label==="labels")setShowLabels((value)=>!value);
+    else if(label==="confirm"&&selectedIds.length)apply(beams.map((beam)=>selectedIds.includes(beam.id)?{...beam,status:"confirmed" as const,reviewMessages:[]}:beam));
+    else if(["needs review","reject","hold"].includes(label)&&selectedIds.length)apply(beams.map((beam)=>selectedIds.includes(beam.id)?{...beam,status:"needs_review" as const}:beam));
+    else if(label==="previous issue")stepIssue(-1);
+    else if(label==="next issue")stepIssue(1);
+    else if(label==="unreviewed")stepIssue(1);
+    else if(label==="resolve all")confirmAll();
+    else if(label==="properties"||["width","depth","support"].includes(label))setRightTab("properties");
+    else if(label==="evidence"||label==="show evidence"||label==="evidence report"||label==="manual changes")setRightTab("properties");
+    else if(["explain","find similar","ai results"].includes(label))setRightTab("ai");
+    else if(label==="workbook"||label.includes("summary")||label==="preview"||["element","family","level"].includes(label))router.push(appRoutes.takeoff(projectId,"beams","workbook"));
+    else if(["boq mapping","formulas","waste","rates","units"].includes(label))router.push(appRoutes.workspaceBoq(projectId));
+    else if(label==="export")exportCurrentTakeoff();
+    else if(label==="print")window.print();
+    else if(label==="new template")createFamily();
+    else if(label==="undo")undo();
+    else if(label==="redo")redo();
+    else notify(`${command.label} is not connected in this workspace yet`);
+  });
 
   if (!page) {
     return <div className="flex min-h-[520px] items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm text-slate-500">Beam analysis completed, but no beam plan page was available to display.</div>;
@@ -209,50 +344,46 @@ function BeamDimension({ projectId, editor, onReanalyze, onAnswerQuestion }: { p
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <Metric label="Detected beams" value={String(beams.length)} />
-        <Metric label="Net length" value={`${netLength.toFixed(2)} m`} />
-        <Metric label="Concrete" value={`${concrete.toFixed(3)} m³`} />
-        <Metric label="Needs review" value={String(needsReview)} warn={needsReview > 0} />
-      </div>
       <BeamQuestionsPanel questions={editor.questions} onAnswer={onAnswerQuestion} />
-      <div className="grid min-h-[620px] flex-1 grid-cols-[220px_minmax(0,1fr)_320px] overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <aside className="min-w-0 border-r border-slate-200">
-          <div className="grid grid-cols-2 border-b border-slate-200 p-2">
-            <button className={leftTab === "drawings" ? activeBtn : "rounded-lg px-2 py-2 text-xs font-semibold text-slate-500"} onClick={() => setLeftTab("drawings")}>Drawings</button>
-            <button className={leftTab === "families" ? activeBtn : "rounded-lg px-2 py-2 text-xs font-semibold text-slate-500"} onClick={() => setLeftTab("families")}>Families</button>
+      <ResizableThreePane
+        storageKey={`beam:${projectId}:dimension`}
+        defaultLeft={240}
+        defaultRight={320}
+        className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white"
+      >
+        <aside className="!overflow-hidden flex min-h-0 min-w-0 flex-col border-r border-slate-200">
+          <div className="grid shrink-0 grid-cols-2 border-b border-slate-200 p-2">
+            <button className={leftTab === "drawings" ? activeBtn : "rounded-lg px-1 py-2 text-[10px] font-semibold text-slate-500"} onClick={() => setLeftTab("drawings")}>Viewports</button>
+            <button className={leftTab === "families" ? activeBtn : "rounded-lg px-1 py-2 text-[10px] font-semibold text-slate-500"} onClick={() => setLeftTab("families")}>Families</button>
           </div>
-          <div className="max-h-[690px] space-y-2 overflow-y-auto p-3">
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-3">
             {leftTab === "drawings" ? editor.pages.map((p) => {
               const count = beams.filter((b) => b.viewportId === p.id).length;
               return <button key={p.id} className={`w-full rounded-xl border p-3 text-left ${p.id === page.id ? "border-slate-950 bg-slate-50" : "border-slate-200 hover:border-slate-300"}`} onClick={() => { setPageId(p.id); select(null); setDraftStart(null); setTool("select"); }}>
-                <div className="text-xs font-semibold text-slate-800">{p.name}</div>
+                <div className="text-xs font-semibold leading-5 text-slate-800" title={p.title || p.name}>{p.title?.trim() || p.name}</div>
                 <div className="mt-1 text-[11px] text-slate-400">{p.sourceDocument || "Project drawing"}{p.sourcePageNumber ? ` · p.${p.sourcePageNumber}` : ""}</div>
                 <div className="mt-2 text-[11px] font-medium text-slate-500">{count} beam{count === 1 ? "" : "s"}</div>
               </button>;
-            }) : <><button className={btn} onClick={createFamily}>New family</button>{families.map((f) => <button key={f.id} className={`w-full rounded-xl border p-3 text-left ${f.id === activeFamilyId ? "border-slate-950 bg-slate-50" : "border-slate-200"}`} onClick={() => setActiveFamilyId(f.id)}>
-              <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: f.color }} /><span className="text-xs font-semibold text-slate-800">{f.mark}</span></div>
-              <div className="mt-1 text-[11px] text-slate-400">{f.widthMm} × {f.depthMm} mm</div>
-            </button>)}</>}
-          </div>
-          <div className="border-t border-slate-200 p-3 text-xs">
-            <div className="mb-2 font-semibold text-slate-700">Layers</div>
-            <label className="flex items-center gap-2 py-1 text-slate-600"><input type="checkbox" checked={visibleFamilyIds.length === families.length} onChange={(e) => setVisibleFamilyIds(e.target.checked ? families.map((f) => f.id) : [])} />Beams</label>
-            {families.map((f) => <label key={f.id} className="flex items-center gap-2 py-1 pl-4 text-slate-500"><input type="checkbox" checked={visibleFamilyIds.includes(f.id)} onChange={(e) => setVisibleFamilyIds((ids) => e.target.checked ? [...new Set([...ids, f.id])] : ids.filter((id) => id !== f.id))} />{f.mark}</label>)}
-            <label className="flex items-center gap-2 py-1 text-slate-600"><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />Beam labels</label>
+            }) : <BeamFamiliesPanel families={families} activeId={activeFamilyId} revealKey={selectedId || ""} onSelect={setActiveFamilyId} onCreate={createFamily} onChange={updateFamily} />}
           </div>
         </aside>
 
         <main className="min-w-0 bg-slate-100 p-3">
           <DrawingCanvas
             imageUrl={apiUrl(page.imageUrl)} width={page.width} height={page.height}
-            tool={tool === "pan" ? "pan" : tool === "add" || tool === "split" ? "draw" : "select"}
+            comparisonImages={editor.pages.filter((item)=>item.id!==page.id).map((item)=>({id:item.id,label:`${item.name}${item.sourceDocument?` · ${item.sourceDocument}`:""}`,imageUrl:apiUrl(item.imageUrl)}))}
+            hideToolbar
+            tool={tool === "pan" ? "pan" : "draw"}
             onCanvasClick={canvasClick}
-            onCanvasMove={(p) => { if (tool === "add" && draftStart) setHover(p); }}
+            onCanvasDragStart={(point)=>{if(tool==="select")setSelectionBox({start:point,current:point});}}
+            onCanvasDragMove={(point)=>{if(tool==="select"&&selectionBox)setSelectionBox((current)=>current?{...current,current:point}:null);}}
+            onCanvasDragEnd={(point)=>{if(tool!=="select"||!selectionBox)return;const start=selectionBox.start;setSelectionBox(null);if(pointDistance(start,point)<6)return;const left=Math.min(start.x,point.x),right=Math.max(start.x,point.x),top=Math.min(start.y,point.y),bottom=Math.max(start.y,point.y),crossing=point.x<start.x,match=(beam:BeamRun)=>{const bounds={left:Math.min(beam.start.x,beam.end.x),top:Math.min(beam.start.y,beam.end.y),right:Math.max(beam.start.x,beam.end.x),bottom:Math.max(beam.start.y,beam.end.y)};return crossing?bounds.right>=left&&bounds.left<=right&&bounds.bottom>=top&&bounds.top<=bottom:bounds.left>=left&&bounds.right<=right&&bounds.top>=top&&bounds.bottom<=bottom;},ids=pageBeams.filter(match).map((beam)=>beam.id);selectMany(ids);dispatchTakeoffStatus({message:`${crossing?"Crossing":"Window"} selected ${ids.length} beam${ids.length===1?"":"s"}`});}}
+            onCanvasMove={(p) => { if (tool === "add" && draftStart) setHover(beamSnapPoint(p,beams,snap,draftStart,ortho,pdfVectors.segments,pdfSnapModes)); else if(tool==="measure")measurement.canvasMove(beamSnapPoint(p,beams,snap,measurement.previewPoints.at(-1)||null,ortho,pdfVectors.segments,pdfSnapModes)); }}
             toolbarLeft={<div className="flex flex-wrap gap-1.5">
               <button className={tool === "select" ? activeBtn : btn} onClick={() => { setTool("select"); setDraftStart(null); }}>Select</button>
               <button className={tool === "pan" ? activeBtn : btn} onClick={() => { setTool("pan"); setDraftStart(null); }}>Hand</button>
               <button className={tool === "add" ? activeBtn : btn} onClick={() => { setTool("add"); setDraftStart(null); }}>Add beam</button>
+              <button className={tool === "measure" ? activeBtn : btn} onClick={() => { setMeasurementKind("distance"); setTool("measure"); measurement.clearDraft(); }}>Measure</button>
               <button className={tool === "split" ? activeBtn : btn} disabled={!selected} onClick={() => setTool("split")}>{tool === "split" ? "Click split point" : "Split"}</button>
               <button className={btn} disabled={!canMerge} onClick={mergeSelected}>Merge</button>
               <button className={btn} disabled={!selected} onClick={deleteSelected}>Delete</button>
@@ -263,35 +394,42 @@ function BeamDimension({ projectId, editor, onReanalyze, onAnswerQuestion }: { p
             </div>}
           >
             <BeamOverlay
-              beams={pageBeams} families={families} selectedId={selectedId} enabled={tool === "select"} showLabels={showLabels}
-              onSelect={select} onChange={(id, patch) => updateBeam(id, patch)}
+              beams={pageBeams} families={families} selectedIds={selectedIds} enabled={tool === "select"} showLabels={showLabels}
+              onSelect={(id, additive) => {
+                if (additive) toggleSelect(id);
+                else select(id);
+                setRightTab("properties");
+              }} onChange={(id, patch) => updateBeam(id, patch)}
+              onBegin={captureUndo}
+              onGroupMove={(dx,dy)=>translateSelected(selectedIds,dx,dy)}
             />
+            <MeasurementOverlay measurements={measurement.measurements} selectedId={measurement.selectedId} scale={page.mmPerPoint?Number(page.mmPerPoint)/1000:.018} editable={tool==="select"||tool==="measure"} previewStart={measurement.start} previewEnd={measurement.previewEnd} previewPoints={measurement.previewPoints} previewKind={measurement.kind} onSelectMeasurement={()=>select(null)}/>
+            {selectionBox?<rect pointerEvents="none" x={Math.min(selectionBox.start.x,selectionBox.current.x)} y={Math.min(selectionBox.start.y,selectionBox.current.y)} width={Math.abs(selectionBox.current.x-selectionBox.start.x)} height={Math.abs(selectionBox.current.y-selectionBox.start.y)} fill={selectionBox.current.x<selectionBox.start.x?"#22c55e":"#3b82f6"} fillOpacity={.12} stroke={selectionBox.current.x<selectionBox.start.x?"#16a34a":"#2563eb"} strokeDasharray={selectionBox.current.x<selectionBox.start.x?"7 4":undefined} strokeWidth={1.5} vectorEffect="non-scaling-stroke"/>:null}
             {draftStart && hover ? <g pointerEvents="none"><line x1={draftStart.x} y1={draftStart.y} x2={hover.x} y2={hover.y} stroke="#0f172a" strokeWidth={2} strokeDasharray="8 5" vectorEffect="non-scaling-stroke" /><circle cx={draftStart.x} cy={draftStart.y} r={4} fill="#0f172a" vectorEffect="non-scaling-stroke" /></g> : null}
           </DrawingCanvas>
         </main>
 
-        <aside className="min-w-0 border-l border-slate-200 bg-white">
-          {selected ? <BeamInspector beam={selected} families={families} onBeamChange={(patch) => updateBeam(selected.id, patch)} onFamilyChange={updateFamily} /> : <div className="p-5"><h3 className="text-sm font-semibold text-slate-800">Beam results</h3><p className="mt-2 text-xs leading-5 text-slate-500">Select a beam on the drawing to inspect or correct it. The drawing, beam family, net length and quantity update together.</p><div className="mt-5 rounded-xl bg-slate-50 p-4 text-xs text-slate-500"><div className="font-semibold text-slate-700">{page.name}</div><div className="mt-1">{page.scaleDenom ? `Scale 1:${page.scaleDenom}` : "Scale requires review"}</div><div className="mt-1">{pageBeams.length} beams on this drawing</div></div></div>}
+        <aside className="!overflow-hidden flex min-h-0 min-w-0 flex-col border-l border-slate-200 bg-white">
+          <div className="grid shrink-0 grid-cols-2 border-b border-slate-200 p-2">{[["ai","Copilot"],["properties","Item"]].map(([value,label])=><button key={value} onClick={()=>setRightTab(value as typeof rightTab)} className={rightTab===value?"rounded-md bg-slate-900 px-1 py-2 text-[9px] font-semibold text-white":"rounded-md px-1 py-2 text-[9px] font-semibold text-slate-500 hover:bg-slate-50"}>{label}</button>)}</div>
+          <div className={rightTab==="ai"?"flex min-h-0 flex-1 overflow-hidden":"min-h-0 flex-1 overflow-y-auto overscroll-contain"}>{rightTab==="ai"?<DemoChat chatKey="takeoff.beams" contextLabel={page.title?.trim() || page.name} onOpenItem={()=>setRightTab("properties")}/>:selected ? <BeamInspector beam={selected} families={families} onBeamChange={(patch) => updateBeam(selected.id, patch)} onFamilyChange={updateFamily} /> : <div className="p-5"><h3 className="text-sm font-semibold text-slate-800">Beam results</h3><p className="mt-2 text-xs leading-5 text-slate-500">Select a beam on the drawing to inspect or correct it.</p></div>}</div>
         </aside>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-        <p className="text-xs text-slate-500">Review the overlay. Correct anything that is wrong, then confirm the beams before final BOQ issue.</p>
-        <div className="flex gap-2"><Link className={btn} href={`/workspace/${projectId}/review`}>Open Review</Link><Link className={btn} href={appRoutes.workspaceBoq(projectId)}>Open BOQ</Link></div>
-      </div>
+      </ResizableThreePane>
     </div>
   );
 }
 
-function BeamOverlay({ beams, families, selectedId, enabled, showLabels, onSelect, onChange }: {
-  beams: BeamRun[]; families: BeamFamily[]; selectedId: string | null; enabled: boolean; showLabels: boolean;
-  onSelect: (id: string | null) => void; onChange: (id: string, patch: Partial<BeamRun>) => void;
+function BeamOverlay({ beams, families, selectedIds, enabled, showLabels, onSelect, onChange, onBegin, onGroupMove }: {
+  beams: BeamRun[]; families: BeamFamily[]; selectedIds: string[]; enabled: boolean; showLabels: boolean;
+  onSelect: (id: string, additive: boolean) => void; onChange: (id: string, patch: Partial<BeamRun>) => void;
+  onBegin: () => void; onGroupMove: (dx: number, dy: number) => void;
 }) {
-  return <g>{beams.map((beam) => <DraggableBeam key={beam.id} beam={beam} family={families.find((f) => f.id === beam.familyId)} selected={beam.id === selectedId} enabled={enabled} showLabel={showLabels} onSelect={() => onSelect(beam.id)} onChange={(patch) => onChange(beam.id, patch)} />)}</g>;
+  return <g>{beams.map((beam) => <DraggableBeam key={beam.id} beam={beam} family={families.find((f) => f.id === beam.familyId)} selected={selectedIds.includes(beam.id)} selectionCount={selectedIds.length} enabled={enabled} showLabel={showLabels} onSelect={(additive) => onSelect(beam.id, additive)} onChange={(patch) => onChange(beam.id, patch)} onBegin={onBegin} onGroupMove={onGroupMove} />)}</g>;
 }
 
-type Drag = { mode: "start" | "end" | "move"; origin: Point; start: Point; end: Point };
-function DraggableBeam({ beam, family, selected, enabled, showLabel, onSelect, onChange }: { beam: BeamRun; family?: BeamFamily; selected: boolean; enabled: boolean; showLabel: boolean; onSelect: () => void; onChange: (patch: Partial<BeamRun>) => void }) {
+type Drag = { mode: "start" | "end" | "move"; origin: Point; start: Point; end: Point; group?: boolean; last?: Point };
+function DraggableBeam({ beam, family, selected, selectionCount, enabled, showLabel, onSelect, onChange, onBegin, onGroupMove }: { beam: BeamRun; family?: BeamFamily; selected: boolean; selectionCount: number; enabled: boolean; showLabel: boolean; onSelect: (additive: boolean) => void; onChange: (patch: Partial<BeamRun>) => void; onBegin: () => void; onGroupMove: (dx: number, dy: number) => void }) {
   const [drag, setDrag] = useState<Drag | null>(null);
+  const undoCaptured = useRef(false);
   const color = family?.color || "#e11d48";
   const label = beam.mark || family?.mark || beam.id;
   function sourcePoint(e: ReactPointerEvent<SVGElement>): Point {
@@ -302,16 +440,24 @@ function DraggableBeam({ beam, family, selected, enabled, showLabel, onSelect, o
     return { x: box.x + (e.clientX - r.left) / Math.max(1, r.width) * box.width, y: box.y + (e.clientY - r.top) / Math.max(1, r.height) * box.height };
   }
   function begin(mode: Drag["mode"], e: ReactPointerEvent<SVGElement>) {
-    if (!enabled) return;
+    if (!enabled || e.button !== 0) return;
     e.stopPropagation(); e.preventDefault();
-    onSelect();
+    onSelect(e.ctrlKey || e.metaKey || e.shiftKey);
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({ mode, origin: sourcePoint(e), start: beam.start, end: beam.end });
+    undoCaptured.current = false;
+    const origin=sourcePoint(e);
+    setDrag({ mode, origin, start: beam.start, end: beam.end, group:mode==="move"&&selected&&selectionCount>1&&!(e.ctrlKey||e.metaKey||e.shiftKey), last:origin });
   }
   function move(e: ReactPointerEvent<SVGElement>) {
     if (!drag) return;
     e.stopPropagation();
     const p = sourcePoint(e);
+    if (pointDistance(drag.origin, p) < 0.5) return;
+    if (!undoCaptured.current) {
+      onBegin();
+      undoCaptured.current = true;
+    }
+    if(drag.mode==="move"&&drag.group&&drag.last){onGroupMove(p.x-drag.last.x,p.y-drag.last.y);setDrag({...drag,last:p});return;}
     if (drag.mode === "start") onChange({ start: p, status: "needs_review", deductions: [] });
     else if (drag.mode === "end") onChange({ end: p, status: "needs_review", deductions: [] });
     else {
@@ -319,9 +465,9 @@ function DraggableBeam({ beam, family, selected, enabled, showLabel, onSelect, o
       onChange({ start: { x: drag.start.x + dx, y: drag.start.y + dy }, end: { x: drag.end.x + dx, y: drag.end.y + dy }, status: "needs_review", deductions: [] });
     }
   }
-  function end(e: ReactPointerEvent<SVGElement>) { if (!drag) return; e.stopPropagation(); setDrag(null); }
+  function end(e: ReactPointerEvent<SVGElement>) { if (!drag) return; e.stopPropagation(); undoCaptured.current = false; setDrag(null); }
   const mx = (beam.start.x + beam.end.x) / 2, my = (beam.start.y + beam.end.y) / 2;
-  return <g>
+  return <g onClick={(event) => event.stopPropagation()}>
     <line x1={beam.start.x} y1={beam.start.y} x2={beam.end.x} y2={beam.end.y} stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" pointerEvents={enabled ? "stroke" : "none"} onPointerDown={(e) => begin("move", e)} onPointerMove={move} onPointerUp={end} onPointerCancel={end} />
     <line x1={beam.start.x} y1={beam.start.y} x2={beam.end.x} y2={beam.end.y} stroke={color} strokeWidth={selected ? 4 : 2.5} opacity={beam.status === "needs_review" ? 0.75 : 0.95} vectorEffect="non-scaling-stroke" pointerEvents="none" />
     {showLabel ? <text x={mx} y={my - 5} fontSize={11} fontWeight={700} fill="#0f172a" stroke="white" strokeWidth={3} paintOrder="stroke" textAnchor="middle" pointerEvents="none">{label}</text> : null}
@@ -335,17 +481,67 @@ function DraggableBeam({ beam, family, selected, enabled, showLabel, onSelect, o
 function BeamInspector({ beam, families, onBeamChange, onFamilyChange }: { beam: BeamRun; families: BeamFamily[]; onBeamChange: (patch: Partial<BeamRun>) => void; onFamilyChange: (id: string, patch: Partial<BeamFamily>) => void }) {
   const family = families.find((f) => f.id === beam.familyId) || families[0];
   if (!family) return null;
-  return <div className="max-h-[720px] space-y-5 overflow-y-auto p-5">
+  const exactLength=beam.netLengthM??beam.grossLengthM;
+  const setExactLength=(value:number)=>{if(!(value>0))return;const dx=beam.end.x-beam.start.x,dy=beam.end.y-beam.start.y,current=Math.hypot(dx,dy);if(current<1e-6)return;const target=beam.mmPerPoint?value*1000/beam.mmPerPoint:exactLength&&exactLength>0?current*value/exactLength:current;onBeamChange({end:{x:beam.start.x+dx/current*target,y:beam.start.y+dy/current*target},grossLengthM:value,netLengthM:value,status:"needs_review",dimensionSource:"user",dimensionMethod:"exact length"});};
+  return <div className="space-y-5 p-5">
     <div><div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Selected beam</div><input className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold" value={beam.mark || ""} onChange={(e) => onBeamChange({ mark: e.target.value, status: "needs_review" })} /></div>
     <Field label="Beam family"><select className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={beam.familyId} onChange={(e) => onBeamChange({ familyId: e.target.value, status: "needs_review" })}>{families.map((f) => <option key={f.id} value={f.id}>{f.mark} · {f.widthMm} × {f.depthMm} mm</option>)}</select></Field>
     <Field label="Beam kind"><select className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={beam.kind} onChange={(e) => onBeamChange({ kind: e.target.value as BeamRun["kind"], status: "needs_review" })}><option value="Downstand">Downstand — below soffit</option><option value="Through">Through — within slab plate</option></select></Field>
     <div className="grid grid-cols-2 gap-2"><NumberField label="Width (mm)" value={family.widthMm} onChange={(value) => onFamilyChange(family.id, { widthMm: value })} /><NumberField label="Depth (mm)" value={family.depthMm} onChange={(value) => onFamilyChange(family.id, { depthMm: value })} /></div>
     <NumberField label={beam.kind === "Downstand" ? "Drop below soffit (mm)" : "Measured depth (mm)"} value={beam.dropMm} onChange={(value) => onBeamChange({ dropMm: value, status: "needs_review" })} />
+    <NumberField label="Exact length (m)" value={exactLength ?? 0} onChange={setExactLength} />
     <div className="grid grid-cols-2 gap-2"><Info label="Gross length" value={beam.grossLengthM == null ? "—" : `${beam.grossLengthM.toFixed(3)} m`} /><Info label="Net length" value={beam.netLengthM == null ? "—" : `${beam.netLengthM.toFixed(3)} m`} /></div>
     <Info label="Concrete" value={`${currentBeamVolume(beam, families).toFixed(4)} m³`} />
     <Field label="Status"><select className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={beam.status} onChange={(e) => onBeamChange({ status: e.target.value as BeamRun["status"] })}><option value="needs_review">Needs review</option><option value="ready">Ready</option><option value="confirmed">Confirmed</option></select></Field>
     <div className="border-t border-slate-100 pt-4"><div className="text-xs font-semibold text-slate-700">Source</div><div className="mt-2 space-y-2 text-xs text-slate-500"><div>{beam.sourceDocument || "Project drawing"}{beam.sourcePageNumber ? ` · page ${beam.sourcePageNumber}` : ""}</div><div>{beam.floorLabel || beam.floorId}</div><div>{friendlyDetection(beam.detectionMethod)}</div><div>{friendlyDimension(beam.dimensionSource, beam.dimensionMethod)}</div></div></div>
     {beam.status === "needs_review" ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">Check this beam on the drawing, then mark it Ready or Confirmed.</div> : null}
+  </div>;
+}
+
+function BeamFamiliesPanel({ families, activeId, revealKey, onSelect, onCreate, onChange }: {
+  families: BeamFamily[];
+  activeId: string;
+  revealKey: string;
+  onSelect: (id: string) => void;
+  onCreate: () => void;
+  onChange: (id: string, patch: Partial<BeamFamily>) => void;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(activeId || null);
+  useEffect(() => {
+    if (activeId) setExpandedId(activeId);
+  }, [activeId, revealKey]);
+  return <div className="space-y-3">
+    <div className="flex items-center justify-between gap-2">
+      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Beam families</p>
+      <button type="button" className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50" onClick={onCreate}>＋ New</button>
+    </div>
+    <div className="space-y-1.5">
+      {families.map((family) => {
+        const expanded = family.id === expandedId;
+        return <div key={family.id} className={`overflow-hidden rounded-xl border ${expanded ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white"}`}>
+          <button type="button" aria-expanded={expanded} className="w-full p-3 text-left hover:bg-slate-50/70" onClick={() => {
+            if (expanded) { setExpandedId(null); return; }
+            onSelect(family.id);
+            setExpandedId(family.id);
+          }}>
+            <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: family.color }} /><span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-800">{family.mark}</span><span className="text-[10px] text-slate-400">{expanded ? "⌃" : "⌄"}</span></span>
+            <span className="mt-1 block text-[10px] text-slate-500">{family.widthMm} × {family.depthMm} mm</span>
+          </button>
+          {expanded ? <div className="space-y-3 border-t border-blue-200 bg-white p-3">
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">General</p>
+            <Field label="Name"><input className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700" value={family.mark} onChange={(event) => onChange(family.id, { mark: event.target.value })} /></Field>
+            <Field label="Description"><textarea rows={3} className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-xs leading-5 text-slate-700" value={family.description} onChange={(event) => onChange(family.id, { description: event.target.value })} /></Field>
+            <p className="pt-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Dimensions</p>
+            <div className="grid grid-cols-2 gap-2"><NumberField label="Width (mm)" value={family.widthMm} onChange={(value) => onChange(family.id, { widthMm: value })} /><NumberField label="Depth (mm)" value={family.depthMm} onChange={(value) => onChange(family.id, { depthMm: value })} /></div>
+            <p className="pt-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Details</p>
+            <Field label="Source"><input className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700" value={family.source} onChange={(event) => onChange(family.id, { source: event.target.value })} /></Field>
+            <Field label="Display colour"><input type="color" className="h-10 w-full cursor-pointer rounded-lg border border-slate-200 bg-white p-1" value={family.color} onChange={(event) => onChange(family.id, { color: event.target.value })} /></Field>
+            <div className="rounded-lg bg-emerald-50 px-3 py-2 text-center text-[10px] font-semibold text-emerald-700">Changes save automatically</div>
+          </div> : null}
+        </div>;
+      })}
+      {!families.length ? <div className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">Create a beam family to begin.</div> : null}
+    </div>
   </div>;
 }
 

@@ -81,6 +81,7 @@ export interface ScopeManifest {
   level_scopes: Array<{
     scope_ref: string;
     level_ref?: string | null;
+    connected_level_refs?: string[];
     label?: string | null;
     primary_viewport_ids: string[];
     geometry_route: string;

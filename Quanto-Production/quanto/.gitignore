@@ -2,14 +2,22 @@
 .env
 .env.*
 !.env.example
-frontend/.env.local
-backend/.env
+!.env.*.example
 
 # Node
 node_modules/
-frontend/.next/
-frontend/out/
+.next/
+out/
+.turbo/
+.vercel/
+.next-corrupt-*/
+*.tsbuildinfo
+.eslintcache
+*.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Python
 .venv/
@@ -18,11 +26,26 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.pyright/
+.hypothesis/
+.tox/
+.nox/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
 *.egg-info/
+pip-wheel-metadata/
 dist/
 build/
 
-# Runtime storage — keep only directory markers and README files
+# Runtime storage — ignore uploaded drawings, renders, crops, and workspace state
+storage/*
+!storage/.gitkeep
+!storage/README.md
+!storage/projects/
+!storage/temp/
 storage/projects/*
 !storage/projects/.gitkeep
 storage/temp/*
@@ -32,9 +55,22 @@ storage/temp/*
 .vscode/
 .idea/
 .DS_Store
+.AppleDouble
+.LSOverride
 Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.swp
+*.swo
 
 # Generated archives and reports
 *.zip
 coverage/
 htmlcov/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*~
+.ipynb_checkpoints/
