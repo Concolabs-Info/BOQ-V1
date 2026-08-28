@@ -5,10 +5,11 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+from ....database.connection import fetch_one, transaction
 from ....modules.pre.access import ensure_project_mutable, project_for_sheet, project_for_viewport
 from ....services.pdf.geometry import norm01_box_to_page_mpt
 from ....services.pdf.media import ensure_viewport_crop
-from ....database.connection import fetch_one, transaction
+from ....services.pdf.vectors import project_page_vector_segments, viewport_vector_segments
 from ..schemas import SheetPatch, ViewportCreate, ViewportPatch
 
 router = APIRouter(tags=["plans"])
@@ -141,3 +142,19 @@ def get_viewport_crop(viewport_id: UUID):
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     return FileResponse(path, media_type="image/png")
+
+
+@router.get("/viewports/{viewport_id}/vectors")
+def get_viewport_vectors(viewport_id: UUID):
+    try:
+        return viewport_vector_segments(str(viewport_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/projects/{project_id}/pages/{page_number}/vectors")
+def get_project_page_vectors(project_id: UUID, page_number: int, width: int, height: int):
+    try:
+        return project_page_vector_segments(str(project_id), page_number, width, height)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc

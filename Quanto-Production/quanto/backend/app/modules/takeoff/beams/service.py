@@ -586,3 +586,34 @@ def page_image_path(project_id: UUID | str, page_index: int) -> Path:
     if not path.exists():
         raise ValueError("Beam page image is missing")
     return path
+
+
+def page_vector_segments(project_id: UUID | str, page_index: int, limit: int = 30000) -> dict:
+    pid = str(project_id)
+    meta = _read_json(_meta_path(pid), {})
+    run_id = meta.get("run_id")
+    db_path = _dir(pid) / "beam_engine.db"
+    if not run_id or not db_path.exists():
+        raise ValueError("Beam analysis is not ready")
+    repo = Repo(db_path)
+    sheet = next((row for row in repo.sheets(run_id) if int(row["page_index"]) == page_index), None)
+    if not sheet:
+        raise ValueError("Beam page not found")
+    paths = repo.paths(run_id, page_index)[:limit]
+    return {
+        "viewport_id": f"BEAM-P{page_index}",
+        "width": float(sheet["width"]),
+        "height": float(sheet["height"]),
+        "vector_available": bool(paths),
+        "truncated": len(paths) >= limit,
+        "segments": [
+            {
+                "id": f"beam-pdf-{page_index}-{index}",
+                "x0": float(row["x0"]), "y0": float(row["y0"]),
+                "x1": float(row["x1"]), "y1": float(row["y1"]),
+                "layer": str(row.get("layer") or ""),
+                "dashed": bool(row.get("dashed")), "width_pt": 0.0,
+            }
+            for index, row in enumerate(paths)
+        ],
+    }

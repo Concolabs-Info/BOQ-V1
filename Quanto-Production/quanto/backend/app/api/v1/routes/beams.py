@@ -6,7 +6,14 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from ....modules.takeoff.beams import answer_question, beam_state, page_image_path, save_editor_state, start_analysis
+from ....modules.takeoff.beams import (
+    answer_question,
+    beam_state,
+    page_image_path,
+    page_vector_segments,
+    save_editor_state,
+    start_analysis,
+)
 
 router = APIRouter(tags=["beams"])
 
@@ -56,5 +63,13 @@ def get_beam_page_image(project_id: UUID, page_index: int):
     try:
         path = page_image_path(project_id, page_index)
         return FileResponse(path, media_type="image/png", filename=f"beam-page-{page_index + 1}.png")
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/projects/{project_id}/takeoff/beams/pages/{page_index}/vectors")
+def get_beam_page_vectors(project_id: UUID, page_index: int):
+    try:
+        return page_vector_segments(project_id, page_index)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
