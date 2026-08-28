@@ -101,7 +101,11 @@ def build_frame(project_id: UUID | str) -> dict:
         if factor is None and sf:
             factor = sf.get("factor_x") or sf.get("factor_y")
         vp["scale_factor"] = float(factor) if factor is not None else None
+        vp["scale_factor_x"] = float(sf["factor_x"]) if sf and sf.get("factor_x") is not None else None
+        vp["scale_factor_y"] = float(sf["factor_y"]) if sf and sf.get("factor_y") is not None else None
         vp["scale_fit_id"] = str(sf["id"]) if sf else None
+        vp["scale_confirmed"] = bool(sf and factor is not None)
+        vp["scale_checks"] = checks if sf else {}
 
     levels = fetch_all(
         "SELECT id,name,level_index,height_mm,typical_group,source_viewport_id,height_source_viewport_id FROM storey WHERE project_id=%s ORDER BY level_index",

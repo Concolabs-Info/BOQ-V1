@@ -26,7 +26,7 @@ Each box must fully contain the drawing edge to edge with a small margin, includ
 Before fixing each edge, find the furthest ink belonging to that drawing. Clipping linework or labels is a serious error.
 
 VIEWPORT CLASSIFICATION
-For every viewport report discipline, view_kind, and subjects separately. Use only the closed enum values from the response schema. A storey is not a view kind: copy it into level_label.
+For every viewport report discipline, view_kind, and subjects separately. Use only the closed enum values from the response schema. Use floor for floor/space geometry plans, ceiling for reflected/ceiling plans, roof for architectural roof/roof-terrace plans, roof_structure for structural roof framing, and ramp for ramps. A storey is not a view kind: copy it into level_label.
 
 SCALE
 Copy the applicable scale note EXACTLY as printed. Preserve the notation kind. Set normalized_ratio only for plain-English scale wording that states one explicit scale; use canonical drawing:real form. Do not calculate or normalise symbolic scale notation. NTS/NOT TO SCALE stays not_to_scale.

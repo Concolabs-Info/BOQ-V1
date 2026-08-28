@@ -145,3 +145,8 @@ class ConfirmationCreate(ApiModel):
     entity_type: str
     entity_id: UUID
     actor: str = "user"
+
+class ScopeAnswer(ApiModel):
+    choice: str | None = None
+    value: str | None = None
+    note: str | None = Field(default=None, max_length=2000)

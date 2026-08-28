@@ -18,6 +18,7 @@ Quanto/
 │       │   │   ├── services/
 │       │   │   ├── state/
 │       │   │   └── types/
+│       │   ├── scope/                # Shared Scope status/API client for all elements
 │       │   ├── takeoff/              # Production Takeoff frontend boundary
 │       │   │   ├── floor/            # Floor module boundary / API contract notes
 │       │   │   ├── ceiling/          # Ceiling module boundary / API contract notes
@@ -36,7 +37,8 @@ Quanto/
 │   │   ├── api/v1/routes/
 │   │   ├── modules/
 │   │   │   ├── pre/                  # Production Pre business logic
-│   │   │   ├── takeoff/              # Production Floor + Ceiling + Roof now; other elements later
+│   │   │   ├── takeoff/              # Scope for all elements + production Floor/Ceiling/Roof
+│   │   │   │   └── scope/            # shared engine, registry, questions, 10 element definitions
 │   │   │   ├── review/               # Reserved for later
 │   │   │   └── boq/                  # Reserved for later
 │   │   ├── services/

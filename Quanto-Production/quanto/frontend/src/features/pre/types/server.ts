@@ -71,7 +71,8 @@ export interface ScaleChecks {
   confirmed_factor?: number;
   confirmed_axis?: string;
   anisotropy_refused?: boolean;
-  printed?: { factor?: number; note?: { text?: string } };
+  auto_confirmable?: boolean;
+  printed?: { factor?: number; note?: { text?: string }; source?: "viewport" | "title_block" | "missing" };
   x?: ScaleEvidenceLine;
   y?: ScaleEvidenceLine;
   roundness?: { sample_count?: number; score?: number };
@@ -112,6 +113,7 @@ export interface Viewport {
   crop_version: number;
   sheet_no?: string | null;
   sheet_title?: string | null;
+  title_block_scale?: JsonValue;
   included: boolean;
   page_number: number;
   width_pt: number;
@@ -125,6 +127,10 @@ export interface Viewport {
   latest_scale?: ScaleFit | null;
   scale_confirmed: boolean;
   scale_stale: boolean;
+  scale_eligible: boolean;
+  scale_required: boolean;
+  detected_scale_factor?: number | null;
+  detected_scale_source?: "viewport" | "title_block" | "missing";
 }
 
 export interface HeightBandEvidence {

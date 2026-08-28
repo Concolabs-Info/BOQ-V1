@@ -28,11 +28,11 @@ def is_scale_eligible(viewport: dict) -> bool:
 
 
 def requires_primary_scale(viewport: dict) -> bool:
-    """Return whether current production Floor/Ceiling/Roof measurement needs this scale.
+    """Return whether Takeoff directly measures geometry from this viewport.
 
-    Height uses explicit dimension readings and a selected source; it does not
-    require every section/elevation to be calibrated. Structural modules are
-    still editable shells and must not block the production Floor/Roof handoff.
+    Sections/elevations remain optional height/reference sources and details are
+    calibrated only when a downstream workflow explicitly selects them.  Main
+    architectural and structural measurement plans are part of the required set.
     """
     if viewport.get("view_kind") != "plan":
         return False
@@ -40,9 +40,19 @@ def requires_primary_scale(viewport: dict) -> bool:
     if re.search(r"\b(site|location|key)\s+plan\b", name, re.I):
         return False
     discipline = (viewport.get("discipline") or "").lower()
-    if discipline == "architectural":
+    if discipline in {"architectural", "mixed"}:
         return True
-    return bool(re.search(r"\b(floor|roof|roof terrace|reflected ceiling|ceiling plan|rcp)\b", name, re.I)) and discipline not in {"structural", "civil_site"}
+    subjects = {str(subject).lower() for subject in (viewport.get("subjects") or [])}
+    structural_subjects = {
+        "foundation", "footing", "raft", "pile", "pile_cap", "ground_beam",
+        "retaining_wall", "column", "beam", "slab", "structural_wall",
+        "stair", "ramp", "roof_structure",
+    }
+    if discipline == "structural":
+        return bool(subjects & structural_subjects) or bool(
+            re.search(r"\b(general arrangement|foundation|footing|column|beam|slab|structural|framing)\b", name, re.I)
+        )
+    return bool(re.search(r"\b(floor|roof|roof terrace|reflected ceiling|ceiling plan|rcp)\b", name, re.I)) and discipline != "civil_site"
 from .prompts import SCALE_PROMPT, SYSTEM
 
 TOLERANCE = Decimal("0.01")
@@ -178,6 +188,7 @@ def parse_scale_note(note: dict | None) -> dict:
         return {"kind": "unknown", "factor": None, "status": "unparseable"}
     kind = note.get("kind", "unknown")
     text = note.get("text")
+    scale_text = re.sub(r"^\s*scale\s*:\s*", "", text or "", flags=re.I)
     normalized = note.get("normalized_ratio")
     factor: Decimal | None = None
 
@@ -191,7 +202,7 @@ def parse_scale_note(note: dict | None) -> dict:
         # example: 1/8" = 1'-0"
         if normalized is not None:
             return {"kind": kind, "factor": None, "status": "unparseable"}
-        m = re.search(r"([^\"]+)\"\s*=\s*(\d+)\s*'\s*(?:[- ]\s*([^\"]+)\")?", text or "")
+        m = re.search(r"([^\"]+)\"\s*=\s*(\d+)\s*'\s*(?:[- ]\s*([^\"]+)\")?", scale_text)
         if m:
             drawing_inches = _number(m.group(1))
             real_inches = Decimal(m.group(2)) * 12 + (_number(m.group(3) or "0") or Decimal(0))
@@ -200,7 +211,7 @@ def parse_scale_note(note: dict | None) -> dict:
     elif kind == ScaleKind.IMPERIAL_ENGINEERING.value:
         if normalized is not None:
             return {"kind": kind, "factor": None, "status": "unparseable"}
-        m = re.search(r"([^\"]+)\"\s*=\s*([^']+)\s*'", text or "")
+        m = re.search(r"([^\"]+)\"\s*=\s*([^']+)\s*'", scale_text)
         if m:
             drawing_inches = _number(m.group(1))
             real_feet = _number(m.group(2))
@@ -419,15 +430,20 @@ def suggest_scale(viewport_id: UUID | str) -> dict:
         if factor_y is not None:
             check_y["deviation_from_printed"] = float(abs(factor_y - printed) / printed)
     roundness = _roundness_evidence(ctx, {"printed": printed, "x": factor_x, "y": factor_y}, parsed["kind"])
+    printed_source = "viewport" if ctx.get("stated_scale") else "title_block" if ctx.get("title_block_scale") else "missing"
+    auto_confirmable = recommendation == "PRINTED_AGREES" or bool(
+        printed is not None and printed > 0 and printed_source == "viewport" and parsed["status"] == "numeric"
+    )
 
     checks = {
         "recommendation": recommendation,
         "roundness": roundness,
-        "printed": {"status": parsed["status"], "factor": float(printed) if printed is not None else None, "note": ctx.get("stated_scale") or ctx.get("title_block_scale")},
+        "printed": {"status": parsed["status"], "factor": float(printed) if printed is not None else None, "note": ctx.get("stated_scale") or ctx.get("title_block_scale"), "source": printed_source},
         "x": check_x,
         "y": check_y,
         "anisotropy_refused": anisotropy_refused,
         "requires_human_calibration": factor_x is None and factor_y is None,
+        "auto_confirmable": auto_confirmable,
     }
     with transaction() as conn:
         row = conn.execute(

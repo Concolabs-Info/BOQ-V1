@@ -17,7 +17,7 @@ import {
   DRAWING_WIDTH,
 } from "./PreDrawing";
 import { ResizableThreePane } from "@/features/quanto/components/ResizablePanels";
-import { usePreStore, viewportRequiresScale, type PreStage } from "@/features/pre/state/preStore";
+import { usePreStore, viewportRequiredForTakeoff, viewportRequiresScale, type PreStage } from "@/features/pre/state/preStore";
 import { usePreProjectSync } from "@/features/pre/hooks/usePreProjectSync";
 import { preApi, renderUrl } from "@/features/pre/services/preApi";
 import { appRoutes } from "@/shared/constants/appRoutes";
@@ -1019,6 +1019,10 @@ function PlansScreen({ projectId }: { projectId: string }) {
 
 function ScaleScreen({ projectId }: { projectId: string }) {
   const router = useRouter();
+  const [showReferenceDrawings, setShowReferenceDrawings] = useState(false);
+  const [confirmingReady, setConfirmingReady] = useState(false);
+  const [analyzingSelected, setAnalyzingSelected] = useState(false);
+  const [scaleNotice, setScaleNotice] = useState<string | null>(null);
   const suggestMissingScales = usePreStore((s) => s.suggestMissingScales);
   useEffect(() => { void suggestMissingScales(); }, [suggestMissingScales]);
   useEffect(() => {
@@ -1053,10 +1057,21 @@ function ScaleScreen({ projectId }: { projectId: string }) {
       }),
     [allViewports, includedSheetIds],
   );
+  const requiredViewports = useMemo(
+    () => viewports.filter((viewport) => viewportRequiredForTakeoff(viewport)),
+    [viewports],
+  );
+  const referenceViewports = useMemo(
+    () => viewports.filter((viewport) => !viewportRequiredForTakeoff(viewport)),
+    [viewports],
+  );
   const selectedId = usePreStore((s) => s.selectedViewportId);
   const setSelected = usePreStore((s) => s.setSelectedViewport);
   const update = usePreStore((s) => s.updateViewport);
-  const v = viewports.find((x) => x.id === selectedId) || viewports[0];
+  const selectedViewport = viewports.find((x) => x.id === selectedId);
+  const v = selectedViewport && (showReferenceDrawings || viewportRequiredForTakeoff(selectedViewport))
+    ? selectedViewport
+    : requiredViewports[0] || referenceViewports[0];
   const sheet = sheets.find((item) => item.id === v?.sheetId);
   const drawing = drawingSize(sheet);
   const [scaleLine, setScaleLine] = useState<[number, number, number, number]>([
@@ -1162,15 +1177,65 @@ function ScaleScreen({ projectId }: { projectId: string }) {
   const scaleBasis = hasPrintedScale
     ? hasXEvidence && hasYEvidence ? "detected printed scale, verified by X/Y" : "detected printed scale"
     : calculatedMpp > 0 ? "validated X/Y dimensions" : scale > 0 ? "saved scale evidence" : null;
-  const pendingScales = viewports.filter((viewport) => viewport.status !== "confirmed");
+  const pendingScales = requiredViewports.filter((viewport) => viewport.status !== "confirmed");
+  function readyScaleChoice(viewport: (typeof requiredViewports)[number]) {
+    const fit = viewport.server?.latest_scale || viewport.server?.scale;
+    const checks = fit?.checks || {};
+    const printedFactor = Number(checks.printed?.factor || viewport.server?.detected_scale_factor || 0);
+    const locallyPrinted = checks.printed?.source === "viewport" || viewport.server?.detected_scale_source === "viewport" || Boolean(viewport.server?.stated_scale);
+    const ready = checks.auto_confirmable === true || checks.recommendation === "PRINTED_AGREES" || (locallyPrinted && printedFactor > 0);
+    if (!fit?.id || !ready) return null;
+    if (printedFactor > 0) return { scaleFitId: fit.id, factor: printedFactor, axis: "printed" } as const;
+    const x = Number(fit.factor_x || 0), y = Number(fit.factor_y || 0);
+    if (x > 0 && y > 0 && Math.abs(x - y) / Math.max(x, y) <= 0.01) return { scaleFitId: fit.id, factor: (x + y) / 2, axis: "x" } as const;
+    return null;
+  }
+  const readyPendingScales = pendingScales.filter((viewport) => readyScaleChoice(viewport));
+  async function confirmReadyScales() {
+    if (!readyPendingScales.length || confirmingReady) return null;
+    setConfirmingReady(true);
+    setScaleNotice(null);
+    try {
+      await Promise.all(readyPendingScales.map((viewport) => {
+        const choice = readyScaleChoice(viewport)!;
+        return preApi.setScale(viewport.id, { mode: "suggested", scale_fit_id: choice.scaleFitId, chosen_factor: choice.factor, axis: choice.axis });
+      }));
+      const latest = await preApi.pre(projectId);
+      usePreStore.getState().hydrate(projectId, latest);
+      setScaleNotice(`${readyPendingScales.length} verified ${readyPendingScales.length === 1 ? "scale was" : "scales were"} confirmed.`);
+      return latest;
+    } catch {
+      usePreStore.getState().hydrate(projectId, await preApi.pre(projectId));
+      setScaleNotice("Some scales still need review. Confirm the highlighted drawing or calibrate one known dimension.");
+      return null;
+    } finally {
+      setConfirmingReady(false);
+      setShowContinuePrompt(false);
+    }
+  }
+  async function analyzeSelectedScale() {
+    if (analyzingSelected) return;
+    setAnalyzingSelected(true);
+    setScaleNotice(null);
+    try {
+      await preApi.suggestScale(v.id);
+      usePreStore.getState().hydrate(projectId, await preApi.pre(projectId));
+      setScaleNotice("Scale evidence is ready. Review it, then confirm this drawing.");
+    } catch {
+      setScaleNotice("The scale could not be verified automatically. Calibrate one known dimension to continue.");
+    } finally {
+      setAnalyzingSelected(false);
+    }
+  }
   function continueAfterScale() {
     if (pendingScales.length) setShowContinuePrompt(true);
     else router.push(appRoutes.pre(projectId, "height"));
   }
-  function confirmAllScalesAndContinue() {
-    pendingScales.forEach((viewport) => update(viewport.id, { status: "confirmed" }));
-    setShowContinuePrompt(false);
-    router.push(appRoutes.pre(projectId, "height"));
+  async function confirmAllScalesAndContinue() {
+    const latest = await confirmReadyScales();
+    if (latest && !latest.readiness.issues.some((issue) => issue.stage === "scale")) {
+      router.push(appRoutes.pre(projectId, "height"));
+    }
   }
   const drawingMode =
     mode === "add" ||
@@ -1379,8 +1444,8 @@ function ScaleScreen({ projectId }: { projectId: string }) {
   return (
     <ThreePane
       left={
-        <SimpleList title="Viewports">
-          {viewports.map((x) => (
+        <SimpleList title="Required for Takeoff">
+          {requiredViewports.map((x) => (
             <ListButton
               key={x.id}
               active={x.id === v.id}
@@ -1390,9 +1455,33 @@ function ScaleScreen({ projectId }: { projectId: string }) {
                 setActiveAxis(null);
               }}
               label={x.name}
+              subtitle={`${x.server?.sheet_no ? `Sheet ${x.server.sheet_no} · ` : ""}Page ${x.server?.page_number || "—"} · Measurement plan`}
               status={x.status}
             />
           ))}
+          {!requiredViewports.length ? <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">No measurement plans require a scale.</p> : null}
+          {referenceViewports.length ? (
+            <>
+              <button type="button" onClick={() => setShowReferenceDrawings((current) => !current)} className="mt-3 flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-semibold text-slate-600">
+                <span>Reference drawings</span>
+                <span>{showReferenceDrawings ? "Hide" : `Show ${referenceViewports.length}`}</span>
+              </button>
+              {showReferenceDrawings ? referenceViewports.map((x) => (
+                <ListButton
+                  key={x.id}
+                  active={x.id === v.id}
+                  onClick={() => {
+                    setSelected(x.id);
+                    startMode("select");
+                    setActiveAxis(null);
+                  }}
+                  label={x.name}
+                  subtitle={`${x.server?.sheet_no ? `Sheet ${x.server.sheet_no} · ` : ""}Page ${x.server?.page_number || "—"} · Optional ${x.category}`}
+                  status={x.status}
+                />
+              )) : null}
+            </>
+          ) : null}
         </SimpleList>
       }
       center={
@@ -1407,8 +1496,8 @@ function ScaleScreen({ projectId }: { projectId: string }) {
             if (mode === "measure") measurement.canvasMove(point);
           }}
           toolbar={toolbar}
-          showFocus={false}
-          focusBox={focusBox}
+          showFocus
+          focusBox={focusBox || v.bbox}
           focusRequest={evidenceRequest}
         >
           {focusedEvidence && focusBox ? (
@@ -1475,21 +1564,23 @@ function ScaleScreen({ projectId }: { projectId: string }) {
         <PreDetailsPanel
           footer={
             <ConfirmationFooter
-              confirmed={viewports.filter((viewport) => viewport.status === "confirmed").length}
-              total={viewports.length}
-              noun="drawing scales confirmed"
+               confirmed={requiredViewports.filter((viewport) => viewport.status === "confirmed").length}
+               total={requiredViewports.length}
+               noun="required drawing scales confirmed"
               status={v.status}
-              primaryLabel={v.status === "confirmed" ? "Selected scale confirmed" : "Confirm selected scale"}
-              primaryDisabled={v.status === "confirmed"}
-              onPrimary={() => update(v.id, { status: "confirmed" })}
-              secondaryLabel={pendingScales.length ? "Confirm all scales" : undefined}
-              onSecondary={() => pendingScales.forEach((viewport) => update(viewport.id, { status: "confirmed" }))}
+              primaryLabel={v.status === "confirmed" ? "Selected scale confirmed" : !v.server?.latest_scale && !v.server?.scale ? (analyzingSelected ? "Checking scale…" : "Check selected scale") : "Confirm selected scale"}
+              primaryDisabled={v.status === "confirmed" || analyzingSelected}
+              onPrimary={() => { if (!v.server?.latest_scale && !v.server?.scale) void analyzeSelectedScale(); else update(v.id, { status: "confirmed" }); }}
+               secondaryLabel={readyPendingScales.length ? (confirmingReady ? "Confirming…" : `Confirm ${readyPendingScales.length} ready ${readyPendingScales.length === 1 ? "scale" : "scales"}`) : undefined}
+              secondaryDisabled={confirmingReady}
+              onSecondary={() => { void confirmReadyScales(); }}
               nextLabel="Next: Height"
               onNext={continueAfterScale}
             />
           }
         >
             <div className="relative">
+              {scaleNotice ? <p className="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">{scaleNotice}</p> : null}
               {evidencePopup ? (
                 <EvidencePopover
                   kind={evidencePopup}
@@ -1635,7 +1726,7 @@ function ScaleScreen({ projectId }: { projectId: string }) {
                 )}
                 <PendingItemsList
                   title="Scales requiring confirmation"
-                  items={pendingScales.map((viewport) => ({ id: viewport.id, name: viewport.name, status: viewport.status }))}
+                  items={pendingScales.map((viewport) => ({ id: viewport.id, name: `${viewport.name} · ${viewport.server?.sheet_no ? `Sheet ${viewport.server.sheet_no} · ` : ""}Page ${viewport.server?.page_number || "—"}`, status: viewport.status }))}
                   selectedId={v.id}
                   onSelect={(id) => {
                     setSelected(id);
@@ -1649,7 +1740,7 @@ function ScaleScreen({ projectId }: { projectId: string }) {
         </PreDetailsPanel>
         {showContinuePrompt ? (
           <PreContinueDialog
-            pending={pendingScales.map((viewport) => ({ id: viewport.id, name: viewport.name }))}
+            pending={pendingScales.map((viewport) => ({ id: viewport.id, name: `${viewport.name} · ${viewport.server?.sheet_no ? `Sheet ${viewport.server.sheet_no} · ` : ""}Page ${viewport.server?.page_number || "—"}`, invalid: !readyScaleChoice(viewport) }))}
             itemNoun="drawing scales"
             nextStep="Height"
             onReview={() => setShowContinuePrompt(false)}
@@ -2547,14 +2638,12 @@ function StartScreen({ projectId }: { projectId: string }) {
   const sheets = usePreStore((state) => state.sheets);
   const heights = usePreStore((state) => state.heights);
   const specifications = usePreStore((state) => state.specifications);
-  const updateViewport = usePreStore((state) => state.updateViewport);
-  const updateHeight = usePreStore((state) => state.updateHeight);
-  const updateSpecification = usePreStore((state) => state.updateSpecification);
   const freezeProjectFrame = usePreStore((state) => state.freezeProjectFrame);
   const raw = usePreStore((state) => state.raw);
   const frozen = usePreStore((state) => state.frozen);
   const [freezeError, setFreezeError] = useState<string | null>(null);
   const [showContinuePrompt, setShowContinuePrompt] = useState(false);
+  const [starting, setStarting] = useState(false);
   const includedSheets = new Set(sheets.filter((sheet) => sheet.included).map((sheet) => sheet.id));
   const pendingPlans = viewports.filter((viewport) => includedSheets.has(viewport.sheetId) && viewport.status !== "confirmed");
   const pendingHeights = heights.filter((item) => item.status !== "confirmed");
@@ -2564,22 +2653,77 @@ function StartScreen({ projectId }: { projectId: string }) {
     ...pendingHeights.map((item) => ({ id: `height-${item.id}`, name: `Height · ${item.name}` })),
     ...pendingSpecifications.map((item) => ({ id: `spec-${item.id}`, name: `Specifications · ${item.name}` })),
   ];
-  async function beginTakeoff() {
-    if (pending.length || raw?.readiness.ready === false) { setShowContinuePrompt(true); return; }
+  const readinessItems = (raw?.readiness.issues || []).map((issue, index) => ({
+    id: `setup-${index}`,
+    name: issue.message
+      .replace(/^Scale not confirmed:\s*/i, "Check drawing scale · ")
+      .replace(/^Viewport not confirmed:\s*/i, "Review drawing · ")
+      .replace(/^Specification item not confirmed:\s*/i, "Review specification · ")
+      .replace(/Sheet inclusion has not been confirmed/i, "Confirm the selected drawing sheets")
+      .replace(/Storey order has not been confirmed/i, "Confirm the floor order")
+      .replace(/Storey heights have not been confirmed/i, "Confirm the floor heights"),
+  }));
+  const firstIncompleteStage = raw?.readiness.issues[0]?.stage;
+  async function freezeAndOpenTakeoff() {
+    setStarting(true);
     setFreezeError(null);
     try {
       await freezeProjectFrame();
       router.push(appRoutes.takeoff(projectId, "columns", "dimension"));
-    } catch (error) {
-      setFreezeError(error instanceof Error ? error.message : "Could not freeze the Project Frame.");
+    } catch {
+      setFreezeError("Some setup items still need your attention. Review the Pre steps marked above, then try again.");
+    } finally {
+      setStarting(false);
     }
   }
-  function confirmAllAndStart() {
-    pendingPlans.filter((item) => item.name.trim()).forEach((item) => updateViewport(item.id, { status: "confirmed" }));
-    pendingHeights.forEach((item) => updateHeight(item.id, { status: "confirmed" }));
-    pendingSpecifications.forEach((item) => updateSpecification(item.id, { status: "confirmed" }));
-    setShowContinuePrompt(false);
-    window.setTimeout(() => { void beginTakeoff(); }, 700);
+  async function beginTakeoff() {
+    if (pending.length) { setShowContinuePrompt(true); return; }
+    if (raw?.readiness.ready === false) {
+      setFreezeError("Complete the remaining setup items listed above before starting Takeoff.");
+      if (firstIncompleteStage) router.push(appRoutes.pre(projectId, firstIncompleteStage));
+      return;
+    }
+    await freezeAndOpenTakeoff();
+  }
+  async function confirmAllAndStart() {
+    setStarting(true);
+    setFreezeError(null);
+    try {
+      await Promise.all([
+        ...pendingPlans.filter((item) => item.name.trim()).map((item) => preApi.confirm("viewport", item.id)),
+        ...pendingSpecifications.map((item) => preApi.confirm("spec_item", item.id)),
+      ]);
+
+      for (const item of pendingHeights) {
+        const viewport = viewports.find((candidate) => candidate.id === item.viewportId);
+        if (item.heightM && item.heightM > 0) {
+          await preApi.setHeight(item.id, { height_mm: Math.round(item.heightM * 1000), basis: item.basis || "user_confirmed" });
+        } else if (viewport) {
+          const yTop = Math.max(0, Math.min(1000, Math.round((item.yTop - viewport.bbox[1]) / Math.max(1, viewport.bbox[3] - viewport.bbox[1]) * 1000)));
+          const yBottom = Math.max(yTop + 1, Math.min(1000, Math.round((item.yBottom - viewport.bbox[1]) / Math.max(1, viewport.bbox[3] - viewport.bbox[1]) * 1000)));
+          await preApi.setHeight(item.id, { source_viewport_id: item.viewportId, y_top: yTop, y_bottom: yBottom, basis: "user_adjusted_line" });
+        }
+      }
+      if (pendingHeights.length) await preApi.confirm("height_stack", projectId);
+
+      const latest = await preApi.pre(projectId);
+      usePreStore.getState().hydrate(projectId, latest);
+      setShowContinuePrompt(false);
+      if (!latest.readiness.ready) {
+        const nextStage = latest.readiness.issues[0]?.stage;
+        setFreezeError("A few setup items still need review. Complete them before starting Takeoff.");
+        if (nextStage) router.push(appRoutes.pre(projectId, nextStage));
+        return;
+      }
+      await preApi.freeze(projectId);
+      usePreStore.getState().hydrate(projectId, await preApi.pre(projectId));
+      router.push(appRoutes.takeoff(projectId, "columns", "dimension"));
+    } catch {
+      setShowContinuePrompt(false);
+      setFreezeError("We couldn't finish the setup. Review the Pre steps marked above, then try again.");
+    } finally {
+      setStarting(false);
+    }
   }
   return (
     <div className="flex min-h-[660px] items-center justify-center rounded-3xl border border-slate-200 bg-white">
@@ -2593,18 +2737,19 @@ function StartScreen({ projectId }: { projectId: string }) {
         </p>
         <div className="mt-5 max-h-64 overflow-y-auto text-left">
           <PendingItemsList
-            title="Pre items requiring confirmation"
-            items={pending.map((item) => ({ id: item.id, name: item.name }))}
+            title="Items to complete before Takeoff"
+            items={readinessItems.length ? readinessItems : pending.map((item) => ({ id: item.id, name: item.name }))}
             emptyMessage="All required Pre items are confirmed."
           />
         </div>
         {freezeError ? <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{freezeError}</p> : null}
-        {frozen ? <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm font-medium text-emerald-700">Project Frame frozen and ready for Takeoff.</p> : null}
+        {frozen ? <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm font-medium text-emerald-700">Setup saved and ready for Takeoff.</p> : null}
         <button
           onClick={() => { void beginTakeoff(); }}
-          className="mt-6 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white"
+          disabled={starting}
+          className="mt-6 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white disabled:bg-slate-300"
         >
-          Start takeoff
+          {starting ? "Preparing Takeoff…" : "Start takeoff"}
         </button>
       </div>
       {showContinuePrompt ? (
@@ -2615,6 +2760,7 @@ function StartScreen({ projectId }: { projectId: string }) {
           onReview={() => setShowContinuePrompt(false)}
           onContinue={() => { setShowContinuePrompt(false); router.push(appRoutes.takeoff(projectId, "columns", "dimension")); }}
           onConfirmAll={confirmAllAndStart}
+          busy={starting}
         />
       ) : null}
     </div>
@@ -2739,6 +2885,7 @@ function PreContinueDialog({
   onReview,
   onContinue,
   onConfirmAll,
+  busy = false,
 }: {
   pending: Array<{ id: string; name: string; invalid?: boolean }>;
   itemNoun: string;
@@ -2746,6 +2893,7 @@ function PreContinueDialog({
   onReview: () => void;
   onContinue: () => void;
   onConfirmAll: () => void;
+  busy?: boolean;
 }) {
   const invalid = pending.some((item) => item.invalid);
   return (
@@ -2770,7 +2918,7 @@ function PreContinueDialog({
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
           <button type="button" onClick={onReview} className="h-11 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50">Review {itemNoun}</button>
           <button type="button" onClick={onContinue} className="h-11 rounded-xl border border-amber-300 bg-amber-50 px-3 text-sm font-semibold text-amber-800 hover:bg-amber-100">Continue without confirming</button>
-          <button type="button" disabled={invalid} onClick={onConfirmAll} className="h-11 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-slate-300 sm:col-span-2">Confirm all and continue</button>
+          <button type="button" disabled={invalid || busy} onClick={onConfirmAll} className="h-11 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-slate-300 sm:col-span-2">{busy ? "Preparing Takeoff…" : "Confirm all and continue"}</button>
         </div>
       </div>
     </div>
@@ -2843,11 +2991,13 @@ function ListButton({
   active,
   onClick,
   label,
+  subtitle,
   status,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
+  subtitle?: string;
   status: DemoStatus;
 }) {
   return (
@@ -2859,7 +3009,10 @@ function ListButton({
           : "flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white p-3 text-left text-sm text-slate-600 hover:border-blue-200"
       }
     >
-      <span>{label}</span>
+      <span className="min-w-0">
+        <span className="block">{label}</span>
+        {subtitle ? <span className="mt-1 block text-[11px] font-normal text-slate-400">{subtitle}</span> : null}
+      </span>
       <StatusDot status={status} />
     </button>
   );

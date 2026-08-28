@@ -56,6 +56,7 @@ import {
 } from "./measurements/MeasurementOverlay";
 import { beginLiveEdit } from "./editing/editSessionStore";
 import { useRealFloorCeilingTakeoff } from "@/features/takeoff/shared/useRealFloorCeilingTakeoff";
+import { ScopeStatus } from "@/features/scope/components/ScopeStatus";
 import {
   MATTEGODA_FLOOR_AREAS,
   MATTEGODA_MASONRY,
@@ -131,7 +132,7 @@ export function TakeoffPage({
   view: string;
 }) {
   const name = elementNames[element] || element;
-  useRealFloorCeilingTakeoff(projectId, element);
+  const runtime = useRealFloorCeilingTakeoff(projectId, element);
   return (
     <QuantoPageShell
       projectId={projectId}
@@ -143,6 +144,24 @@ export function TakeoffPage({
       }
     >
       <TakeoffTabs projectId={projectId} element={element} view={view} />
+      {planned.has(element) ? <ScopeStatus projectId={projectId} element={element} /> : null}
+      {runtime.module && runtime.analysis?.status === "running" ? (
+        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          <span className="font-semibold">Finding {name.toLowerCase()} areas…</span>
+          <span className="ml-2">You can continue reviewing the drawings while this finishes.</span>
+        </div>
+      ) : null}
+      {runtime.module && runtime.analysis?.status === "failed" ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+          <div>
+            <span className="font-semibold text-amber-900">{name} areas need review</span>
+            <span className="ml-2 text-amber-800">We could not separate every area safely, so uncertain measurements were not saved. Draw the areas manually or try detection again.</span>
+          </div>
+          <button type="button" disabled={runtime.retrying} onClick={() => void runtime.retryAnalysis()} className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 disabled:opacity-50">
+            {runtime.retrying ? "Trying again…" : "Try detection again"}
+          </button>
+        </div>
+      ) : null}
       {isStructuralElement(element) ? (
         <StructuralTakeoff
           projectId={projectId}
@@ -4065,7 +4084,7 @@ function boxPoints(a: Point, b: Point) {
 }
 function targetViewport(row: WorkbookRow) {
   const st = useDemoStore.getState();
-  if (!["GF", "FF", "TYP", "RF"].includes(row.floorId)) {
+  if (!row.floorId || !["GF", "FF", "TYP", "RF"].includes(row.floorId)) {
     const storey = st.storeys.find((item) => item.id === row.floorId);
     const byName = storey ? st.viewports.find((vp) => vp.name.toLowerCase().includes(storey.name.toLowerCase()) || storey.name.toLowerCase().includes(vp.name.toLowerCase())) : undefined;
     return byName?.id || st.viewports[0]?.id || "";

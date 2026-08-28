@@ -16,6 +16,33 @@ from ...services.storage.paths import resolve_key
 from .prompts import SYSTEM, TRIAGE_PROMPT
 
 
+def _box_iou(a: dict, b: dict) -> float:
+    ix = max(0, min(a["x2"], b["x2"]) - max(a["x1"], b["x1"]))
+    iy = max(0, min(a["y2"], b["y2"]) - max(a["y1"], b["y1"]))
+    intersection = ix * iy
+    if not intersection:
+        return 0.0
+    area_a = (a["x2"] - a["x1"]) * (a["y2"] - a["y1"])
+    area_b = (b["x2"] - b["x1"]) * (b["y2"] - b["y1"])
+    return intersection / max(1, area_a + area_b - intersection)
+
+
+def _deduplicate_viewports(viewports: list[dict]) -> list[dict]:
+    """Drop only obvious same-sheet duplicates; repeated titles on different sheets remain distinct."""
+    result: list[dict] = []
+    for viewport in viewports:
+        name = " ".join((viewport.get("name") or "").lower().split())
+        duplicate = next((
+            existing for existing in result
+            if " ".join((existing.get("name") or "").lower().split()) == name
+            and existing.get("view_kind") == viewport.get("view_kind")
+            and _box_iou(existing["box"], viewport["box"]) >= 0.75
+        ), None)
+        if duplicate is None:
+            result.append(viewport)
+    return result
+
+
 def _analyze_page(page: dict, settings) -> tuple[TriageOutput, str | None]:
     if settings.pre_ai_provider.lower().strip() in {"local", "manual"}:
         return (
@@ -103,7 +130,7 @@ def triage_project(project_id: UUID | str) -> None:
                 ).fetchone()
                 sheet_id = r["id"]
 
-            for idx, vp in enumerate(payload["viewports"]):
+            for idx, vp in enumerate(_deduplicate_viewports(payload["viewports"])):
                 box_px = norm_box_to_px(vp["box"], page["width_px"], page["height_px"])
                 bbox_mpt = px_box_to_page_mpt(box_px, page["page_from_image"])
                 reason = vp["why"]

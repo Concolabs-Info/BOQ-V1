@@ -498,6 +498,12 @@ def analyze_floor(project_id: UUID | str, floor_id: UUID | str, quality: str = "
 
 
 def analyze_project_floors(project_id: UUID | str, quality: str = "medium") -> dict[str, Any]:
+    from .scope.engine import get_scope
+
+    scope = get_scope(str(project_id), "floor", auto_run=True)
+    if scope.get("status") == "blocked":
+        first = next((gap.get("message") for gap in scope.get("coverage_gaps", []) if gap.get("severity") == "blocked"), "Floor Scope is blocked")
+        raise RuntimeError(f"Floor Scope is not ready: {first}")
     floors = ensure_takeoff_floors(project_id)
     if not floors:
         raise RuntimeError("No Takeoff floors can be built. Complete Pre storeys/plans first.")

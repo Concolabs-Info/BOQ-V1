@@ -71,7 +71,13 @@ def source_mm_per_pixel(viewport_id: UUID | str) -> tuple[float | None, bool]:
 
 
 def ensure_takeoff_floors(project_id: UUID | str) -> list[dict[str, Any]]:
-    """Build one Takeoff floor context per physical storey from confirmed Pre evidence."""
+    """Build one Takeoff floor context per physical storey from the Floor Scope manifest.
+
+    Scope is the authority for source selection. This function no longer rescans the project
+    and scores plan names independently.
+    """
+    from .scope.engine import get_scope
+
     pid = str(project_id)
     storeys = fetch_all(
         "SELECT * FROM storey WHERE project_id=%s ORDER BY level_index",
@@ -79,39 +85,14 @@ def ensure_takeoff_floors(project_id: UUID | str) -> list[dict[str, Any]]:
     )
     if not storeys:
         return []
-    # Architectural plan candidates are only a fallback when a storey has no source viewport.
-    plans = fetch_all(
-        """SELECT v.*,s.title,p.page_number FROM viewport v
-           JOIN sheet s ON s.id=v.sheet_id JOIN page p ON p.id=s.page_id
-           JOIN document d ON d.id=p.document_id
-           WHERE d.project_id=%s AND s.included=true AND v.relevant=true AND v.view_kind='plan'
-             AND (v.discipline='architectural' OR v.name ~* '(floor|roof|roof terrace|reflected ceiling|ceiling plan|rcp)')
-             AND v.discipline NOT IN ('structural','civil_site')
-           ORDER BY p.page_number,v.display_order""",
-        (pid,),
-    )
-
-    def choose_viewport(storey: dict[str, Any]) -> str | None:
-        source_id = str(storey.get("source_viewport_id") or "")
-        if source_id and any(str(plan["id"]) == source_id for plan in plans):
-            return source_id
-        label = (storey.get("name") or "").lower()
-        scored: list[tuple[int, dict[str, Any]]] = []
-        for vp in plans:
-            text = " ".join([vp.get("name") or "", vp.get("level_label") or "", vp.get("title") or ""]).lower()
-            score = 0
-            if label and label in text:
-                score += 10
-            if "floor" in text:
-                score += 2
-            if vp.get("discipline") == "architectural":
-                score += 2
-            scored.append((score, vp))
-        return str(max(scored, key=lambda item: item[0])[1]["id"]) if scored else None
+    scope = get_scope(pid, "floor", auto_run=True)
+    scope_by_level = {str(item.get("level_ref")): item for item in (scope.get("level_scopes") or []) if item.get("level_ref")}
 
     result: list[dict[str, Any]] = []
     for s in storeys:
-        viewport_id = choose_viewport(s)
+        level_scope = scope_by_level.get(str(s["id"])) or {}
+        primary_ids = level_scope.get("primary_viewport_ids") or []
+        viewport_id = str(primary_ids[0]) if primary_ids else None
         if not viewport_id:
             continue
         try:
@@ -119,7 +100,6 @@ def ensure_takeoff_floors(project_id: UUID | str) -> list[dict[str, Any]]:
         except Exception:
             continue
         mmpp, verified = source_mm_per_pixel(viewport_id)
-        # Pre may use one typical storey record per physical floor or a single grouped record.
         typical_group = (s.get("typical_group") or "").strip()
         factor = 1
         range_match = re.search(r"(\d+)\s*[-–]\s*(\d+)", typical_group)

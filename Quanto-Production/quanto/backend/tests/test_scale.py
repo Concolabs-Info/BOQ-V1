@@ -25,6 +25,8 @@ def test_architectural_and_engineering_scale():
     engineering = parse_scale_note({"kind": "imperial_engineering", "text": '1" = 10\'', "normalized_ratio": None})
     assert architectural["factor"] == Decimal("96")
     assert engineering["factor"] == Decimal("120")
+    prefixed = parse_scale_note({"kind": "imperial_architectural", "text": 'Scale: 1/8" = 1\' 0"', "normalized_ratio": None})
+    assert prefixed["factor"] == Decimal("96")
 
 
 def test_plain_text_only_uses_normalized_ratio():
@@ -61,7 +63,9 @@ def test_takeoff_scale_gate_only_requires_measurement_plans():
     assert requires_primary_scale({"view_kind": "plan", "discipline": "architectural", "name": "Roof Plan"})
     assert not requires_primary_scale({"view_kind": "section", "discipline": "architectural", "name": "Section A-A"})
     assert not requires_primary_scale({"view_kind": "elevation", "discipline": "architectural", "name": "Front Elevation"})
-    assert not requires_primary_scale({"view_kind": "plan", "discipline": "structural", "name": "General Arrangement of Columns & Walls"})
+    assert requires_primary_scale({"view_kind": "plan", "discipline": "structural", "name": "General Arrangement of Columns & Walls"})
+    assert requires_primary_scale({"view_kind": "plan", "discipline": "structural", "name": "S-101", "subjects": ["beam", "slab"]})
+    assert not requires_primary_scale({"view_kind": "section", "discipline": "structural", "name": "Section A-A", "subjects": ["beam"]})
     assert not requires_primary_scale({"view_kind": "plan", "discipline": "civil_site", "name": "Site Plan"})
     assert is_scale_eligible({"view_kind": "section", "name": "Section A-A"})
 

@@ -1,6 +1,6 @@
-# Quanto — Production Pre + Floor + Ceiling + Roof
+# Quanto — Production Pre + Takeoff Scope + Floor + Ceiling + Roof
 
-This repository is the current production Quanto codebase. It preserves the supplied **demo UI and workflow** and replaces demo Floor/Ceiling/Roof data with real PostgreSQL-backed project data and real drawing analysis. The existing demo-derived workflow UI remains the visual contract.
+This repository is the current production Quanto codebase. It preserves the supplied **demo UI and workflow**, adds a production Takeoff Scope layer for every planned element, and replaces demo Floor/Ceiling/Roof data with real PostgreSQL-backed project data and real drawing analysis. The existing demo-derived workflow UI remains the visual contract.
 
 Visible product navigation remains unchanged:
 
@@ -15,12 +15,13 @@ Pre
 Upload → Plans → Scale → Height → Specifications → Start Takeoff
 
 Takeoff
+Scope   → deterministic evidence selection for all 10 planned elements
 Floor   → Dimension | Workbook | 3D
 Ceiling → Dimension | Workbook | 3D
 Roof    → Dimension | Workbook | 3D
 ```
 
-Other Takeoff elements, Review and BOQ remain in the existing project exactly where they were and can be implemented later. The Projects library is the application entry point and can be reached again from the workflow navigation.
+Columns, Beams, Slab, Doors & Windows, Walls, Stairs & Ramps and Foundation now have production Scope definitions, while their later Bind/Detect/measurement workspaces remain in the existing project for later implementation. Review and BOQ remain unchanged. The Projects library is the application entry point and can be reached again from the workflow navigation.
 
 ## What is production-backed now
 
@@ -33,6 +34,16 @@ Other Takeoff elements, Review and BOQ remain in the existing project exactly wh
 - Specification/schedule/notes extraction.
 - Content-hash confirmation and stale-on-edit behaviour.
 - Frozen Project Frame gate before Takeoff.
+
+### Takeoff Scope
+- Runs only after the frozen Pre Project Frame exists.
+- One generic API contract routes to separate Scope definitions for Columns, Beams, Slab, Floor, Ceiling, Doors & Windows, Walls, Roof, Stairs & Ramps and Foundation.
+- Scope makes **no AI/model call**. It deterministically selects trusted viewport boxes from Pre, maps levels, checks confirmed scale, registers supporting sections/details/schedules and records missing evidence.
+- Cross-element requirements are represented as published fact-set dependencies (`beam_solid`, `slab_solid`, `opening_area`, `instance_position`, `pad_top_level`) so later stages can be added without changing Scope architecture.
+- Manifests are persisted per element + `frame_version`. A new frozen Pre frame makes the old manifest stale instead of silently overwriting its evidence trail.
+- Questions/holds are persisted separately and only user-actionable problems are surfaced in the Takeoff UI.
+- Floor, Ceiling and Roof now take their approved primary sources from Scope rather than independently rescanning the document package.
+- The existing Dimension / Workbook / 3D layout is unchanged; Scope appears only as a compact evidence/status panel.
 
 ### Floor
 - Uses the confirmed Pre plan viewport and confirmed scale.
@@ -80,6 +91,7 @@ Quanto/
 │       ├── app/
 │       ├── features/
 │       │   ├── pre/
+│       │   ├── scope/               # compact Scope status + generic Scope API client
 │       │   ├── quanto/               # same main Quanto shell / Takeoff UI
 │       │   ├── floors/               # existing future/detail feature boundary
 │       │   ├── ceilings/             # existing future/detail feature boundary
@@ -97,6 +109,7 @@ Quanto/
 │       ├── modules/
 │       │   ├── pre/
 │       │   └── takeoff/
+│       │       ├── scope/            # shared deterministic Scope engine + 10 element specs
 │       │       ├── common.py
 │       │       ├── floors.py
 │       │       ├── ceilings.py
@@ -108,6 +121,7 @@ Quanto/
 │   ├── schema/001_pre.sql
 │   ├── schema/002_floor_ceiling.sql
 │   ├── schema/003_roof.sql
+│   ├── schema/004_takeoff_scope.sql
 │   └── migrations/
 ├── storage/                          # plan-defined local project storage
 ├── shared/
@@ -138,6 +152,8 @@ Apply schemas from the repository root. If `psql` is on PATH:
 ```powershell
 psql -U postgres -d quanto -f ".\database\schema\001_pre.sql"
 psql -U postgres -d quanto -f ".\database\schema\002_floor_ceiling.sql"
+psql -U postgres -d quanto -f ".\database\schema\003_roof.sql"
+psql -U postgres -d quanto -f ".\database\schema\004_takeoff_scope.sql"
 ```
 
 If PostgreSQL is installed on E: and is not on PATH, use the full executable path, for example:
@@ -146,14 +162,15 @@ If PostgreSQL is installed on E: and is not on PATH, use the full executable pat
 & "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\001_pre.sql"
 & "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\002_floor_ceiling.sql"
 & "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\003_roof.sql"
+& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\004_takeoff_scope.sql"
 ```
 
-All schema files are written to be safe for the intended upgrade path; on an existing Pre + Floor + Ceiling database, apply only `003_roof.sql`.
+All schema files are written to be safe for the intended upgrade path. A fresh database should apply `001` through `004` in order.
 
-For an existing database that already has Pre + Floor + Ceiling, apply only the new Roof migration:
+For an existing database that already has Pre + Floor + Ceiling + Roof, apply the new Scope migration:
 
 ```powershell
-& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\003_roof.sql"
+& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\004_takeoff_scope.sql"
 ```
 
 Or run all idempotent migrations with:
@@ -251,12 +268,23 @@ Upload
 → Height confirmed
 → Specifications reviewed
 → Start Takeoff / freeze Project Frame
-→ Floor
-→ Ceiling
-→ Roof
+→ Scope (automatic per selected element)
+→ Bind / Detect when implemented for that element
+→ Floor / Ceiling / Roof current production workflows
 ```
 
 Ceiling is intentionally run after Floor. When there is no dedicated RCP, it will not derive ceiling geometry until the Floor zones have been reviewed/confirmed in Floor → Dimension; this prevents unreviewed AI room geometry from silently becoming ceiling measurement geometry.
+
+## Generic Takeoff Scope API
+
+```text
+GET  /api/v1/takeoff/scope/elements
+GET  /api/v1/projects/{project_id}/takeoff/{element}/scope
+POST /api/v1/projects/{project_id}/takeoff/{element}/scope/run
+POST /api/v1/projects/{project_id}/takeoff/{element}/scope/questions/{question_id}/answer
+```
+
+The `{element}` value is routed through the Scope registry; this is one API contract, not ten duplicated APIs.
 
 ## Floor/Ceiling/Roof API endpoints
 
@@ -319,10 +347,10 @@ npm run test:syntax
 npm run build
 ```
 
-The package was verified with the backend test suite (including Roof geometry/NRM rules/API surface) and a TypeScript/TSX syntax pass. The packaging environment could not complete npm registry installation, so the full Next.js build must be run on the normal development PC/CI after `npm install`.
+The package was verified with the backend test suite (including Scope registry/API surface and the existing Roof geometry/NRM tests), `python -m compileall`, and a TypeScript parse/syntax check of the new Scope files. The packaging environment does not contain the frontend dependency tree, so the full Next.js typecheck/build must be run on the normal development PC/CI after `npm install`.
 
 ## Docker / deployment
 
-Docker remains optional. `docker-compose.yml` initializes `001_pre.sql`, `002_floor_ceiling.sql` and `003_roof.sql` for a fresh database.
+Docker remains optional. `docker-compose.yml` initializes `001_pre.sql`, `002_floor_ceiling.sql`, `003_roof.sql` and `004_takeoff_scope.sql` for a fresh database.
 
-For deployment, keep PostgreSQL persistent and keep the plan-defined `STORAGE_ROOT` persistent. Floor/Ceiling/Roof records store evidence and geometry in PostgreSQL while original PDFs/renders/crops stay in project storage.
+For deployment, keep PostgreSQL persistent and keep the plan-defined `STORAGE_ROOT` persistent. Scope manifests/questions/fact sets and Floor/Ceiling/Roof records are stored in PostgreSQL while original PDFs/renders/crops stay in project storage.

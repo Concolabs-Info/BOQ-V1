@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDemoStore } from "@/features/demo/store";
 import type { FinishFamily, RoofFamily, RoofZone, Sheet, Storey, UpstandFamily, Viewport, Zone } from "@/features/demo/types";
 import { apiUrl, requestJson } from "@/shared/services/apiClient";
 
 type ModuleName = "floor" | "ceiling" | "roof";
-type AnalysisState = { status: string; progress: number; message?: string | null; error_message?: string | null };
+const EMPTY_FAMILIES: Array<FinishFamily | RoofFamily> = [];
+const EMPTY_ZONES: Array<Zone | RoofZone> = [];
+export type TakeoffAnalysisState = { status: string; progress: number; message?: string | null; error_message?: string | null };
 type TakeoffServerState = {
   sheets: Array<Sheet & { width?: number; height?: number }>;
   viewports: Viewport[];
@@ -15,7 +17,7 @@ type TakeoffServerState = {
   upstandFamilies?: UpstandFamily[];
   zones: Array<Zone | RoofZone>;
   uiState?: { workbookOverrides?: Record<string, number>; workbookConfirmed?: Record<string, boolean> };
-  analysis?: AnalysisState;
+  analysis?: TakeoffAnalysisState;
   provider?: string;
 };
 
@@ -56,8 +58,8 @@ function hydrate(module: ModuleName, raw: TakeoffServerState) {
  */
 export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
   const module: ModuleName | null = element === "floor" ? "floor" : element === "ceiling" ? "ceiling" : element === "roof" ? "roof" : null;
-  const families = useDemoStore((state) => module === "floor" ? state.floorFamilies : module === "ceiling" ? state.ceilingFamilies : module === "roof" ? state.roofFamilies : []);
-  const zones = useDemoStore((state) => module === "floor" ? state.floorZones : module === "ceiling" ? state.ceilingZones : module === "roof" ? state.roofZones : []);
+  const families = useDemoStore((state) => module === "floor" ? state.floorFamilies : module === "ceiling" ? state.ceilingFamilies : module === "roof" ? state.roofFamilies : EMPTY_FAMILIES);
+  const zones = useDemoStore((state) => module === "floor" ? state.floorZones : module === "ceiling" ? state.ceilingZones : module === "roof" ? state.roofZones : EMPTY_ZONES);
   const upstandFamilies = useDemoStore((state) => state.upstandFamilies);
   const workbookOverrides = useDemoStore((state) => state.workbookOverrides);
   const workbookConfirmed = useDemoStore((state) => state.workbookConfirmed);
@@ -72,6 +74,8 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
   }>(null);
   const lastSaved = useRef("");
   const analysisTriggered = useRef(false);
+  const [analysis, setAnalysis] = useState<TakeoffAnalysisState | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   function currentPayload(currentModule: ModuleName) {
     const state = useDemoStore.getState();
@@ -96,6 +100,7 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
     let cancelled = false;
     loaded.current = false;
     analysisTriggered.current = false;
+    setAnalysis(null);
     const before = useDemoStore.getState();
     previousDemoContext.current = {
       sheets: before.sheets, viewports: before.viewports, storeys: before.storeys,
@@ -112,12 +117,13 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
         if (cancelled) return;
         hydrating.current = true;
         hydrate(module!, state);
+        setAnalysis(state.analysis || null);
         lastSaved.current = signatureFromServer(state);
         queueMicrotask(() => { hydrating.current = false; loaded.current = true; });
 
         // Same interaction as Floor/Ceiling: one automatic analysis on first empty entry
         // only when the backend is explicitly configured with OpenAI.
-        if (!state.zones.length && state.provider === "openai" && state.analysis?.status !== "running" && !analysisTriggered.current) {
+        if (!state.zones.length && state.provider === "openai" && state.analysis?.status === "not_started" && !analysisTriggered.current) {
           analysisTriggered.current = true;
           try {
             await requestJson(`${serverPath(projectId, module!)}/analyze?quality=medium`, { method: "POST" });
@@ -126,6 +132,7 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
             if (cancelled) return;
             hydrating.current = true;
             hydrate(module!, refreshed);
+            setAnalysis(refreshed.analysis || null);
             lastSaved.current = signatureFromServer(refreshed);
             queueMicrotask(() => { hydrating.current = false; loaded.current = true; });
           } catch (error) {
@@ -155,6 +162,30 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
     };
   }, [projectId, module]);
 
+  async function retryAnalysis() {
+    if (!module || retrying) return;
+    setRetrying(true);
+    setAnalysis({ status: "running", progress: 5, message: `Finding ${module} areas…` });
+    try {
+      await requestJson(`${serverPath(projectId, module)}/analyze?quality=medium`, { method: "POST" });
+      const refreshed = await requestJson<TakeoffServerState>(`${serverPath(projectId, module)}/demo-state?fresh=${Date.now()}`);
+      hydrating.current = true;
+      hydrate(module, refreshed);
+      lastSaved.current = signatureFromServer(refreshed);
+      setAnalysis(refreshed.analysis || null);
+      queueMicrotask(() => { hydrating.current = false; loaded.current = true; });
+    } catch {
+      try {
+        const latest = await requestJson<TakeoffServerState>(`${serverPath(projectId, module)}/demo-state?fresh=${Date.now()}`);
+        setAnalysis(latest.analysis || { status: "failed", progress: 100, message: "Automatic detection needs review" });
+      } catch {
+        setAnalysis({ status: "failed", progress: 100, message: "Automatic detection needs review" });
+      }
+    } finally {
+      setRetrying(false);
+    }
+  }
+
   const payloadSignature = useMemo(() => JSON.stringify({ families, zones, upstandFamilies: module === "roof" ? upstandFamilies : [], workbookOverrides, workbookConfirmed }), [families, zones, upstandFamilies, module, workbookOverrides, workbookConfirmed]);
 
   useEffect(() => {
@@ -174,4 +205,6 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
     }, 750);
     return () => window.clearTimeout(timer);
   }, [projectId, module, payloadSignature]);
+
+  return { module, analysis, retrying, retryAnalysis };
 }

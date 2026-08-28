@@ -128,45 +128,40 @@ def nrm_section_for_layer(category: str, fallback: str | None = None) -> str:
 
 
 def _roof_candidates(project_id: str) -> list[dict[str, Any]]:
+    """Return only roof geometry sources approved by Roof Scope."""
+    from .scope.engine import primary_viewports
+
+    approved = primary_viewports(project_id, "roof")
+    if not approved:
+        return []
+    ids = [row["viewport_id"] for row in approved]
     rows = fetch_all(
         """SELECT v.*,s.sheet_no,s.title,p.page_number
-           FROM viewport v
-           JOIN sheet s ON s.id=v.sheet_id
+           FROM viewport v JOIN sheet s ON s.id=v.sheet_id
            JOIN page p ON p.id=s.page_id
-           JOIN document d ON d.id=p.document_id
-           WHERE d.project_id=%s AND s.included=true AND v.relevant=true
-             AND v.view_kind IN ('plan','detail','section','elevation')
+           WHERE v.id = ANY(%s::uuid[])
            ORDER BY p.page_number,v.display_order""",
-        (project_id,),
+        (ids,),
     )
-    candidates: list[tuple[int, dict[str, Any]]] = []
+    scope_meta = {row["viewport_id"]: row for row in approved}
+    order = {value: index for index, value in enumerate(ids)}
+    enriched = []
     for row in rows:
-        subjects = [str(x).lower() for x in (row.get("subjects") or [])]
-        text = " ".join(
-            str(x or "") for x in (row.get("name"), row.get("level_label"), row.get("title"), row.get("why"))
-        )
-        score = 0
-        if any("roof" in item for item in subjects):
-            score += 15
-        if ROOF_WORDS.search(text):
-            score += 10
-        if row.get("view_kind") == "plan":
-            score += 2
-        if re.search(r"roof terrace|roof plan", text, re.I):
-            score += 10
-        if EXCLUDE_ONLY_WORDS.search(text) and not ROOF_WORDS.search(text):
-            score -= 10
-        if score > 0:
-            candidates.append((score, row))
-    # Avoid accidental section/elevation primary geometry unless no plan/detail roof crop exists.
-    primary = [r for score, r in candidates if r.get("view_kind") in {"plan", "detail"}]
-    return primary or [r for score, r in candidates]
+        meta = scope_meta.get(str(row["id"])) or {}
+        enriched.append({**row, "scope_level_ref": meta.get("level_ref"), "scope_ref": meta.get("scope_ref")})
+    return sorted(enriched, key=lambda row: order.get(str(row["id"]), 9999))
 
 
 def _host_floor_for_source(project_id: str, source: dict[str, Any]) -> dict[str, Any] | None:
     floors = ensure_takeoff_floors(project_id)
     if not floors:
         return None
+    scope_level_ref = str(source.get("scope_level_ref") or "")
+    if scope_level_ref:
+        direct = next((floor for floor in floors if str(floor.get("storey_id") or "") == scope_level_ref), None)
+        if direct:
+            return direct
+    # Compatibility only for older Pre frames where the roof viewport was not mapped to a storey.
     text = re.sub(r"[^a-z0-9]+", " ", " ".join(str(source.get(k) or "") for k in ("name", "level_label", "title")).lower())
     scored: list[tuple[int, dict[str, Any]]] = []
     for floor in floors:
@@ -707,8 +702,14 @@ def _recalculate_level(level_id: str) -> None:
 
 
 def analyze_project_roofs(project_id: UUID | str, quality: str = "medium", force: bool = False) -> dict[str, Any]:
+    from .scope.engine import get_scope
+
     pid = str(project_id)
     require_frozen_project(pid)
+    scope = get_scope(pid, "roof", auto_run=True)
+    if scope.get("status") == "blocked":
+        first = next((gap.get("message") for gap in scope.get("coverage_gaps", []) if gap.get("severity") == "blocked"), "Roof Scope is blocked")
+        raise RuntimeError(f"Roof Scope is not ready: {first}")
     settings = get_settings()
     if settings.takeoff_ai_provider.lower().strip() != "openai":
         raise RuntimeError("Automatic Roof detection requires TAKEOFF_AI_PROVIDER=openai and a backend OPENAI_API_KEY. Manual Roof editing remains available without AI.")

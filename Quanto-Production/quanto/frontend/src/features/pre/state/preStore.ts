@@ -15,12 +15,27 @@ type ExtendedSheet = Sheet & { renderWidth?: number; renderHeight?: number };
 type ExtendedViewport = UiViewport & { server?: ServerViewport; scaleFit?: ScaleFit | null; scaleStale?: boolean };
 
 export function viewportRequiresScale(viewport: ExtendedViewport): boolean {
+  if (typeof viewport.server?.scale_eligible === "boolean") return viewport.server.scale_eligible;
   const drawingType = viewport.server?.view_kind || viewport.category;
   if (drawingType === "elevation" || drawingType === "section") return true;
   if (drawingType !== "plan") return false;
   // Site/location diagrams are reference drawings, not the floor plans used
   // by the primary takeoff scale workflow.
   return !/\b(site|location|key)\s+plan\b/i.test(viewport.name);
+}
+
+export function viewportRequiredForTakeoff(viewport: ExtendedViewport): boolean {
+  if (typeof viewport.server?.scale_required === "boolean") return viewport.server.scale_required;
+  const drawingType = viewport.server?.view_kind || viewport.category;
+  if (drawingType !== "plan" || /\b(site|location|key)\s+plan\b/i.test(viewport.name)) return false;
+  const discipline = (viewport.server?.discipline || "").toLowerCase();
+  if (discipline === "architectural" || discipline === "mixed") return true;
+  if (discipline === "structural") {
+    const subjects = new Set((viewport.server?.subjects || []).map((subject) => subject.toLowerCase()));
+    const structural = ["foundation", "footing", "raft", "pile", "pile_cap", "ground_beam", "retaining_wall", "column", "beam", "slab", "structural_wall", "stair", "ramp", "roof_structure"];
+    return structural.some((subject) => subjects.has(subject)) || /\b(general arrangement|foundation|footing|column|beam|slab|structural|framing)\b/i.test(viewport.name);
+  }
+  return /\b(floor|roof|roof terrace|reflected ceiling|ceiling plan|rcp)\b/i.test(viewport.name) && discipline !== "civil_site";
 }
 
 type State = {
@@ -132,7 +147,7 @@ function mapState(state: PreState, stage: PreStage) {
     const fit = (server.scale || server.latest_scale) as ScaleFit | null | undefined;
     const checks = fit?.checks as any;
     const fx = Number(fit?.factor_x || 0), fy = Number(fit?.factor_y || 0), printed = Number(checks?.printed?.factor || 0);
-    let factor = Number(checks?.confirmed_factor || 0);
+    let factor = Number(checks?.confirmed_factor || server.detected_scale_factor || 0);
     // A valid printed scale remains usable evidence even when X/Y checks need
     // a human choice; the disagreement must not turn a real 1:N into zero.
     if (!factor && printed) factor = printed;
@@ -226,7 +241,7 @@ export const usePreStore = create<State>((set, get) => ({
       } else if(fit && mpp>0) {
         const checks=(fit.checks || {}) as any;
         const chosenFactor=mppToScaleFactor(mpp);
-        const printedFactor=Number(checks?.printed?.factor || 0);
+        const printedFactor=Number(checks?.printed?.factor || current.server?.detected_scale_factor || 0);
         const choosesPrinted=printedFactor>0 && Math.abs(chosenFactor-printedFactor)/printedFactor<0.001;
         const axis = choosesPrinted ? "printed" : "manual";
         if(!checks?.anisotropy_refused || choosesPrinted) request=preApi.setScale(id,{mode:"suggested",scale_fit_id:fit.id,chosen_factor:chosenFactor,axis});
@@ -292,7 +307,7 @@ export const usePreStore = create<State>((set, get) => ({
     const targets=get().viewports.filter((v)=>{
       return v.server?.included!==false
         && v.server?.relevant!==false
-        && viewportRequiresScale(v)
+        && viewportRequiredForTakeoff(v)
         && !v.scaleFit
         && v.status!=="confirmed";
     });

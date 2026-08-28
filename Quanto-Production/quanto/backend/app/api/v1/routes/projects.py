@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from ....modules.pre.confirmations import is_confirmed
 from ....modules.pre.project_frame import readiness
 from ....modules.pre.height import confirmed_scale
+from ....modules.pre.scale import is_scale_eligible, parse_scale_note, requires_primary_scale
 from ....services.pdf.geometry import page_mpt_box_to_norm01
 from ....database.connection import fetch_all, fetch_one, transaction
 from ..schemas import CreateProject, UpdateProject
@@ -139,7 +140,7 @@ def get_pre(project_id: UUID):
         (str(project_id),),
     )
     viewports = fetch_all(
-        """SELECT v.*,s.page_id,s.sheet_no,s.title AS sheet_title,s.included,p.page_number,p.width_pt,p.height_pt,
+        """SELECT v.*,s.page_id,s.sheet_no,s.title AS sheet_title,s.title_block_scale,s.included,p.page_number,p.width_pt,p.height_pt,
                   r150.id AS working_render_id,r150.width_px AS working_width_px,
                   r150.height_px AS working_height_px,r150.page_from_image AS working_page_from_image
            FROM viewport v JOIN sheet s ON s.id=v.sheet_id JOIN page p ON p.id=s.page_id
@@ -162,6 +163,12 @@ def get_pre(project_id: UUID):
         vp["latest_scale"] = latest
         vp["scale_confirmed"] = bool(sf and _safe_confirmed("scale", sf["id"]))
         vp["scale_stale"] = bool(latest and latest["crop_version"] != vp["crop_version"])
+        vp["scale_eligible"] = is_scale_eligible(vp)
+        vp["scale_required"] = requires_primary_scale(vp)
+        scale_note = vp.get("stated_scale") or vp.get("title_block_scale")
+        detected = parse_scale_note(scale_note)
+        vp["detected_scale_factor"] = float(detected["factor"]) if detected.get("factor") is not None else None
+        vp["detected_scale_source"] = "viewport" if vp.get("stated_scale") else "title_block" if vp.get("title_block_scale") else "missing"
 
     storeys = fetch_all("SELECT * FROM storey WHERE project_id=%s ORDER BY level_index", (str(project_id),))
     specs = fetch_all(

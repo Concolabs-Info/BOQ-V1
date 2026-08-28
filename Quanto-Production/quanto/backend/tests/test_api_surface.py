@@ -12,6 +12,8 @@ def test_required_pre_routes_exist():
         "/api/v1/projects/{project_id}/heights/suggest",
         "/api/v1/projects/{project_id}/specs/extract",
         "/api/v1/projects/{project_id}/pre/freeze",
+        "/api/v1/projects/{project_id}/takeoff/{element}/scope",
+        "/api/v1/projects/{project_id}/takeoff/{element}/scope/run",
         "/api/v1/projects/{project_id}/takeoff/floor/demo-state",
         "/api/v1/projects/{project_id}/takeoff/floor/analyze",
         "/api/v1/projects/{project_id}/takeoff/ceiling/demo-state",

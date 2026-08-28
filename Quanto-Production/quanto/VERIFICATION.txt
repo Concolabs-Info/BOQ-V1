@@ -1,35 +1,40 @@
-Quanto Pre + Floor + Ceiling + Roof production verification
-============================================================
+Quanto Pre + Takeoff Scope + Floor + Ceiling + Roof verification
+===============================================================
 
 Release scope
 -------------
 - Current Quanto production repository retained as the base.
 - Existing demo-derived UI retained as the visual/interaction contract.
-- Pre remains production-backed.
-- Floor and Ceiling production integrations remain intact.
-- Roof production integration added behind the existing Roof Dimension / Workbook / 3D UI.
-- Projects page is the application entry point and saved-project library. Existing projects can be continued; workspace navigation includes a Projects link to return to the library.
+- Production Takeoff Scope added for all 10 planned elements.
+- Scope is deterministic and makes no AI/model call.
+- One generic Scope API routes to separate element-specific Scope definitions.
+- Scope manifests/questions/fact-set dependencies are persisted in PostgreSQL via migration 004.
+- Existing Floor, Ceiling and Roof production analysis/editing APIs remain intact; their primary evidence selection now comes from Scope.
+- Columns, Beams, Slab, Doors & Windows, Walls, Stairs & Ramps and Foundation have production Scope definitions ready for later Bind/Detect stages.
+- Existing Dimension / Workbook / 3D layouts are unchanged; a compact Scope status panel is added below the tabs.
 
-Roof implementation checks
---------------------------
-- Roof source candidates come from Pre-classified/included roof evidence only.
-- Confirmed Pre scale is required for measured roof geometry.
-- Source pixel geometry and deterministic metric calculations are stored in PostgreSQL.
-- One primary roof geometry visual call per source crop; at most one targeted visual repair call.
-- Project evidence resolves roof systems/layers separately from geometry.
-- User-confirmed plane/system choices are protected from later automatic assignment updates.
-- Projected and true surface areas, edges/upstands, openings, drainage and NRM2 routes are stored separately.
-- Concrete roof derived quantities are explicitly marked as derived/reviewable.
+Scope implementation checks
+---------------------------
+- Scope reads only the frozen Pre Project Frame plus declared published fact sets.
+- Exact viewport boxes, levels, scale, source revision and source transforms are retained in the Scope manifest.
+- Typical Pre source viewports can apply to multiple confirmed storeys without being collapsed to only one level.
+- Primary-source ambiguity becomes a named SINGLE_CHOICE question instead of a silent guess.
+- Missing scale or source transform locks only the affected measurement source.
+- Vertical evidence coverage is recorded per level/scope where the element requires it.
+- Cross-element dependency status is recorded per affected scope; pending dependencies hold downstream facts but do not invent substitutes.
+- Stairs & Ramps do not falsely require a stair/ramp plan on every building storey.
+- Slab/Foundation/Roof source-role rules prevent unintended duplicate primary representations according to the Scope plan.
+- A new frozen Pre frame version causes the older Scope manifest to become stale; old manifests remain audit history.
 
 Local verification performed in packaging environment
 ----------------------------------------------------
 - Python compileall: PASS
-- Backend pytest suite: PASS (38 tests)
-- TypeScript/TSX syntax transpilation: PASS (299 source files, 0 syntax failures)
-- Secret scan before package: PASS
-- ZIP integrity: PASS (run after packaging)
+- Backend pytest suite: PASS (47 tests)
+- New Scope TypeScript files: parsed successfully with no non-resolution diagnostics
+- OpenAPI contract regenerated with the generic Scope endpoints
 
 Environment-limited checks
 --------------------------
-- A live OpenAI Roof detection call was not performed because no user API key is packaged or available to the packaging environment.
-- A complete npm install / next build could not be completed in the packaging environment because registry access timed out. Run `npm install` and `npm run build` on the normal development machine/CI before deployment.
+- The source ZIP does not include the frontend dependency tree (`node_modules`). Registry installation was unavailable in the packaging environment, so a full Next.js typecheck/build could not be completed here.
+- Run `npm install`, `npm run typecheck`, `npm run test:syntax`, and `npm run build` on the normal development machine/CI before deployment.
+- Apply `database/schema/004_takeoff_scope.sql` (or run the migration script) before using Scope against an existing database.

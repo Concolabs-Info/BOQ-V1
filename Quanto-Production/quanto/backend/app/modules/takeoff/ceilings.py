@@ -172,29 +172,25 @@ def _resolve_definition(room_type: str | None, visible_code: str | None, catalog
 
 
 def _find_rcp_for_floor(project_id: str, floor: dict[str, Any]) -> dict[str, Any] | None:
-    candidates = fetch_all(
-        """SELECT v.*,s.title,p.page_number FROM viewport v
-           JOIN sheet s ON s.id=v.sheet_id JOIN page p ON p.id=s.page_id JOIN document d ON d.id=p.document_id
-           WHERE d.project_id=%s AND s.included=true AND v.relevant=true
-             AND (lower(coalesce(v.name,'')) LIKE '%%ceiling%%' OR lower(coalesce(v.name,'')) LIKE '%%reflected%%'
-                  OR lower(coalesce(v.name,'')) LIKE '%%rcp%%' OR lower(coalesce(s.title,'')) LIKE '%%ceiling%%'
-                  OR lower(coalesce(s.title,'')) LIKE '%%reflected%%')
-           ORDER BY p.page_number,v.display_order""",
-        (project_id,),
-    )
-    if not candidates:
+    """Return the RCP selected by Ceiling Scope for this floor, if the route is ceiling_drawing."""
+    from .scope.engine import get_scope
+
+    storey_id = str(floor.get("storey_id") or "")
+    if not storey_id:
         return None
-    target = _normalize(floor.get("name"))
-    scored: list[tuple[int, dict[str, Any]]] = []
-    for item in candidates:
-        text = _normalize(" ".join([item.get("name") or "", item.get("level_label") or "", item.get("title") or ""]))
-        score = 1
-        if target and (target in text or text in target):
-            score += 10
-        if str(floor.get("level_index")) in text:
-            score += 2
-        scored.append((score, item))
-    return max(scored, key=lambda pair: pair[0])[1]
+    scope = get_scope(project_id, "ceiling", auto_run=True)
+    level_scope = next((item for item in (scope.get("level_scopes") or []) if str(item.get("level_ref") or "") == storey_id), None)
+    if not level_scope or level_scope.get("geometry_route") != "drawing":
+        return None
+    primary_ids = level_scope.get("primary_viewport_ids") or []
+    if not primary_ids:
+        return None
+    return fetch_one(
+        """SELECT v.*,s.title,p.page_number FROM viewport v
+           JOIN sheet s ON s.id=v.sheet_id JOIN page p ON p.id=s.page_id
+           WHERE v.id=%s""",
+        (str(primary_ids[0]),),
+    )
 
 
 def _section_observations(project_id: str, quality: str) -> list[dict[str, Any]]:
@@ -204,13 +200,20 @@ def _section_observations(project_id: str, quality: str) -> list[dict[str, Any]]
     )
     if existing:
         return [row["metadata"] for row in existing if row.get("metadata")]
+    from .scope.engine import get_scope
+
+    scope = get_scope(project_id, "ceiling", auto_run=True)
+    section_ids = [
+        row["viewport_id"] for row in (scope.get("selected_viewports") or [])
+        if row.get("role") == "supporting_vertical"
+    ][:3]
     sections = fetch_all(
         """SELECT v.id,v.name,v.level_label,s.title,p.page_number FROM viewport v
-           JOIN sheet s ON s.id=v.sheet_id JOIN page p ON p.id=s.page_id JOIN document d ON d.id=p.document_id
-           WHERE d.project_id=%s AND s.included=true AND v.relevant=true AND v.view_kind IN ('section','elevation')
-           ORDER BY CASE WHEN v.view_kind='section' THEN 0 ELSE 1 END,p.page_number LIMIT 3""",
-        (project_id,),
-    )
+           JOIN sheet s ON s.id=v.sheet_id JOIN page p ON p.id=s.page_id
+           WHERE v.id = ANY(%s::uuid[])
+           ORDER BY CASE WHEN v.view_kind='section' THEN 0 ELSE 1 END,p.page_number""",
+        (section_ids,),
+    ) if section_ids else []
     if not sections:
         return []
     model = model_for_quality(quality)
@@ -428,8 +431,14 @@ def _analyze_rcp(project_id: str, floor: dict[str, Any], rcp: dict[str, Any], qu
 
 
 def analyze_project_ceilings(project_id: UUID | str, quality: str = "medium") -> dict[str, Any]:
+    from .scope.engine import get_scope
+
     pid = str(project_id)
     require_frozen_project(pid)
+    scope = get_scope(pid, "ceiling", auto_run=True)
+    if scope.get("status") == "blocked":
+        first = next((gap.get("message") for gap in scope.get("coverage_gaps", []) if gap.get("severity") == "blocked"), "Ceiling Scope is blocked")
+        raise RuntimeError(f"Ceiling Scope is not ready: {first}")
     floors = ensure_takeoff_floors(pid)
     if not floors:
         raise RuntimeError("No Takeoff floors available. Complete Pre Plans/Scale/Height first.")

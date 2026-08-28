@@ -47,6 +47,7 @@ import {
   beginLiveEdit,
   requestGuardedAction,
 } from "./editing/editSessionStore";
+import { useRealStructuralScopeTakeoff } from "@/features/takeoff/shared/useRealStructuralScopeTakeoff";
 
 const elementLabel: Record<StructuralElement, string> = {
   columns: "Columns",
@@ -76,6 +77,10 @@ const viewports: Record<StructuralElement, string[]> = {
   ],
 };
 
+function isElementDrawing(element: StructuralElement, drawing: { id: string; takeoffElement?: StructuralElement }) {
+  return drawing.takeoffElement === element || viewports[element].includes(drawing.id);
+}
+
 export function StructuralTakeoff({
   projectId,
   element,
@@ -85,6 +90,7 @@ export function StructuralTakeoff({
   element: StructuralElement;
   view: string;
 }) {
+  useRealStructuralScopeTakeoff(projectId, element);
   if (view === "workbook")
     return <StructuralWorkbook projectId={projectId} element={element} />;
   if (view === "3d")
@@ -151,6 +157,14 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
   // viewports and must render selectable takeoff overlays.
   const isSection = viewport?.category === "section";
   const selected = selectedItem(element, store.selectedId);
+
+  useEffect(() => {
+    const first = drawings.find((drawing) => isElementDrawing(element, drawing));
+    if (first && !drawings.some((drawing) => drawing.id === viewportId && isElementDrawing(element, drawing))) {
+      setViewportId(first.id);
+      store.select(null);
+    }
+  }, [drawings, element, viewportId, store.select]);
 
   useEffect(() => {
     const id = search.get("entity");
@@ -397,7 +411,7 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
   }
 
   const allowedDrawings = drawings.filter((v) =>
-    viewports[element].includes(v.id),
+    isElementDrawing(element, v),
   );
   return (
     <>
@@ -870,7 +884,7 @@ function StructuralAddElementDialog({
         : store.slabPlates.map((item) => item.id);
   const availableDrawings = drawings.filter(
     (drawing) =>
-      viewports[element].includes(drawing.id) &&
+      isElementDrawing(element, drawing) &&
       (element === "slab" || drawing.category === "plan"),
   );
   const safeViewportId = availableDrawings.some(
@@ -3447,7 +3461,7 @@ function StructuralLocationFields({
         options={drawings
           .filter(
             (drawing) =>
-              viewports[element].includes(drawing.id) &&
+              isElementDrawing(element, drawing) &&
               drawing.category === "plan",
           )
           .map((drawing) => [drawing.id, drawing.name])}
