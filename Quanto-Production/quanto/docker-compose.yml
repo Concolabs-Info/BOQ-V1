@@ -14,6 +14,7 @@ services:
       - quanto_postgres:/var/lib/postgresql/data
       - ./database/schema/001_pre.sql:/docker-entrypoint-initdb.d/001_pre.sql:ro
       - ./database/schema/002_floor_ceiling.sql:/docker-entrypoint-initdb.d/002_floor_ceiling.sql:ro
+      - ./database/schema/003_roof.sql:/docker-entrypoint-initdb.d/003_roof.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quanto} -d ${POSTGRES_DB:-quanto}"]
       interval: 5s

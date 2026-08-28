@@ -35,8 +35,8 @@ export function wallFinishAreaM2(finishId:string,floorId:string){
   return st.walls.filter(w=>w.floorId===floorId).reduce((sum,w)=>{ const net=wallNetAreaM2(w); return sum+(w.side1Finish===finishId?net:0)+(w.side2Finish===finishId?net:0); },0);
 }
 export function zoneNetAreaM2(z:Zone){ return zoneAreaM2(z.points,z.deducts,scaleForViewport(z.viewportId)); }
-export function roofNetAreaM2(z:RoofZone){ return zoneAreaM2(z.points,z.deducts,scaleForViewport(z.viewportId)); }
-export function roofUpstandM(z:RoofZone){ return edgeLengthM(z.points,z.upstandEdges,scaleForViewport(z.viewportId)); }
+export function roofNetAreaM2(z:RoofZone){ return z.measuredAreaM2 ?? zoneAreaM2(z.points,z.deducts,scaleForViewport(z.viewportId)); }
+export function roofUpstandM(z:RoofZone){ return z.measuredUpstandM ?? edgeLengthM(z.points,z.upstandEdges,scaleForViewport(z.viewportId)); }
 
 function statusToReview(s:DemoStatus){ return s; }
 function sourceMap(source:string){ return { source: source.includes("schedule") ? "schedule" : source.includes("Specification") ? "specification" : "calculated" }; }

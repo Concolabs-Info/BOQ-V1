@@ -82,3 +82,57 @@ Native PDF text candidates:
 
 Return only observations actually visible and useful for ceilings: sloped/raked ceiling, bulkhead/drop, double height/open-to-below, stair soffit, vaulted ceiling, no-ceiling, and explicit ceiling levels/heights. Preserve the level/room label where visible. Do not infer normal flat ceilings just because no special note is shown.
 """
+
+ROOF_SYSTEM = """You are Quanto's architectural roof geometry reader. Use only visible evidence in the supplied roof drawing crop. Never invent pitch, level, material, openings or boundaries. Coordinates are exact integer pixels in the supplied source crop with top-left origin. Return one schema-valid structured response only. Code, not you, calculates official quantities."""
+
+ROOF_GEOMETRY_PROMPT = """Detect all measurable roof geometry in this confirmed roof-plan / roof-terrace / roof-deck crop.
+
+Source image: {width} x {height} px.
+Source name/level context: {source_name}
+Native PDF text candidates with crop-pixel bboxes:
+{context}
+
+Rules:
+- The supplied crop is the geometry authority. Coordinates MUST be source-image pixels, not normalized coordinates.
+- Detect true roof regions and roof planes. Include flat roofs, concrete roofs, roof terraces over protected/occupied space, pitched/mono/gable/hip/intersecting roofs, lower roofs, canopies, lift/machine/tank/plant roofs, glazed/green/curved roofs when visibly supported.
+- Exclude ordinary internal floor slabs, ground terraces, courtyards, balconies that are not roofs, voids, planters/flower trough interiors, tanks, parapets themselves and ceilings.
+- Split planes only at real pitch/level/topology changes. Do not split by arbitrary colour, text, grids or dimensions.
+- Return outer roof boundary, each actual plane polygon, topology edges (ridge/hip/valley/eave/verge/rake/abutment/parapet/pitch/level change/gutters), openings and drainage features.
+- Roof openings/voids must be returned even when a deduction rule may later decide not to deduct them.
+- Pitch: only return a value when visible from a note, slope arrow, dimension or supported detail. Otherwise pitch must be null and the plane needs review.
+- Materials: capture visible roof codes/notes/hatches only as evidence. Do not resolve the final system from common practice.
+- For parapet/abutment/upstand edges, return visible height only if stated. Never assume 300 mm.
+- Do not infer a curved-roof true surface profile from its plan outline.
+- Do a final coverage/topology audit: no missing roof, no self-intersecting polygons, no coordinates outside the crop, no duplicate overlapping peer planes, no invented geometry.
+"""
+
+ROOF_CATALOG_SYSTEM = """You are Quanto's QS roof system evidence resolver. Convert only supplied project drawings/specifications/schedules/legends/details into structured roof systems and assignments. Never invent a build-up, product, pitch or layer."""
+
+ROOF_CATALOG_PROMPT = """Resolve roof coverings and build-ups using only the supplied project evidence.
+
+Detected roof/plane evidence keys:
+{roof_context}
+
+Project specification/schedule/detail text:
+{spec_text}
+
+Requirements:
+- Extract actual roof systems/codes/marks where supported (e.g. RF01/R01 or clearly described unmarked systems).
+- Classify covering as sheet, tile/slate, waterproofed flat, glazed, green, concrete exposed, other or unknown.
+- Extract layers only when stated: covering, waterproofing, underlay, insulation, screed/falls, protection, finish, other.
+- Keep exact source_text for every system/layer. Include thickness/factor only when explicitly supported.
+- Assign systems to roof_id / plane_id only when drawing code/note/hatch + schedule/spec/detail evidence supports it.
+- If evidence conflicts, do not guess: add a conflict and mark assignment needs_review.
+- NRM2 routing should be explicit only where supported: 17 sheet roof covering, 18 tile/slate, 19 waterproofing, 23 rooflights, 31 insulation, 33 drainage. Concrete/reinforcement/formwork remain structural data under section 11 and are not invented here.
+"""
+
+ROOF_REPAIR_SYSTEM = """You are repairing one rejected roof geometry entity. Return only corrected geometry for the named entity in the supplied cropped image. Do not add other roof objects."""
+
+ROOF_REPAIR_PROMPT = """Repair this one invalid roof geometry entity.
+Entity kind: {entity_kind}
+Entity id: {entity_id}
+Problem: {problem}
+Crop offset in original roof image: x={offset_x}, y={offset_y}
+This repair image is {width} x {height} px.
+Return coordinates LOCAL TO THIS REPAIR IMAGE. Keep the entity faithful to visible roof lines and do not invent geometry.
+"""

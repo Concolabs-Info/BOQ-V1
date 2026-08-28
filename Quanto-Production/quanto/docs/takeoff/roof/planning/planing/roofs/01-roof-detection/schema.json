@@ -1,0 +1,617 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "quanto-roof-detection-v1",
+  "title": "Quanto Roof Detection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_image",
+    "roof_regions",
+    "reference_markers",
+    "review_items"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "roof-detection-v1"
+    },
+    "source_image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width_px",
+        "height_px",
+        "origin"
+      ],
+      "properties": {
+        "width_px": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height_px": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "origin": {
+          "const": "top_left"
+        }
+      }
+    },
+    "drawing_scope": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "roof_regions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/roofRegion"
+      }
+    },
+    "reference_markers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/referenceMarker"
+      }
+    },
+    "review_items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/reviewItem"
+      }
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "integer"
+        }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "polygon": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "$ref": "#/$defs/point"
+      }
+    },
+    "polyline": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "$ref": "#/$defs/point"
+      }
+    },
+    "bbox": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "integer"
+        }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "pitch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "unit",
+        "raw_text",
+        "source_kind"
+      ],
+      "properties": {
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unit": {
+          "enum": [
+            "degrees",
+            "percent",
+            "ratio",
+            "rise_run",
+            null
+          ]
+        },
+        "raw_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_kind": {
+          "enum": [
+            "plan_text",
+            "slope_arrow",
+            "pre_section_evidence",
+            "section_image",
+            "detail",
+            "user",
+            null
+          ]
+        }
+      }
+    },
+    "materialEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "raw_text",
+        "source_kind",
+        "bbox",
+        "confidence"
+      ],
+      "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_kind": {
+          "type": "string"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/bbox"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "plane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plane_id",
+        "surface_type",
+        "polygon",
+        "pitch",
+        "slope_direction",
+        "material_evidence",
+        "confidence"
+      ],
+      "properties": {
+        "plane_id": {
+          "type": "string"
+        },
+        "surface_type": {
+          "enum": [
+            "flat",
+            "sloped_planar",
+            "curved",
+            "unknown"
+          ]
+        },
+        "polygon": {
+          "$ref": "#/$defs/polygon"
+        },
+        "pitch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/pitch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slope_direction": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/point"
+            },
+            "to": {
+              "$ref": "#/$defs/point"
+            },
+            "evidence": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "material_evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/materialEvidence"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edge_id",
+        "edge_type",
+        "polyline",
+        "adjacent_plane_ids",
+        "confidence"
+      ],
+      "properties": {
+        "edge_id": {
+          "type": "string"
+        },
+        "edge_type": {
+          "enum": [
+            "ridge",
+            "hip",
+            "valley",
+            "eave",
+            "verge",
+            "rake",
+            "abutment",
+            "parapet",
+            "pitch_change",
+            "level_change",
+            "roof_step",
+            "gutter",
+            "valley_gutter",
+            "internal_gutter",
+            "unknown_roof_boundary"
+          ]
+        },
+        "polyline": {
+          "$ref": "#/$defs/polyline"
+        },
+        "adjacent_plane_ids": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "opening": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "opening_id",
+        "opening_type",
+        "polygon",
+        "host_plane_id",
+        "raw_text",
+        "confidence"
+      ],
+      "properties": {
+        "opening_id": {
+          "type": "string"
+        },
+        "opening_type": {
+          "enum": [
+            "rooflight",
+            "skylight",
+            "lanternlight",
+            "roof_hatch",
+            "access_hatch",
+            "smoke_vent",
+            "chimney",
+            "duct_penetration",
+            "pipe_penetration",
+            "roof_void",
+            "open_courtyard",
+            "plant_opening",
+            "other"
+          ]
+        },
+        "polygon": {
+          "$ref": "#/$defs/polygon"
+        },
+        "host_plane_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "drainage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "drainage_id",
+        "type",
+        "geometry_type",
+        "coordinates",
+        "associated_plane_ids",
+        "raw_text",
+        "confidence"
+      ],
+      "properties": {
+        "drainage_id": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "gutter",
+            "valley_gutter",
+            "box_gutter",
+            "internal_gutter",
+            "roof_outlet",
+            "rwp",
+            "downpipe",
+            "hopper",
+            "scupper",
+            "sump",
+            "overflow"
+          ]
+        },
+        "geometry_type": {
+          "enum": [
+            "point",
+            "polyline",
+            "polygon"
+          ]
+        },
+        "coordinates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/point"
+          }
+        },
+        "associated_plane_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "raw_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "roofRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "roof_id",
+        "name",
+        "roof_type",
+        "roof_level_text",
+        "outer_boundary",
+        "planes",
+        "edges",
+        "openings",
+        "drainage",
+        "confidence"
+      ],
+      "properties": {
+        "roof_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "roof_type": {
+          "enum": [
+            "flat",
+            "mono_pitch",
+            "gable",
+            "hip",
+            "pyramid_hip",
+            "intersecting",
+            "butterfly",
+            "mansard",
+            "gambrel",
+            "saltbox",
+            "sawtooth",
+            "a_frame",
+            "glazed",
+            "green",
+            "barrel",
+            "dome",
+            "conical",
+            "canopy",
+            "mixed",
+            "other",
+            "unknown"
+          ]
+        },
+        "roof_level_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outer_boundary": {
+          "$ref": "#/$defs/polygon"
+        },
+        "planes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/plane"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge"
+          }
+        },
+        "openings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opening"
+          }
+        },
+        "drainage": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/drainage"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "referenceMarker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "marker_id",
+        "type",
+        "label",
+        "bbox",
+        "confidence"
+      ],
+      "properties": {
+        "marker_id": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "section",
+            "elevation",
+            "detail",
+            "roof_note",
+            "level_note",
+            "pitch_note"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "reviewItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "review_id",
+        "severity",
+        "category",
+        "message",
+        "related_ids",
+        "bbox"
+      ],
+      "properties": {
+        "review_id": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "warning",
+            "blocker"
+          ]
+        },
+        "category": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "related_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/bbox"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

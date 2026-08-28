@@ -2,17 +2,18 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useDemoStore } from "@/features/demo/store";
-import type { FinishFamily, Sheet, Storey, Viewport, Zone } from "@/features/demo/types";
+import type { FinishFamily, RoofFamily, RoofZone, Sheet, Storey, UpstandFamily, Viewport, Zone } from "@/features/demo/types";
 import { apiUrl, requestJson } from "@/shared/services/apiClient";
 
-type ModuleName = "floor" | "ceiling";
+type ModuleName = "floor" | "ceiling" | "roof";
 type AnalysisState = { status: string; progress: number; message?: string | null; error_message?: string | null };
 type TakeoffServerState = {
   sheets: Array<Sheet & { width?: number; height?: number }>;
   viewports: Viewport[];
   storeys: Storey[];
-  families: FinishFamily[];
-  zones: Zone[];
+  families: Array<FinishFamily | RoofFamily>;
+  upstandFamilies?: UpstandFamily[];
+  zones: Array<Zone | RoofZone>;
   uiState?: { workbookOverrides?: Record<string, number>; workbookConfirmed?: Record<string, boolean> };
   analysis?: AnalysisState;
   provider?: string;
@@ -23,10 +24,7 @@ function serverPath(projectId: string, module: ModuleName) {
 }
 
 function withAbsoluteImages(items: TakeoffServerState): TakeoffServerState {
-  return {
-    ...items,
-    sheets: items.sheets.map((sheet) => ({ ...sheet, image: apiUrl(sheet.image) })),
-  };
+  return { ...items, sheets: items.sheets.map((sheet) => ({ ...sheet, image: apiUrl(sheet.image) })) };
 }
 
 function hydrate(module: ModuleName, raw: TakeoffServerState) {
@@ -34,27 +32,33 @@ function hydrate(module: ModuleName, raw: TakeoffServerState) {
   const current = useDemoStore.getState();
   const firstViewport = data.viewports[0]?.id || current.selectedViewportId;
   const selectedStillExists = data.viewports.some((viewport) => viewport.id === current.selectedViewportId);
+  const moduleData = module === "floor"
+    ? { floorFamilies: data.families as FinishFamily[], floorZones: data.zones as Zone[] }
+    : module === "ceiling"
+      ? { ceilingFamilies: data.families as FinishFamily[], ceilingZones: data.zones as Zone[] }
+      : { roofFamilies: data.families as RoofFamily[], upstandFamilies: data.upstandFamilies || [], roofZones: data.zones as RoofZone[] };
   useDemoStore.setState({
     sheets: data.sheets,
     viewports: data.viewports,
     storeys: data.storeys,
     selectedViewportId: selectedStillExists ? current.selectedViewportId : firstViewport,
     selectedEntityId: null,
-    ...(module === "floor" ? { floorFamilies: data.families, floorZones: data.zones } : { ceilingFamilies: data.families, ceilingZones: data.zones }),
+    ...moduleData,
     workbookOverrides: data.uiState?.workbookOverrides || {},
     workbookConfirmed: data.uiState?.workbookConfirmed || {},
   });
 }
 
 /**
- * Bridges the unchanged demo-derived Takeoff UI to the production Floor/Ceiling API.
- * Geometry stays in the original source-crop pixel coordinate space; the server is
- * authoritative for scale and official quantities.
+ * Bridges the unchanged demo-derived Takeoff UI to the production Floor/Ceiling/Roof API.
+ * Geometry stays in the exact source-crop pixel coordinate space. PostgreSQL + the
+ * confirmed Pre scale are authoritative for official quantities.
  */
 export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
-  const module: ModuleName | null = element === "floor" ? "floor" : element === "ceiling" ? "ceiling" : null;
-  const families = useDemoStore((state) => module === "floor" ? state.floorFamilies : module === "ceiling" ? state.ceilingFamilies : []);
-  const zones = useDemoStore((state) => module === "floor" ? state.floorZones : module === "ceiling" ? state.ceilingZones : []);
+  const module: ModuleName | null = element === "floor" ? "floor" : element === "ceiling" ? "ceiling" : element === "roof" ? "roof" : null;
+  const families = useDemoStore((state) => module === "floor" ? state.floorFamilies : module === "ceiling" ? state.ceilingFamilies : module === "roof" ? state.roofFamilies : []);
+  const zones = useDemoStore((state) => module === "floor" ? state.floorZones : module === "ceiling" ? state.ceilingZones : module === "roof" ? state.roofZones : []);
+  const upstandFamilies = useDemoStore((state) => state.upstandFamilies);
   const workbookOverrides = useDemoStore((state) => state.workbookOverrides);
   const workbookConfirmed = useDemoStore((state) => state.workbookConfirmed);
   const loaded = useRef(false);
@@ -62,11 +66,30 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
   const previousDemoContext = useRef<null | {
     sheets: Sheet[]; viewports: Viewport[]; storeys: Storey[];
     floorFamilies: FinishFamily[]; floorZones: Zone[]; ceilingFamilies: FinishFamily[]; ceilingZones: Zone[];
+    roofFamilies: RoofFamily[]; upstandFamilies: UpstandFamily[]; roofZones: RoofZone[];
     selectedViewportId: string; selectedEntityId: string | null;
     workbookOverrides: Record<string, number>; workbookConfirmed: Record<string, boolean>;
   }>(null);
   const lastSaved = useRef("");
   const analysisTriggered = useRef(false);
+
+  function currentPayload(currentModule: ModuleName) {
+    const state = useDemoStore.getState();
+    const moduleFamilies = currentModule === "floor" ? state.floorFamilies : currentModule === "ceiling" ? state.ceilingFamilies : state.roofFamilies;
+    const moduleZones = currentModule === "floor" ? state.floorZones : currentModule === "ceiling" ? state.ceilingZones : state.roofZones;
+    return {
+      families: moduleFamilies,
+      ...(currentModule === "roof" ? { upstandFamilies: state.upstandFamilies } : {}),
+      zones: moduleZones,
+      uiState: { workbookOverrides: state.workbookOverrides, workbookConfirmed: state.workbookConfirmed },
+    };
+  }
+  function signatureFor(payload: ReturnType<typeof currentPayload>) {
+    return JSON.stringify({ families: payload.families, upstandFamilies: "upstandFamilies" in payload ? payload.upstandFamilies : [], zones: payload.zones, workbookOverrides: payload.uiState.workbookOverrides, workbookConfirmed: payload.uiState.workbookConfirmed });
+  }
+  function signatureFromServer(state: TakeoffServerState) {
+    return JSON.stringify({ families: state.families, upstandFamilies: state.upstandFamilies || [], zones: state.zones, workbookOverrides: state.uiState?.workbookOverrides || {}, workbookConfirmed: state.uiState?.workbookConfirmed || {} });
+  }
 
   useEffect(() => {
     if (!module || !projectId) return;
@@ -78,6 +101,7 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
       sheets: before.sheets, viewports: before.viewports, storeys: before.storeys,
       floorFamilies: before.floorFamilies, floorZones: before.floorZones,
       ceilingFamilies: before.ceilingFamilies, ceilingZones: before.ceilingZones,
+      roofFamilies: before.roofFamilies, upstandFamilies: before.upstandFamilies, roofZones: before.roofZones,
       selectedViewportId: before.selectedViewportId, selectedEntityId: before.selectedEntityId,
       workbookOverrides: before.workbookOverrides, workbookConfirmed: before.workbookConfirmed,
     };
@@ -88,16 +112,11 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
         if (cancelled) return;
         hydrating.current = true;
         hydrate(module!, state);
-        lastSaved.current = JSON.stringify({
-          families: state.families,
-          zones: state.zones,
-          workbookOverrides: state.uiState?.workbookOverrides || {},
-          workbookConfirmed: state.uiState?.workbookConfirmed || {},
-        });
+        lastSaved.current = signatureFromServer(state);
         queueMicrotask(() => { hydrating.current = false; loaded.current = true; });
 
-        // The production UI keeps the demo interaction exactly as supplied. Analysis
-        // starts automatically on first entry only when a model provider is configured.
+        // Same interaction as Floor/Ceiling: one automatic analysis on first empty entry
+        // only when the backend is explicitly configured with OpenAI.
         if (!state.zones.length && state.provider === "openai" && state.analysis?.status !== "running" && !analysisTriggered.current) {
           analysisTriggered.current = true;
           try {
@@ -107,15 +126,9 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
             if (cancelled) return;
             hydrating.current = true;
             hydrate(module!, refreshed);
-            lastSaved.current = JSON.stringify({
-              families: refreshed.families,
-              zones: refreshed.zones,
-              workbookOverrides: refreshed.uiState?.workbookOverrides || {},
-              workbookConfirmed: refreshed.uiState?.workbookConfirmed || {},
-            });
+            lastSaved.current = signatureFromServer(refreshed);
             queueMicrotask(() => { hydrating.current = false; loaded.current = true; });
           } catch (error) {
-            // Keep manual drawing/editing usable if prerequisites or AI credentials are missing.
             console.warn(`Quanto ${module} analysis could not start`, error);
           }
         }
@@ -126,27 +139,12 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
     void load();
     return () => {
       cancelled = true;
-      // Do not lose a last edit when the user switches from Floor to Ceiling
-      // before the normal debounce completes. Persist the production state once
-      // before restoring the original demo context for the other modules.
       if (loaded.current && !hydrating.current) {
-        const state = useDemoStore.getState();
-        const pendingPayload = {
-          families: module === "floor" ? state.floorFamilies : state.ceilingFamilies,
-          zones: module === "floor" ? state.floorZones : state.ceilingZones,
-          uiState: { workbookOverrides: state.workbookOverrides, workbookConfirmed: state.workbookConfirmed },
-        };
-        const signature = JSON.stringify({
-          families: pendingPayload.families,
-          zones: pendingPayload.zones,
-          workbookOverrides: pendingPayload.uiState.workbookOverrides,
-          workbookConfirmed: pendingPayload.uiState.workbookConfirmed,
-        });
+        const pendingPayload = currentPayload(module);
+        const signature = signatureFor(pendingPayload);
         if (signature !== lastSaved.current) {
           void requestJson(`${serverPath(projectId, module)}/demo-state`, {
-            method: "PUT",
-            body: JSON.stringify(pendingPayload),
-            keepalive: true,
+            method: "PUT", body: JSON.stringify(pendingPayload), keepalive: true,
           }).catch((error) => console.warn(`Quanto ${module} final edit could not be saved`, error));
         }
       }
@@ -157,29 +155,16 @@ export function useRealFloorCeilingTakeoff(projectId: string, element: string) {
     };
   }, [projectId, module]);
 
-  const payloadSignature = useMemo(() => JSON.stringify({ families, zones, workbookOverrides, workbookConfirmed }), [families, zones, workbookOverrides, workbookConfirmed]);
+  const payloadSignature = useMemo(() => JSON.stringify({ families, zones, upstandFamilies: module === "roof" ? upstandFamilies : [], workbookOverrides, workbookConfirmed }), [families, zones, upstandFamilies, module, workbookOverrides, workbookConfirmed]);
 
   useEffect(() => {
     if (!module || !loaded.current || hydrating.current) return;
     if (payloadSignature === lastSaved.current) return;
     const timer = window.setTimeout(async () => {
-      const state = useDemoStore.getState();
-      const payload = {
-        families: module === "floor" ? state.floorFamilies : state.ceilingFamilies,
-        zones: module === "floor" ? state.floorZones : state.ceilingZones,
-        uiState: { workbookOverrides: state.workbookOverrides, workbookConfirmed: state.workbookConfirmed },
-      };
+      const payload = currentPayload(module);
       try {
-        const saved = await requestJson<TakeoffServerState>(`${serverPath(projectId, module)}/demo-state`, {
-          method: "PUT",
-          body: JSON.stringify(payload),
-        });
-        lastSaved.current = JSON.stringify({
-          families: payload.families,
-          zones: payload.zones,
-          workbookOverrides: payload.uiState.workbookOverrides,
-          workbookConfirmed: payload.uiState.workbookConfirmed,
-        });
+        const saved = await requestJson<TakeoffServerState>(`${serverPath(projectId, module)}/demo-state`, { method: "PUT", body: JSON.stringify(payload) });
+        lastSaved.current = signatureFor(payload);
         hydrating.current = true;
         hydrate(module, saved);
         queueMicrotask(() => { hydrating.current = false; });

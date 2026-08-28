@@ -102,3 +102,30 @@ def test_gemini_requires_api_key(monkeypatch):
             raise AssertionError("GeminiModelClient accepted a missing API key")
     finally:
         get_settings.cache_clear()
+
+
+def test_roof_can_disable_hidden_schema_retries(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODEL_RETRIES", "2")
+    get_settings.cache_clear()
+    image = tmp_path / "crop.png"
+    image.write_bytes(b"fake")
+
+    class Responses:
+        def __init__(self): self.calls = 0
+        def parse(self, **kwargs):
+            self.calls += 1
+            raise ValueError("schema mismatch")
+
+    model = OpenAIModelClient.__new__(OpenAIModelClient)
+    model.client = SimpleNamespace(responses=Responses())
+    model.model = "test-model"
+    try:
+        try:
+            model.parse_image(image, "roof", ScaleReading, system="system", max_schema_retries=0)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("Roof call unexpectedly succeeded")
+        assert model.client.responses.calls == 1
+    finally:
+        get_settings.cache_clear()

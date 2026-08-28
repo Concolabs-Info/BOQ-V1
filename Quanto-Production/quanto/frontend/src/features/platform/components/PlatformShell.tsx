@@ -19,9 +19,11 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
   }, []);
   function toggleDesktopNavigation() { setDesktopCollapsed((current) => { const next = !current; rememberedDesktopCollapsed = next; window.localStorage.setItem(DESKTOP_NAV_KEY, String(next)); return next; }); }
 
-  const projectId = pathname.split("/")[2] || "demo";
+  const workspaceMatch = pathname.match(/^\/workspace\/([^/]+)/);
+  const projectId = workspaceMatch?.[1] || null;
   const nav = [
-    { title: "Project workspace", href: appRoutes.pre(projectId, "upload") },
+    { title: "Projects", href: appRoutes.projects },
+    ...(projectId ? [{ title: "Project workspace", href: appRoutes.pre(projectId, "upload") }] : []),
   ];
 
   const navigation = <>
@@ -33,7 +35,7 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
       <p className="px-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Workspace</p>
       <div className="mt-3 space-y-1">
         {nav.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "/") || (item.title === "Project workspace" && pathname.includes(`/workspace/${projectId}/`) && !pathname.endsWith("/review") && !pathname.includes("/boq"));
+          const active = pathname === item.href || pathname.startsWith(item.href + "/") || (item.title === "Project workspace" && projectId !== null && pathname.includes(`/workspace/${projectId}/`) && !pathname.endsWith("/review") && !pathname.includes("/boq"));
           return <Link key={item.title} href={item.href} onClick={() => setMobileOpen(false)} className={active ? "flex items-center rounded-xl border-l-2 border-blue-600 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700" : "flex items-center rounded-xl border-l-2 border-transparent px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"}>{item.title}</Link>;
         })}
       </div>
@@ -41,7 +43,7 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
     <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Production</p>
       <p className="mt-2 text-sm font-semibold text-slate-900">Live project data</p>
-      <p className="mt-1 text-xs leading-5 text-slate-500">Pre is connected to the project API, PostgreSQL and drawing storage.</p><button type="button" onClick={() => { window.location.reload(); }} className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700">Reload project</button>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Pre and production Takeoff modules are connected to the project API, PostgreSQL and drawing storage.</p><button type="button" onClick={() => { window.location.reload(); }} className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700">Reload project</button>
     </div>
   </>;
 

@@ -21,6 +21,7 @@ Quanto/
 │       │   ├── takeoff/              # Production Takeoff frontend boundary
 │       │   │   ├── floor/            # Floor module boundary / API contract notes
 │       │   │   ├── ceiling/          # Ceiling module boundary / API contract notes
+│       │   │   ├── roof/             # Roof module boundary / production integration notes
 │       │   │   └── shared/           # Real PostgreSQL/API bridge into unchanged demo UI
 │       │   ├── floors/               # Existing future/detail feature boundary (unchanged)
 │       │   ├── ceilings/             # Existing future/detail feature boundary (unchanged)
@@ -35,7 +36,7 @@ Quanto/
 │   │   ├── api/v1/routes/
 │   │   ├── modules/
 │   │   │   ├── pre/                  # Production Pre business logic
-│   │   │   ├── takeoff/              # Production Floor + Ceiling now; other elements later
+│   │   │   ├── takeoff/              # Production Floor + Ceiling + Roof now; other elements later
 │   │   │   ├── review/               # Reserved for later
 │   │   │   └── boq/                  # Reserved for later
 │   │   ├── services/

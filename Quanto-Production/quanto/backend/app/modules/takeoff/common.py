@@ -301,5 +301,5 @@ def require_frozen_project(project_id: UUID | str) -> dict[str, Any]:
     if not project:
         raise ValueError("Project not found")
     if project.get("pre_status") != "frozen":
-        raise RuntimeError("Complete Pre and use Start Takeoff first. Floor/Ceiling analysis reads the frozen Project Frame.")
+        raise RuntimeError("Complete Pre and use Start Takeoff first. Takeoff analysis reads the frozen Project Frame.")
     return project

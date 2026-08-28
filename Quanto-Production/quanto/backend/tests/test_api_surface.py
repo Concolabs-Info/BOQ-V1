@@ -16,5 +16,9 @@ def test_required_pre_routes_exist():
         "/api/v1/projects/{project_id}/takeoff/floor/analyze",
         "/api/v1/projects/{project_id}/takeoff/ceiling/demo-state",
         "/api/v1/projects/{project_id}/takeoff/ceiling/analyze",
+        "/api/v1/projects/{project_id}/takeoff/roof/demo-state",
+        "/api/v1/projects/{project_id}/takeoff/roof/analyze",
+        "/api/v1/projects/{project_id}/roofs",
+        "/api/v1/projects/{project_id}/roofs/import-json",
     }
     assert expected.issubset(paths)

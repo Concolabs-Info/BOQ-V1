@@ -1,21 +1,35 @@
-Quanto Floor + Ceiling release verification
-===========================================
+Quanto Pre + Floor + Ceiling + Roof production verification
+============================================================
 
-Backend test suite: PASS (32 tests)
-Backend Python compileall: PASS
-Frontend TypeScript/TSX syntax scan: PASS (299 source files, 0 syntax failures)
-Floor/Ceiling migration/schema copies: MATCH
-Provided Mattegoda PDF: opened successfully with PyMuPDF (28 pages); real vector text/render path exercised during implementation checks.
+Release scope
+-------------
+- Current Quanto production repository retained as the base.
+- Existing demo-derived UI retained as the visual/interaction contract.
+- Pre remains production-backed.
+- Floor and Ceiling production integrations remain intact.
+- Roof production integration added behind the existing Roof Dimension / Workbook / 3D UI.
+- Projects page is the application entry point and saved-project library. Existing projects can be continued; workspace navigation includes a Projects link to return to the library.
 
-Not executed in the packaging sandbox:
-- Full npm install / next build (registry installation timed out in this sandbox).
-- Live OpenAI Floor/Ceiling model call (no user API secret is stored in this package).
-- Live PostgreSQL integration against the user's Windows database (the supplied SQL migration is intended to be applied there).
+Roof implementation checks
+--------------------------
+- Roof source candidates come from Pre-classified/included roof evidence only.
+- Confirmed Pre scale is required for measured roof geometry.
+- Source pixel geometry and deterministic metric calculations are stored in PostgreSQL.
+- One primary roof geometry visual call per source crop; at most one targeted visual repair call.
+- Project evidence resolves roof systems/layers separately from geometry.
+- User-confirmed plane/system choices are protected from later automatic assignment updates.
+- Projected and true surface areas, edges/upstands, openings, drainage and NRM2 routes are stored separately.
+- Concrete roof derived quantities are explicitly marked as derived/reviewable.
 
-After extraction on the development PC, run:
-  cd frontend
-  npm install
-  npm run typecheck
-  npm run build
+Local verification performed in packaging environment
+----------------------------------------------------
+- Python compileall: PASS
+- Backend pytest suite: PASS (38 tests)
+- TypeScript/TSX syntax transpilation: PASS (299 source files, 0 syntax failures)
+- Secret scan before package: PASS
+- ZIP integrity: PASS (run after packaging)
 
-Then configure OPENAI_API_KEY in the root .env and test a real frozen Pre project through Floor -> Ceiling.
+Environment-limited checks
+--------------------------
+- A live OpenAI Roof detection call was not performed because no user API key is packaged or available to the packaging environment.
+- A complete npm install / next build could not be completed in the packaging environment because registry access timed out. Run `npm install` and `npm run build` on the normal development machine/CI before deployment.

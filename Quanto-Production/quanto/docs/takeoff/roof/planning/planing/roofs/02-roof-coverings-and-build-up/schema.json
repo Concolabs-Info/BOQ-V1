@@ -1,0 +1,306 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "quanto-roof-system-resolution-v1",
+  "title": "Quanto Roof System Resolution v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "system_definitions",
+    "assignments",
+    "conflicts",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "roof-system-resolution-v1"
+    },
+    "system_definitions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/system"
+      }
+    },
+    "assignments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/assignment"
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/conflict"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "source_kind",
+        "page",
+        "raw_text",
+        "bbox",
+        "confidence"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string"
+        },
+        "source_kind": {
+          "enum": [
+            "plan_note",
+            "zone_code",
+            "colour_legend",
+            "hatch_legend",
+            "roof_schedule",
+            "material_schedule",
+            "specification",
+            "general_note",
+            "detail",
+            "pre_extraction",
+            "user"
+          ]
+        },
+        "page": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "raw_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bbox": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer_id",
+        "category",
+        "description",
+        "thickness_mm",
+        "factor_per_m2",
+        "factor_unit",
+        "evidence"
+      ],
+      "properties": {
+        "layer_id": {
+          "type": "string"
+        },
+        "category": {
+          "enum": [
+            "covering",
+            "waterproofing",
+            "underlay",
+            "insulation",
+            "screed_falls",
+            "protection",
+            "finish",
+            "other"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "thickness_mm": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "factor_per_m2": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "factor_unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        }
+      }
+    },
+    "system": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "system_id",
+        "mark",
+        "name",
+        "covering_class",
+        "layers",
+        "evidence",
+        "confidence"
+      ],
+      "properties": {
+        "system_id": {
+          "type": "string"
+        },
+        "mark": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "covering_class": {
+          "enum": [
+            "sheet",
+            "tile_slate",
+            "waterproofed_flat",
+            "glazed",
+            "green",
+            "concrete_exposed",
+            "other",
+            "unknown"
+          ]
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/layer"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignment_id",
+        "roof_id",
+        "plane_ids",
+        "system_id",
+        "method",
+        "evidence",
+        "confidence",
+        "status"
+      ],
+      "properties": {
+        "assignment_id": {
+          "type": "string"
+        },
+        "roof_id": {
+          "type": "string"
+        },
+        "plane_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "system_id": {
+          "type": "string"
+        },
+        "method": {
+          "enum": [
+            "direct_code",
+            "direct_text",
+            "colour",
+            "hatch",
+            "schedule",
+            "spec_rule",
+            "detail_rule",
+            "user"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "status": {
+          "enum": [
+            "proposed",
+            "needs_review",
+            "confirmed"
+          ]
+        }
+      }
+    },
+    "conflict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conflict_id",
+        "roof_id",
+        "message",
+        "evidence"
+      ],
+      "properties": {
+        "conflict_id": {
+          "type": "string"
+        },
+        "roof_id": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        }
+      }
+    }
+  }
+}

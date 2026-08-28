@@ -41,10 +41,10 @@ def _gemini_json_schema(schema: type[BaseModel]) -> dict:
 
 
 class ModelClient:
-    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None, max_schema_retries: int | None = None) -> T:
         raise NotImplementedError
 
-    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None, max_schema_retries: int | None = None) -> T:
         raise NotImplementedError
 
 
@@ -60,16 +60,18 @@ class OpenAIModelClient(ModelClient):
         if not self.model:
             raise RuntimeError("OPENAI_MODEL is required when AI_PROVIDER=openai")
 
-    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None, max_schema_retries: int | None = None) -> T:
         mime = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
         settings = get_settings()
         working_prompt = prompt
         last_error: Exception | None = None
 
-        # A malformed structured response is retried twice, as required by the Pre plan.
-        # The image stays identical; only concise schema-repair feedback is appended.
-        for attempt in range(settings.model_retries + 1):
+        retry_count = settings.model_retries if max_schema_retries is None else max(0, max_schema_retries)
+        # Most Pre/Takeoff calls use the configured schema retry policy. Roof geometry
+        # explicitly passes zero here so its separate targeted repair remains the only
+        # second visual call allowed by the Roof plan.
+        for attempt in range(retry_count + 1):
             try:
                 response = self.client.responses.parse(
                     model=model or self.model,
@@ -94,7 +96,7 @@ class OpenAIModelClient(ModelClient):
                 return response.output_parsed
             except Exception as exc:  # noqa: BLE001 - provider and schema errors use one bounded retry policy
                 last_error = exc
-                if attempt >= settings.model_retries:
+                if attempt >= retry_count:
                     break
                 message = str(exc).replace("\n", " ")[:500]
                 working_prompt = (
@@ -103,14 +105,15 @@ class OpenAIModelClient(ModelClient):
                 )
 
         raise RuntimeError(
-            f"Model output failed schema validation after {settings.model_retries + 1} attempts"
+            f"Model output failed schema validation after {retry_count + 1} attempts"
         ) from last_error
 
-    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None, max_schema_retries: int | None = None) -> T:
         settings = get_settings()
         last_error: Exception | None = None
         working_prompt = prompt
-        for attempt in range(settings.model_retries + 1):
+        retry_count = settings.model_retries if max_schema_retries is None else max(0, max_schema_retries)
+        for attempt in range(retry_count + 1):
             try:
                 response = self.client.responses.parse(
                     model=model or self.model,
@@ -125,10 +128,10 @@ class OpenAIModelClient(ModelClient):
                 return response.output_parsed
             except Exception as exc:
                 last_error = exc
-                if attempt >= settings.model_retries:
+                if attempt >= retry_count:
                     break
                 working_prompt = f"{prompt}\n\nRepair the structured response to match the required schema exactly. Previous error: {str(exc)[:500]}"
-        raise RuntimeError(f"Model output failed schema validation after {settings.model_retries + 1} attempts") from last_error
+        raise RuntimeError(f"Model output failed schema validation after {retry_count + 1} attempts") from last_error
 
 
 
@@ -165,7 +168,7 @@ class GeminiModelClient(ModelClient):
         self.client = genai.Client(api_key=settings.gemini_api_key)
         self.model = settings.gemini_model
 
-    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None, max_schema_retries: int | None = None) -> T:
         types = _gemini_types()
 
         mime = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
@@ -173,8 +176,9 @@ class GeminiModelClient(ModelClient):
         settings = get_settings()
         working_prompt = prompt
         last_error: Exception | None = None
+        retry_count = settings.model_retries if max_schema_retries is None else max(0, max_schema_retries)
 
-        for attempt in range(settings.model_retries + 1):
+        for attempt in range(retry_count + 1):
             try:
                 response = self.client.models.generate_content(
                     model=model or self.model,
@@ -196,7 +200,7 @@ class GeminiModelClient(ModelClient):
                 return schema.model_validate_json(text)
             except Exception as exc:  # noqa: BLE001 - provider and schema errors use one bounded retry policy
                 last_error = exc
-                if attempt >= settings.model_retries:
+                if attempt >= retry_count:
                     break
                 message = str(exc).replace("\n", " ")[:500]
                 working_prompt = (
@@ -205,10 +209,10 @@ class GeminiModelClient(ModelClient):
                 )
 
         raise RuntimeError(
-            f"Model output failed schema validation after {settings.model_retries + 1} attempts"
+            f"Model output failed schema validation after {retry_count + 1} attempts"
         ) from last_error
 
-    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None, max_schema_retries: int | None = None) -> T:
         types = _gemini_types()
         response = self.client.models.generate_content(
             model=model or self.model,
@@ -230,7 +234,7 @@ class GeminiModelClient(ModelClient):
 class LocalReviewModelClient(ModelClient):
     """Conservative fallback for scale/height when no external vision provider is configured."""
 
-    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None, max_schema_retries: int | None = None) -> T:
         if schema is TriageOutput:
             return TriageOutput(
                 sheet_disciplines=[ViewportDiscipline.UNKNOWN],
@@ -267,7 +271,7 @@ class LocalReviewModelClient(ModelClient):
             return SpecReading(items=[])  # type: ignore[return-value]
         raise TypeError(f"Local provider cannot automatically extract {schema.__name__}; set AI_PROVIDER=openai for Floor/Ceiling analysis")
 
-    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None, max_schema_retries: int | None = None) -> T:
         raise TypeError(f"Local provider cannot automatically extract {schema.__name__}; set AI_PROVIDER=openai")
 
 

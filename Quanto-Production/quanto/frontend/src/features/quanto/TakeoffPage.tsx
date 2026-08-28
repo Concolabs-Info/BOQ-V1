@@ -55,7 +55,7 @@ import {
   useMeasurementTool,
 } from "./measurements/MeasurementOverlay";
 import { beginLiveEdit } from "./editing/editSessionStore";
-import { useRealFloorCeilingTakeoff } from "./takeoff/useRealFloorCeilingTakeoff";
+import { useRealFloorCeilingTakeoff } from "@/features/takeoff/shared/useRealFloorCeilingTakeoff";
 import {
   MATTEGODA_FLOOR_AREAS,
   MATTEGODA_MASONRY,
@@ -115,7 +115,7 @@ const viewportsByElement: Record<string, string[]> = {
 function allowedViewportsFor(element: string, viewports: Array<{ id: string; category: string }>) {
   const configured = viewportsByElement[element] || [];
   const hasDemoIds = viewports.some((viewport) => configured.includes(viewport.id));
-  if ((element === "floor" || element === "ceiling") && !hasDemoIds) {
+  if ((element === "floor" || element === "ceiling" || element === "roof") && !hasDemoIds) {
     return viewports.filter((viewport) => viewport.category === "plan").map((viewport) => viewport.id);
   }
   return configured;
@@ -2412,12 +2412,36 @@ function RoofInspector({ id }: { id: string }) {
         onChange={apply}
       />
       <InfoRow label="Area" value={`${roofNetAreaM2(roof).toFixed(2)} m²`} />
+      {roof.projectedAreaM2 != null ? <InfoRow label="Plan area" value={`${roof.projectedAreaM2.toFixed(2)} m²`} /> : null}
+      {roof.pitchDegrees != null ? <InfoRow label="Pitch" value={`${roof.pitchDegrees.toFixed(2)}°`} /> : null}
+      {roof.roofType ? <InfoRow label="Roof type" value={roof.roofType.replaceAll("_", " ")} /> : null}
       <InfoRow label="Falls" value={rf.falls} />
       <InfoRow label="Layers" value={rf.layers} />
       <InfoRow
         label="Upstand"
         value={`${roofUpstandM(roof).toFixed(2)} m · ${uf.heightMm} mm`}
       />
+      <details className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+        <summary className="cursor-pointer text-xs font-semibold text-slate-700">Structural / Derived</summary>
+        <div className="mt-3 space-y-3">
+          <Field label="Slab thickness (mm)">
+            <input className="input w-full" type="number" min="0" step="1" value={roof.slabThicknessMm ?? ""} onChange={(e) => st.updateRoofZone(roof.id, { slabThicknessMm: e.target.value === "" ? null : Number(e.target.value), structuralBasis: "user_entered" })} placeholder="e.g. 150" />
+          </Field>
+          <Field label="Reinforcement (kg/m²)">
+            <input className="input w-full" type="number" min="0" step="0.1" value={roof.reinforcementKgM2 ?? ""} onChange={(e) => st.updateRoofZone(roof.id, { reinforcementKgM2: e.target.value === "" ? null : Number(e.target.value), structuralBasis: "user_derived_factor" })} placeholder="Derived factor" />
+          </Field>
+          <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
+            <span>Soffit formwork</span>
+            <input type="checkbox" checked={Boolean(roof.soffitFormwork)} onChange={(e) => st.updateRoofZone(roof.id, { soffitFormwork: e.target.checked, structuralBasis: "user_entered" })} />
+          </label>
+          <Field label="Formed edge depth (mm)">
+            <input className="input w-full" type="number" min="0" step="1" value={roof.formedEdgeDepthMm ?? ""} onChange={(e) => st.updateRoofZone(roof.id, { formedEdgeDepthMm: e.target.value === "" ? null : Number(e.target.value), structuralBasis: "user_entered" })} placeholder="Optional" />
+          </Field>
+          {roof.slabThicknessMm ? <InfoRow label="Concrete" value={`${(roofNetAreaM2(roof) * roof.slabThicknessMm / 1000).toFixed(3)} m³ · Derived`} /> : null}
+          {roof.reinforcementKgM2 ? <InfoRow label="Reinforcement" value={`${(roofNetAreaM2(roof) * roof.reinforcementKgM2).toFixed(1)} kg · Derived`} /> : null}
+          {roof.soffitFormwork ? <InfoRow label="Soffit formwork" value={`${roofNetAreaM2(roof).toFixed(2)} m² · Geometry`} /> : null}
+        </div>
+      </details>
       <SavedState />
       <button
         onClick={() => {
@@ -3175,6 +3199,17 @@ function useWorkbookRows(element: string) {
             source: u.source,
             extra: `${u.heightMm} mm high`,
           });
+        }
+      }
+      for (const z of st.roofZones) {
+        const area = roofNetAreaM2(z);
+        if (z.slabThicknessMm) rows.push({ key: `roof-concrete:${z.id}`, parent: "Concrete Roof Slab", familyId: z.familyId, familyLabel: "In-situ concrete roof slab", scope: z.scope, floorId: z.floorId, calc: `${area.toFixed(2)} × ${(z.slabThicknessMm / 1000).toFixed(3)}`, qty: area * z.slabThicknessMm / 1000, unit: "m³", source: "User-entered thickness · NRM2 WS11", extra: `${z.slabThicknessMm} mm · Derived` });
+        if (z.reinforcementKgM2) rows.push({ key: `roof-rebar:${z.id}`, parent: "Derived Materials", familyId: z.familyId, familyLabel: "Roof slab reinforcement", scope: z.scope, floorId: z.floorId, calc: `${area.toFixed(2)} × ${z.reinforcementKgM2.toFixed(1)}`, qty: area * z.reinforcementKgM2, unit: "kg", source: "User-derived factor · NRM2 WS11", extra: `${z.reinforcementKgM2} kg/m² · Derived / review` });
+        if (z.soffitFormwork) rows.push({ key: `roof-soffit-formwork:${z.id}`, parent: "Concrete Roof Slab", familyId: z.familyId, familyLabel: "Roof slab soffit formwork", scope: z.scope, floorId: z.floorId, calc: area.toFixed(2), qty: area, unit: "m²", source: "Roof geometry · NRM2 WS11", extra: "Derived contact surface" });
+        if (z.formedEdgeDepthMm) {
+          const scale = scaleForViewport(z.viewportId);
+          const perimeter = z.points.reduce((sum, p, index) => sum + distance(p, z.points[(index + 1) % z.points.length]) * scale, 0);
+          rows.push({ key: `roof-edge-formwork:${z.id}`, parent: "Concrete Roof Slab", familyId: z.familyId, familyLabel: "Roof slab edge formwork", scope: z.scope, floorId: z.floorId, calc: `${perimeter.toFixed(2)} × ${(z.formedEdgeDepthMm / 1000).toFixed(3)}`, qty: perimeter * z.formedEdgeDepthMm / 1000, unit: "m²", source: "User-entered formed depth · NRM2 WS11", extra: "Derived / review qualifying edges" });
         }
       }
     }

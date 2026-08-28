@@ -1,7 +1,7 @@
 [project]
 name = "quanto-api"
 version = "1.0.0"
-description = "Quanto production API — Pre + Floor + Ceiling"
+description = "Quanto production API — Pre + Floor + Ceiling + Roof"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.116,<1",

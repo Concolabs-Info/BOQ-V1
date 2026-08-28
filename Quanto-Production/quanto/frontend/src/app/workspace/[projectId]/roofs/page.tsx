@@ -1,6 +1,6 @@
-import { RoofsPage } from "@/features/roofs/components/RoofsPage";
+import { redirect } from "next/navigation";
+import { appRoutes } from "@/shared/constants/appRoutes";
 
 export default function Page({ params }: { params: { projectId: string } }) {
-  return <RoofsPage projectId={params.projectId} />;
+  redirect(appRoutes.takeoff(params.projectId, "roof", "dimension"));
 }
-

@@ -1,6 +1,6 @@
-# Quanto — Production Pre + Floor + Ceiling
+# Quanto — Production Pre + Floor + Ceiling + Roof
 
-This repository is the current production Quanto codebase. It preserves the supplied **demo UI and workflow** and replaces demo Floor/Ceiling data with real PostgreSQL-backed project data and real drawing analysis.
+This repository is the current production Quanto codebase. It preserves the supplied **demo UI and workflow** and replaces demo Floor/Ceiling/Roof data with real PostgreSQL-backed project data and real drawing analysis. The existing demo-derived workflow UI remains the visual contract.
 
 Visible product navigation remains unchanged:
 
@@ -17,9 +17,10 @@ Upload → Plans → Scale → Height → Specifications → Start Takeoff
 Takeoff
 Floor   → Dimension | Workbook | 3D
 Ceiling → Dimension | Workbook | 3D
+Roof    → Dimension | Workbook | 3D
 ```
 
-Other Takeoff elements, Review and BOQ remain in the existing project exactly where they were and can be implemented later.
+Other Takeoff elements, Review and BOQ remain in the existing project exactly where they were and can be implemented later. The Projects library is the application entry point and can be reached again from the workflow navigation.
 
 ## What is production-backed now
 
@@ -57,6 +58,19 @@ Other Takeoff elements, Review and BOQ remain in the existing project exactly wh
 - Flat surface quantities are deterministic. Special/sloped surfaces remain review-required unless enough evidence exists to calculate a true surface area.
 - User Dimension/Workbook edits persist back to PostgreSQL.
 
+### Roof
+- Uses only Pre-included roof plan / roof terrace / roof-deck viewports as primary geometry sources; it does not rescan unrelated sheets.
+- OpenAI structured vision returns exact source-crop pixel polygons for RoofRegion/RoofPlane plus ridge/hip/valley/eave/verge/abutment/parapet/gutter edges, roof openings and drainage components.
+- One primary roof geometry model call is allowed per source crop, with at most one targeted repair crop when deterministic geometry validation rejects one entity. Saved runs are cached by source/crop/model/prompt context.
+- Deterministic validation rejects out-of-bounds/self-intersecting/materially overlapping plane geometry. AI never calculates official quantities.
+- Projected area is calculated from source pixels + confirmed Pre scale. Sloping planar true area is `projected / cos(pitch)` only when pitch evidence exists. Curved roofs remain review-required until profile evidence/user input exists.
+- Roof system/build-up resolution uses project drawings, schedules/specifications/legends/details and stores covering, waterproofing, underlay, insulation, screed/falls, protection and finish layers with evidence.
+- NRM2 routing is separated: sheet covering 17; tile/slate 18; waterproofing 19; rooflights 23; insulation 31; drainage 33; concrete/reinforcement/formwork 11.
+- Concrete roof structural/derived fields are editable inside the existing Roof Item panel: slab thickness, reinforcement kg/m² factor, soffit formwork and formed-edge depth. Their derived quantities are clearly labelled and persisted.
+- Roof openings remain stored even when a later ruleset decides whether to deduct them. Upstand edges are independently selectable in the existing canvas UI.
+- User-confirmed roof geometry/system edits are never silently overwritten by a later AI run.
+- Roof Dimension / Workbook / 3D stay in the supplied demo shell; production records are persisted through PostgreSQL.
+
 ## Repository structure
 
 ```text
@@ -69,6 +83,7 @@ Quanto/
 │       │   ├── quanto/               # same main Quanto shell / Takeoff UI
 │       │   ├── floors/               # existing future/detail feature boundary
 │       │   ├── ceilings/             # existing future/detail feature boundary
+│       │   ├── roofs/                # roof feature/API boundary; demo shell remains primary UI
 │       │   ├── review/
 │       │   └── boq/
 │       └── shared/
@@ -77,19 +92,22 @@ Quanto/
 │       ├── api/v1/routes/
 │       │   ├── ... Pre routes ...
 │       │   ├── floors.py             # production Floor API
-│       │   └── ceilings.py           # production Ceiling API
+│       │   ├── ceilings.py           # production Ceiling API
+│       │   └── roofs.py              # production Roof API
 │       ├── modules/
 │       │   ├── pre/
 │       │   └── takeoff/
 │       │       ├── common.py
 │       │       ├── floors.py
 │       │       ├── ceilings.py
+│       │       ├── roofs.py
 │       │       ├── model_schemas.py
 │       │       └── prompts.py
 │       └── services/
 ├── database/
 │   ├── schema/001_pre.sql
 │   ├── schema/002_floor_ceiling.sql
+│   ├── schema/003_roof.sql
 │   └── migrations/
 ├── storage/                          # plan-defined local project storage
 ├── shared/
@@ -98,6 +116,7 @@ Quanto/
 │   ├── pre/
 │   ├── takeoff/floor-plan/           # supplied Floor planning source
 │   ├── takeoff/ceiling-plan/         # supplied Ceiling planning source
+│   ├── takeoff/roof/planning/        # supplied Roof planning source
 │   └── ui-reference/                 # supplied Takeoff UI plan
 └── tests/
 ```
@@ -126,14 +145,15 @@ If PostgreSQL is installed on E: and is not on PATH, use the full executable pat
 ```powershell
 & "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\001_pre.sql"
 & "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\002_floor_ceiling.sql"
+& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\003_roof.sql"
 ```
 
-Both SQL files are idempotent (`IF NOT EXISTS`), so running them on the existing Quanto database is safe.
+All schema files are written to be safe for the intended upgrade path; on an existing Pre + Floor + Ceiling database, apply only `003_roof.sql`.
 
-For the **existing Pre-only database you already created**, `001_pre.sql` is already present, so after replacing the project files the only new schema you need is:
+For an existing database that already has Pre + Floor + Ceiling, apply only the new Roof migration:
 
 ```powershell
-& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\002_floor_ceiling.sql"
+& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\003_roof.sql"
 ```
 
 Or run all idempotent migrations with:
@@ -193,7 +213,7 @@ Open:
 http://localhost:3000
 ```
 
-## OpenAI Floor/Ceiling detection
+## OpenAI Floor/Ceiling/Roof detection
 
 Do **not** put the API key in frontend code and do not commit `.env`.
 
@@ -207,7 +227,7 @@ OPENAI_MODEL=gpt-5.6-terra
 
 Restart the backend.
 
-The existing Floor/Ceiling Takeoff UI then loads the project from PostgreSQL. On the first Floor/Ceiling entry with no saved zones, the production bridge requests analysis once and hydrates the same UI with real project families/zones. Saved results are reused; normal refreshes do not resend already-saved geometry.
+The existing Floor/Ceiling/Roof Takeoff UI then loads the project from PostgreSQL. On the first Floor/Ceiling/Roof entry with no saved zones, the production bridge requests analysis once and hydrates the same UI with real project families/zones. Saved results are reused; normal refreshes do not resend already-saved geometry.
 
 Server quality mapping is kept behind the UI:
 
@@ -233,11 +253,12 @@ Upload
 → Start Takeoff / freeze Project Frame
 → Floor
 → Ceiling
+→ Roof
 ```
 
 Ceiling is intentionally run after Floor. When there is no dedicated RCP, it will not derive ceiling geometry until the Floor zones have been reviewed/confirmed in Floor → Dimension; this prevents unreviewed AI room geometry from silently becoming ceiling measurement geometry.
 
-## Floor/Ceiling API endpoints
+## Floor/Ceiling/Roof API endpoints
 
 ```text
 GET  /api/v1/projects/{project_id}/takeoff/floors
@@ -260,6 +281,25 @@ GET  /api/v1/projects/{project_id}/takeoff/ceiling-definitions
 GET  /api/v1/projects/{project_id}/takeoff/ceiling-features
 ```
 
+
+### Roof API
+
+```text
+GET  /api/v1/projects/{project_id}/takeoff/roof/demo-state
+PUT  /api/v1/projects/{project_id}/takeoff/roof/demo-state
+POST /api/v1/projects/{project_id}/takeoff/roof/analyze
+GET  /api/v1/projects/{project_id}/takeoff/roof-quantities
+GET  /api/v1/projects/{project_id}/takeoff/roof-review
+
+GET  /api/v1/projects/{project_id}/roofs
+POST /api/v1/projects/{project_id}/roofs/analyze
+POST /api/v1/projects/{project_id}/roofs/import-json
+GET  /api/v1/projects/{project_id}/roofs/crop
+POST/PATCH/DELETE roof levels, planes, edges, openings and components
+POST /api/v1/projects/{project_id}/roofs/recalculate
+POST /api/v1/projects/{project_id}/roofs/confirm
+```
+
 ## Verification
 
 Backend:
@@ -279,10 +319,10 @@ npm run test:syntax
 npm run build
 ```
 
-The package was verified with the backend test suite and a TypeScript/TSX syntax pass. The packaging environment could not complete npm registry installation, so the full Next.js build must be run on the normal development PC/CI after `npm install`.
+The package was verified with the backend test suite (including Roof geometry/NRM rules/API surface) and a TypeScript/TSX syntax pass. The packaging environment could not complete npm registry installation, so the full Next.js build must be run on the normal development PC/CI after `npm install`.
 
 ## Docker / deployment
 
-Docker remains optional. `docker-compose.yml` initializes both `001_pre.sql` and `002_floor_ceiling.sql` for a fresh database.
+Docker remains optional. `docker-compose.yml` initializes `001_pre.sql`, `002_floor_ceiling.sql` and `003_roof.sql` for a fresh database.
 
-For deployment, keep PostgreSQL persistent and keep the plan-defined `STORAGE_ROOT` persistent. Floor/Ceiling records store evidence and geometry in PostgreSQL while original PDFs/renders/crops stay in project storage.
+For deployment, keep PostgreSQL persistent and keep the plan-defined `STORAGE_ROOT` persistent. Floor/Ceiling/Roof records store evidence and geometry in PostgreSQL while original PDFs/renders/crops stay in project storage.

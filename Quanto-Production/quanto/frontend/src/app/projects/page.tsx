@@ -152,7 +152,7 @@ export default function ProjectsPage() {
                   href={appRoutes.workflowUpload(project.id)}
                   className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-blue-700"
                 >
-                  Open PDF Generation
+                  Continue Project
                 </Link>
               </div>
             </article>
