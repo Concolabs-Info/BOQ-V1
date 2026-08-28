@@ -14,8 +14,16 @@ import {
   type ReactNode,
 } from "react";
 import type { Point } from "../types";
+import {
+  TAKEOFF_COMMAND_EVENT,
+  TAKEOFF_VIEW_EVENT,
+  dispatchTakeoffStatus,
+  type TakeoffCommand,
+  type TakeoffViewState,
+} from "@/features/quanto/takeoffCommands";
 
 export type DrawingCanvasTool = "select" | "pan" | "point" | "draw";
+export type DrawingComparisonImage = { id: string; label: string; imageUrl: string };
 
 type ViewState = {
   zoom: number;
@@ -38,8 +46,10 @@ type Props = {
   className?: string;
   toolbarLeft?: ReactNode;
   toolbarRight?: ReactNode;
+  hideToolbar?: boolean;
   focusBox?: [number, number, number, number];
   focusRequest?: number;
+  comparisonImages?: DrawingComparisonImage[];
 };
 
 type PanDrag = {
@@ -73,24 +83,41 @@ export function DrawingCanvas({
   className = "",
   toolbarLeft,
   toolbarRight,
+  hideToolbar = false,
   focusBox,
   focusRequest,
+  comparisonImages = [],
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const pointerRef = useRef<PanDrag | null>(null);
   const suppressClickRef = useRef(false);
-  const drawPointerRef = useRef<number | null>(null);
+  const drawPointerRef = useRef<{
+    pointerId: number;
+    startClient: Point;
+    moved: boolean;
+  } | null>(null);
   const onViewChangeRef = useRef(onViewChange);
   const reportedViewRef = useRef<ViewState | null>(null);
   const zoomRef = useRef(initialView?.zoom ?? 1);
   const panRef = useRef<Point>(initialView?.pan ?? { x: 0, y: 0 });
   const sizeRef = useRef({ width: 900, height: 620 });
+  const previousViewRef = useRef<ViewState | null>(null);
 
   const [zoom, setZoom] = useState(initialView?.zoom ?? 1);
   const [pan, setPan] = useState<Point>(initialView?.pan ?? { x: 0, y: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 900, height: 620 });
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [pageRotation, setPageRotation] = useState(0);
+  const [imageOpacity, setImageOpacity] = useState(1);
+  const [drawingVisible, setDrawingVisible] = useState(true);
+  const [takeoffVisible, setTakeoffVisible] = useState(true);
+  const [comparisonVisible, setComparisonVisible] = useState(false);
+  const [comparisonMode, setComparisonMode] = useState<"overlay" | "difference">("overlay");
+  const [comparisonOpacity, setComparisonOpacity] = useState(0.5);
+  const [comparisonId, setComparisonId] = useState("");
+  const [comparisonOffset, setComparisonOffset] = useState<Point>({ x: 0, y: 0 });
+  const [comparisonPanel, setComparisonPanel] = useState(false);
 
   const sourceWidth = Math.max(1, width);
   const sourceHeight = Math.max(1, height);
@@ -252,11 +279,87 @@ export function DrawingCanvas({
   );
 
   const fit = useCallback(() => {
+    previousViewRef.current = { zoom: zoomRef.current, pan: { ...panRef.current } };
     zoomRef.current = 1;
     panRef.current = { x: 0, y: 0 };
     setZoom(1);
     setPan({ x: 0, y: 0 });
   }, []);
+
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const command = (event as CustomEvent<TakeoffCommand>).detail;
+      const centerX = sizeRef.current.width / 2;
+      const centerY = sizeRef.current.height / 2;
+      const label = command.label.toLowerCase();
+      if (label === "zoom" || label === "zoom in") {
+        previousViewRef.current = { zoom: zoomRef.current, pan: { ...panRef.current } };
+        zoomAtPoint(centerX, centerY, zoomRef.current * 1.25);
+      } else if (label === "zoom out") {
+        previousViewRef.current = { zoom: zoomRef.current, pan: { ...panRef.current } };
+        zoomAtPoint(centerX, centerY, zoomRef.current / 1.25);
+      } else if (label === "fit" || label === "fit page" || label === "fit drawing") {
+        fit();
+      } else if (label === "full screen") {
+        void toggleFullscreen();
+      } else if (label === "previous view" && previousViewRef.current) {
+        const current = { zoom: zoomRef.current, pan: { ...panRef.current } };
+        const previous = previousViewRef.current;
+        previousViewRef.current = current;
+        updateZoom(previous.zoom);
+        updatePan(previous.pan);
+      } else if (label === "rotate") {
+        setPageRotation((value) => (value + 90) % 360);
+        dispatchTakeoffStatus({ message: "Drawing rotated 90°" });
+      } else if (label === "align") {
+        fit();
+        setPageRotation(0);
+        setComparisonOffset({ x: 0, y: 0 });
+        dispatchTakeoffStatus({ message: "Drawing and comparison revision aligned" });
+      } else if (label === "opacity") {
+        if (comparisonVisible) setComparisonPanel(true);
+        else {
+          const entered = window.prompt("Drawing opacity (10–100%)", String(Math.round(imageOpacity * 100)));
+          const next = Number(entered);
+          if (next >= 10 && next <= 100) setImageOpacity(next / 100);
+        }
+      } else if (label === "overlay") {
+        if (!comparisonImages.length) {
+          dispatchTakeoffStatus({ message: "No other drawing is available for revision overlay" });
+          return;
+        }
+        setComparisonId((value) => value || comparisonImages[0].id);
+        setComparisonMode("overlay");
+        setComparisonVisible((value) => !value);
+        setComparisonPanel(true);
+        dispatchTakeoffStatus({ message: "Revision overlay toggled" });
+      } else if (label === "compare") {
+        if (!comparisonImages.length) {
+          dispatchTakeoffStatus({ message: "No other drawing is available for comparison" });
+          return;
+        }
+        setComparisonId((value) => value || comparisonImages[0].id);
+        setComparisonMode("difference");
+        setComparisonVisible(true);
+        setComparisonPanel(true);
+        dispatchTakeoffStatus({ message: "Revision difference comparison active" });
+      } else if (label === "drawing") {
+        setDrawingVisible((value) => !value);
+      } else if (label === "takeoff") {
+        setTakeoffVisible((value) => !value);
+      }
+    };
+    window.addEventListener(TAKEOFF_COMMAND_EVENT, listener);
+    return () => window.removeEventListener(TAKEOFF_COMMAND_EVENT, listener);
+  }, [comparisonImages, comparisonVisible, fit, imageOpacity, updatePan, updateZoom, zoomAtPoint]);
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent<TakeoffViewState>(TAKEOFF_VIEW_EVENT, {
+        detail: { zoom, x: -pan.x, y: -pan.y, fullscreen: isFullscreen },
+      }),
+    );
+  }, [isFullscreen, pan.x, pan.y, zoom]);
 
   useEffect(() => {
     if (!focusBox || !focusRequest) return;
@@ -358,6 +461,7 @@ export function DrawingCanvas({
   function pointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     const forcePan = tool === "pan" || event.button === 1 || event.button === 2;
     if (!forcePan) return;
+    previousViewRef.current = { zoom: zoomRef.current, pan: { ...panRef.current } };
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerRef.current = {
@@ -402,7 +506,12 @@ export function DrawingCanvas({
     const point = toSourcePoint(event.clientX, event.clientY);
     if (!point) return;
     onCanvasMove?.(point, fitScale * zoomRef.current);
-    if (drawPointerRef.current === event.pointerId) onCanvasDragMove?.(point, fitScale * zoomRef.current);
+    const drag = drawPointerRef.current;
+    if (drag?.pointerId === event.pointerId) {
+      if (Math.hypot(event.clientX - drag.startClient.x, event.clientY - drag.startClient.y) > 3)
+        drag.moved = true;
+      onCanvasDragMove?.(point, fitScale * zoomRef.current);
+    }
   }
 
   function canvasPointerDown(event: ReactPointerEvent<SVGSVGElement>) {
@@ -412,14 +521,19 @@ export function DrawingCanvas({
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    drawPointerRef.current = event.pointerId;
+    drawPointerRef.current = {
+      pointerId: event.pointerId,
+      startClient: { x: event.clientX, y: event.clientY },
+      moved: false,
+    };
     onCanvasDragStart(point, fitScale * zoomRef.current);
   }
 
   function canvasPointerUp(event: ReactPointerEvent<SVGSVGElement>) {
-    if (drawPointerRef.current !== event.pointerId) return;
+    const drag = drawPointerRef.current;
+    if (drag?.pointerId !== event.pointerId) return;
     const point = toSourcePoint(event.clientX, event.clientY);
-    suppressClickRef.current = true;
+    suppressClickRef.current = drag.moved;
     drawPointerRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (point) onCanvasDragEnd?.(point, fitScale * zoomRef.current);
@@ -472,7 +586,7 @@ export function DrawingCanvas({
       ref={containerRef}
       className={`flex h-full min-h-0 w-full flex-col overflow-hidden bg-slate-100 ${isFullscreen ? "bg-slate-200" : ""} ${className}`}
     >
-      <div className="relative z-40 grid min-h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-slate-200 bg-white px-3 py-1.5">
+      {!hideToolbar ? <div className="relative z-40 grid min-h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-slate-200 bg-white px-3 py-1.5">
         <div className="min-w-0 justify-self-stretch overflow-visible">
           {toolbarLeft}
         </div>
@@ -524,7 +638,7 @@ export function DrawingCanvas({
           </button>
         </div>
         <div className="min-w-0 justify-self-end">{toolbarRight}</div>
-      </div>
+      </div> : null}
 
       <div
         ref={viewportRef}
@@ -550,6 +664,8 @@ export function DrawingCanvas({
               top: pageTop,
               width: pageWidth,
               height: pageHeight,
+              transform: `rotate(${pageRotation}deg)`,
+              transformOrigin: "center",
             }}
             onClick={canvasClick}
             onPointerDown={canvasPointerDown}
@@ -564,9 +680,23 @@ export function DrawingCanvas({
               width={sourceWidth}
               height={sourceHeight}
               preserveAspectRatio="none"
+              opacity={drawingVisible ? imageOpacity : 0}
             />
+            {comparisonVisible && comparisonImages.length ? (
+              <image
+                href={(comparisonImages.find((item) => item.id === comparisonId) || comparisonImages[0]).imageUrl}
+                x={comparisonOffset.x}
+                y={comparisonOffset.y}
+                width={sourceWidth}
+                height={sourceHeight}
+                preserveAspectRatio="none"
+                opacity={drawingVisible ? comparisonOpacity : 0}
+                style={{ mixBlendMode: comparisonMode === "difference" ? "difference" : "multiply" }}
+                pointerEvents="none"
+              />
+            ) : null}
             <DrawingZoomContext.Provider value={fitScale * zoom}>
-              {children}
+              <g style={{ display: takeoffVisible ? undefined : "none" }}>{children}</g>
             </DrawingZoomContext.Provider>
           </svg>
         ) : (
@@ -580,6 +710,29 @@ export function DrawingCanvas({
             Ctrl + wheel to zoom · Wheel to move · Middle-drag to move ·
             Double-click to zoom
           </div>
+        ) : null}
+        {comparisonVisible && comparisonPanel && comparisonImages.length ? (
+          <div className="absolute right-3 top-3 z-40 w-72 rounded-xl border border-violet-200 bg-white/95 p-3 shadow-xl backdrop-blur" onPointerDown={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-slate-800">Revision comparison</span>
+              <button type="button" className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100" onClick={() => setComparisonPanel(false)}>✕</button>
+            </div>
+            <select value={comparisonId || comparisonImages[0].id} onChange={(event) => setComparisonId(event.target.value)} className="mt-2 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs">
+              {comparisonImages.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+            <div className="mt-3 flex rounded-lg bg-slate-100 p-1">
+              {(["overlay", "difference"] as const).map((mode) => <button key={mode} type="button" onClick={() => setComparisonMode(mode)} className={comparisonMode === mode ? "flex-1 rounded-md bg-white px-2 py-1.5 text-[11px] font-bold capitalize text-violet-700 shadow-sm" : "flex-1 px-2 py-1.5 text-[11px] font-semibold capitalize text-slate-500"}>{mode}</button>)}
+            </div>
+            <label className="mt-3 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Comparison opacity · {Math.round(comparisonOpacity * 100)}%</label>
+            <input type="range" min="0.1" max="1" step="0.05" value={comparisonOpacity} onChange={(event) => setComparisonOpacity(Number(event.target.value))} className="mt-1 w-full accent-violet-600" />
+            <div className="mt-2 grid grid-cols-[1fr_1fr_auto] gap-2">
+              <label className="text-[9px] font-semibold text-slate-500">X offset<input type="number" value={comparisonOffset.x} onChange={(event) => setComparisonOffset((value) => ({ ...value, x: Number(event.target.value) || 0 }))} className="mt-1 h-8 w-full rounded-md border border-slate-200 px-2 text-xs" /></label>
+              <label className="text-[9px] font-semibold text-slate-500">Y offset<input type="number" value={comparisonOffset.y} onChange={(event) => setComparisonOffset((value) => ({ ...value, y: Number(event.target.value) || 0 }))} className="mt-1 h-8 w-full rounded-md border border-slate-200 px-2 text-xs" /></label>
+              <button type="button" className="self-end rounded-md border border-slate-200 px-2 py-2 text-[10px] font-bold text-slate-600 hover:bg-slate-50" onClick={() => setComparisonOffset({ x: 0, y: 0 })}>Align</button>
+            </div>
+          </div>
+        ) : comparisonVisible && comparisonImages.length ? (
+          <button type="button" onClick={() => setComparisonPanel(true)} className="absolute right-3 top-3 z-40 rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs font-bold text-violet-700 shadow">Compare</button>
         ) : null}
       </div>
     </div>

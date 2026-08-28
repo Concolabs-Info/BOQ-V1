@@ -65,12 +65,18 @@ type State = {
   piles: Pile[];
   caps: PileCap[];
   selectedId: string | null;
+  selectedIds: string[];
   undoStack: Snapshot[];
+  redoStack: Snapshot[];
   workbookOverrides: Record<string, number>;
   workbookConfirmed: Record<string, boolean>;
   select: (id: string | null) => void;
+  selectMany: (ids: string[]) => void;
+  toggleSelect: (id: string) => void;
+  translateSelected: (ids: string[], dx: number, dy: number) => void;
   captureUndo: () => void;
   undo: () => void;
+  redo: () => void;
   updateFlight: (id: string, patch: Partial<Flight>) => void;
   addFlight: (item: Flight) => void;
   deleteFlight: (id: string) => void;
@@ -103,13 +109,62 @@ export const useSpecialStore = create<State>()(
     (set, get) => ({
       ...seed(),
       selectedId: null,
+      selectedIds: [],
       undoStack: [],
+      redoStack: [],
       workbookOverrides: {},
       workbookConfirmed: {},
       select: (selectedId) => {
-        if (selectedId === get().selectedId) return;
-        requestGuardedAction(() => set({ selectedId }), "select another item");
+        if (selectedId === get().selectedId && get().selectedIds.length <= 1) return;
+        requestGuardedAction(() => set({ selectedId, selectedIds: selectedId ? [selectedId] : [] }), "select another item");
       },
+      selectMany: (ids) => {
+        const selectedIds = [...new Set(ids)];
+        requestGuardedAction(() => set({ selectedIds, selectedId: selectedIds.at(-1) || null }), "change selection");
+      },
+      toggleSelect: (id) => {
+        const current = get().selectedIds;
+        const selectedIds = current.includes(id) ? current.filter((value) => value !== id) : [...current, id];
+        requestGuardedAction(() => set({ selectedIds, selectedId: selectedIds.at(-1) || null }), "change selection");
+      },
+      translateSelected: (ids, dx, dy) =>
+        set((s) => {
+          const selected = new Set(ids);
+          const movePoint = (point: { x: number; y: number }) => ({
+            x: point.x + dx,
+            y: point.y + dy,
+          });
+          return {
+            flights: s.flights.map((item) =>
+              selected.has(item.id)
+                ? {
+                    ...item,
+                    points: item.points.map(movePoint),
+                    status: item.status === "confirmed" ? "ready" : item.status,
+                  }
+                : item,
+            ),
+            piles: s.piles.map((item) =>
+              selected.has(item.id)
+                ? {
+                    ...item,
+                    bbox: { ...item.bbox, x: item.bbox.x + dx, y: item.bbox.y + dy },
+                    status: item.status === "confirmed" ? "ready" : item.status,
+                  }
+                : item,
+            ),
+            caps: s.caps.map((item) =>
+              selected.has(item.id)
+                ? {
+                    ...item,
+                    bbox: { ...item.bbox, x: item.bbox.x + dx, y: item.bbox.y + dy },
+                    status: item.status === "confirmed" ? "ready" : item.status,
+                  }
+                : item,
+            ),
+            workbookConfirmed: {},
+          };
+        }),
       captureUndo: () =>
         set((s) => ({
           undoStack: [
@@ -120,6 +175,7 @@ export const useSpecialStore = create<State>()(
               caps: clone(s.caps),
             },
           ],
+          redoStack: [],
         })),
       undo: () =>
         set((s) => {
@@ -128,9 +184,16 @@ export const useSpecialStore = create<State>()(
             ? {
                 ...clone(p),
                 undoStack: s.undoStack.slice(0, -1),
+                redoStack: [...(s.redoStack || []).slice(-19), { flights: clone(s.flights), piles: clone(s.piles), caps: clone(s.caps) }],
                 selectedId: null,
+                selectedIds: [],
               }
             : {};
+        }),
+      redo: () =>
+        set((s) => {
+          const next=(s.redoStack || []).at(-1);
+          return next?{...clone(next),undoStack:[...s.undoStack.slice(-19),{flights:clone(s.flights),piles:clone(s.piles),caps:clone(s.caps)}],redoStack:s.redoStack.slice(0,-1),selectedId:null,selectedIds:[]}:{};
         }),
       updateFlight: (id, patch) => {
         const original = get().flights.find((x) => x.id === id);
@@ -172,7 +235,7 @@ export const useSpecialStore = create<State>()(
           )
         )
           return;
-        set((s) => ({ flights: [...s.flights, item], selectedId: item.id }));
+        set((s) => ({ flights: [...s.flights, item], selectedId: item.id, selectedIds: [item.id] }));
       },
       deleteFlight: (id) => {
         const original = get().flights.find((x) => x.id === id);
@@ -189,6 +252,7 @@ export const useSpecialStore = create<State>()(
         set((s) => ({
           flights: s.flights.filter((x) => x.id !== id),
           selectedId: s.selectedId === id ? null : s.selectedId,
+          selectedIds: s.selectedIds.filter((value) => value !== id),
         }));
       },
       updateFlightFamily: (id, patch) => {
@@ -279,7 +343,7 @@ export const useSpecialStore = create<State>()(
           )
         )
           return;
-        set((s) => ({ piles: [...s.piles, item], selectedId: item.id }));
+        set((s) => ({ piles: [...s.piles, item], selectedId: item.id, selectedIds: [item.id] }));
       },
       deletePile: (id) => {
         const original = get().piles.find((x) => x.id === id);
@@ -296,6 +360,7 @@ export const useSpecialStore = create<State>()(
         set((s) => ({
           piles: s.piles.filter((x) => x.id !== id),
           selectedId: s.selectedId === id ? null : s.selectedId,
+          selectedIds: s.selectedIds.filter((value) => value !== id),
         }));
       },
       updateCap: (id, patch) => {
@@ -338,7 +403,7 @@ export const useSpecialStore = create<State>()(
           )
         )
           return;
-        set((s) => ({ caps: [...s.caps, item], selectedId: item.id }));
+        set((s) => ({ caps: [...s.caps, item], selectedId: item.id, selectedIds: [item.id] }));
       },
       deleteCap: (id) => {
         const original = get().caps.find((x) => x.id === id);
@@ -355,6 +420,7 @@ export const useSpecialStore = create<State>()(
         set((s) => ({
           caps: s.caps.filter((x) => x.id !== id),
           selectedId: s.selectedId === id ? null : s.selectedId,
+          selectedIds: s.selectedIds.filter((value) => value !== id),
         }));
       },
       updatePileFamily: (id, patch) => {
@@ -449,7 +515,9 @@ export const useSpecialStore = create<State>()(
         set({
           ...seed(),
           selectedId: null,
+          selectedIds: [],
           undoStack: [],
+          redoStack: [],
           workbookOverrides: {},
           workbookConfirmed: {},
         }),
@@ -482,6 +550,7 @@ export const useSpecialStore = create<State>()(
         flightFamilies: current.flightFamilies,
         railFamilies: current.railFamilies,
         flights: (persisted as Partial<State>).flights || current.flights,
+        selectedIds: (persisted as Partial<State>).selectedIds || ((persisted as Partial<State>).selectedId ? [(persisted as Partial<State>).selectedId!] : []),
       }),
     },
   ),

@@ -8,9 +8,10 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { useSearchParams } from "next/navigation";
-import { DemoDrawing, svgPoint } from "./components/DemoDrawing";
+import { useRouter, useSearchParams } from "next/navigation";
+import { DemoDrawing, drawingSize, svgPoint } from "./components/DemoDrawing";
 import { DemoChat } from "./components/DemoChat";
+import { ViewportCardLabel } from "./components/ViewportCardLabel";
 import {
   ResizableThreePane,
   ResizableTwoPane,
@@ -43,12 +44,16 @@ import {
   MeasurementOverlay,
   useMeasurementTool,
 } from "./measurements/MeasurementOverlay";
+import type { MeasurementKind } from "./measurements/measurementStore";
 import {
   beginLiveEdit,
   requestGuardedAction,
 } from "./editing/editSessionStore";
 import { useRealStructuralScopeTakeoff } from "@/features/takeoff/shared/useRealStructuralScopeTakeoff";
 import { BeamTakeoff } from "@/features/beams/BeamTakeoff";
+import { dispatchTakeoffStatus, useTakeoffCommand } from "./takeoffCommands";
+import { findPdfVectorSnap, usePdfSnapModes, usePdfVectorSource } from "./snapping/pdfVectorSnap";
+import { exportTakeoffCsv, type ExportRow } from "./takeoffExport";
 
 const elementLabel: Record<StructuralElement, string> = {
   columns: "Columns",
@@ -83,7 +88,15 @@ function isElementDrawing(element: StructuralElement, drawing: { id: string; tak
 }
 
 export function StructuralTakeoff({ projectId, element, view }: { projectId: string; element: StructuralElement; view: string }) {
-  if (element === "beams") return <BeamTakeoff projectId={projectId} view={view} />;
+  if (element === "beams")
+    return (
+      <BeamTakeoff
+        projectId={projectId}
+        view={view}
+        workbookView={<StructuralWorkbook projectId={projectId} element="beams" />}
+        threeDView={<Structural3D projectId={projectId} element="beams" />}
+      />
+    );
   return <ScopedStructuralTakeoff projectId={projectId} element={element} view={view} />;
 }
 
@@ -91,13 +104,15 @@ function ScopedStructuralTakeoff({ projectId, element, view }: { projectId: stri
   useRealStructuralScopeTakeoff(projectId, element);
   if (view === "workbook") return <StructuralWorkbook projectId={projectId} element={element} />;
   if (view === "3d") return <Structural3D projectId={projectId} element={element} />;
-  return <StructuralDimension element={element} />;
+  return <StructuralDimension projectId={projectId} element={element} />;
 }
 
 type Tool = "select" | "pan" | "measure" | "draw";
 type PendingBeam = Omit<BeamRun, "start" | "end">;
 type PendingSlab = Omit<SlabPlate, "points" | "voids" | "sectionProfile">;
 type PendingColumn = Omit<ColumnInstance, "bbox">;
+type SlabDrawShape = "polygon" | "rectangle" | "freehand";
+type SlabDrawAction = "create" | "add" | "subtract" | "cutout";
 type SnapCandidate = { point: Point; label: string };
 type SnapResult = { point: Point; target: SnapCandidate | null };
 const button =
@@ -108,18 +123,24 @@ const active =
 // real ratio prevents a 150–250 mm plate being drawn as a heavy 30–50 px band.
 const SECTION_SLAB_MM_PER_PX = 20;
 
-function StructuralDimension({ element }: { element: StructuralElement }) {
+function StructuralDimension({ projectId, element }: { projectId: string; element: StructuralElement }) {
+  const router = useRouter();
   const search = useSearchParams();
   const drawings = useDemoStore((s) => s.viewports);
+  const sheets = useDemoStore((s) => s.sheets);
   const store = useStructuralStore();
   const [viewportId, setViewportId] = useState(viewports[element][0]);
-  const [leftTab, setLeftTab] = useState<"viewports" | "families">("viewports");
-  const [rightTab, setRightTab] = useState<"takeoff" | "item">("takeoff");
+  const [leftTab, setLeftTab] = useState<"drawings" | "families">("drawings");
+  const [rightTab, setRightTab] = useState<"properties" | "ai">("ai");
   const [tool, setTool] = useState<Tool>("select");
+  const [measurementKind, setMeasurementKind] =
+    useState<MeasurementKind>("distance");
   const [draft, setDraft] = useState<Point[]>([]);
   const [minimap, setMinimap] = useState(false);
   const [snap, setSnapState] = useState(false);
+  const [ortho, setOrtho] = useState(false);
   const [snapTarget, setSnapTarget] = useState<SnapCandidate | null>(null);
+  const [selectionBox,setSelectionBox]=useState<{start:Point;current:Point}|null>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [addElementOpen, setAddElementOpen] = useState(false);
   const [pendingBeam, setPendingBeam] = useState<PendingBeam | null>(null);
@@ -130,8 +151,12 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
     families(element)[0]?.id || "",
   );
   const [slabSign, setSlabSign] = useState<"add" | "remove">("add");
+  const [slabDrawShape, setSlabDrawShape] = useState<SlabDrawShape>("polygon");
+  const [slabDrawAction, setSlabDrawAction] = useState<SlabDrawAction>("create");
+  const [columnDrawShape, setColumnDrawShape] = useState<"point" | "rectangle">("point");
   const altPressed = useRef(false);
   const canvasScale = useRef(1);
+  const clipboard = useRef<Array<ColumnInstance | BeamRun | SlabPlate>>([]);
   useEffect(() => {
     setSnapState(window.localStorage.getItem("quanto.snap.enabled") === "true");
   }, []);
@@ -143,16 +168,44 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
     });
   }
   const viewport = drawings.find((v) => v.id === viewportId) || drawings[0];
+  const vectorSheet = sheets.find((sheet) => sheet.id === viewport?.sheetId);
+  const vectorSize = drawingSize(vectorSheet);
+  const pdfVectors = usePdfVectorSource(
+    vectorSheet ? `project-page:${projectId}:${vectorSheet.page}:${vectorSize.width}x${vectorSize.height}` : "",
+    vectorSheet ? `/api/v1/projects/${projectId}/pages/${vectorSheet.page}/vectors?width=${vectorSize.width}&height=${vectorSize.height}` : "",
+  );
+  const pdfSnapModes=usePdfSnapModes().modes;
   const measurement = useMeasurementTool({
     viewportId,
     scale: scaleForViewport(viewportId),
     active: tool === "measure",
     deleteEnabled: tool === "select" || tool === "measure",
+    kind: measurementKind,
   });
   // Structural GA sheets are catalogued as details, but they are still plan
   // viewports and must render selectable takeoff overlays.
   const isSection = viewport?.category === "section";
   const selected = selectedItem(element, store.selectedId);
+  useEffect(() => {
+    if (!selected) return;
+    setActiveFamily(selected.familyId);
+    setLeftTab("families");
+    setRightTab("properties");
+  }, [selected?.familyId, selected?.id]);
+  const visibleSelectableIds = useMemo(() => (element === "columns" ? store.columns : element === "beams" ? store.beams : store.slabPlates).filter((item) => item.viewportId === viewportId).map((item) => item.id), [element, store.beams, store.columns, store.slabPlates, viewportId]);
+  useEffect(() => {
+    const keyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input,textarea,select,[contenteditable=true]") || tool !== "select") return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") { event.preventDefault(); store.selectMany(visibleSelectableIds); return; }
+      if (event.key === "Escape") { store.selectMany([]); return; }
+      if (event.key !== "Tab" || !visibleSelectableIds.length) return;
+      event.preventDefault();
+      const current=visibleSelectableIds.indexOf(store.selectedId||"");
+      store.select(visibleSelectableIds[(current+(event.shiftKey?-1:1)+visibleSelectableIds.length)%visibleSelectableIds.length]);
+    };
+    window.addEventListener("keydown",keyDown);return()=>window.removeEventListener("keydown",keyDown);
+  },[store.select,store.selectMany,store.selectedId,tool,visibleSelectableIds]);
 
   useEffect(() => {
     const first = drawings.find((drawing) => isElementDrawing(element, drawing));
@@ -168,13 +221,13 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
     if (!item) return;
     store.select(item.id);
     setViewportId(item.viewportId);
-    setRightTab("item");
+    setRightTab("properties");
   }, [element, search, store.select]);
 
   useEffect(() => {
     const chatKey = `takeoff.${element}`;
     const messages = useDemoStore.getState().chat[chatKey];
-    if (copilotQuestionPending(chatKey, messages || [])) setRightTab("takeoff");
+    if (copilotQuestionPending(chatKey, messages || [])) setRightTab("ai");
   }, [element]);
 
   useEffect(() => {
@@ -193,7 +246,23 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
   }, [pendingBeam, pendingSlab, pendingColumn]);
 
   function dragStart(raw: Point, scale: number) {
-    if (tool !== "draw" || (!pendingColumn && !pendingBeam && !pendingSlab)) return;
+    if(tool==="select"){canvasScale.current=scale;setSelectionBox({start:raw,current:raw});return;}
+    if (tool !== "draw") return;
+    if (element === "columns" && columnDrawShape === "rectangle") {
+      canvasScale.current = scale;
+      const point = resolveSnap(raw).point;
+      setDraft([point, point]);
+      setHoverPoint(point);
+      return;
+    }
+    if (element === "slab" && !isSection && slabDrawShape !== "polygon") {
+      canvasScale.current = scale;
+      const point = resolveSnap(raw).point;
+      setDraft(slabDrawShape === "freehand" ? [point] : [point, point]);
+      setHoverPoint(point);
+      return;
+    }
+    if (!pendingColumn && !pendingBeam && !pendingSlab) return;
     // Plan slabs are point-defined polygons. Drag creation is reserved for
     // columns, beams, and the rectangular section representation of a slab.
     if (pendingSlab && !isSection) return;
@@ -204,17 +273,41 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
   }
 
   function dragMove(raw: Point, scale: number) {
-    if (tool !== "draw" || draft.length < 2) return;
+    if(tool==="select"&&selectionBox){canvasScale.current=scale;setSelectionBox((current)=>current?{...current,current:raw}:null);return;}
+    if (tool !== "draw" || !draft.length) return;
     canvasScale.current = scale;
-    const point = resolveSnap(raw, undefined, draft[0]).point;
+    const point = resolveSnap(raw, undefined, slabDrawShape === "freehand" ? draft[draft.length - 1] : draft[0]).point;
+    if (element === "slab" && !isSection && slabDrawShape === "freehand") {
+      setDraft((current) => !current.length || distance(current[current.length - 1], point) >= Math.max(2, 5 / Math.max(.01, scale)) ? [...current, point] : current);
+      setHoverPoint(point);
+      return;
+    }
     setDraft((current) => current.length ? [current[0], point] : current);
     setHoverPoint(point);
   }
 
   function dragEnd(raw: Point, scale: number) {
-    if (tool !== "draw" || draft.length < 2) return;
+    if(tool==="select"&&selectionBox){canvasScale.current=scale;const start=selectionBox.start;setSelectionBox(null);if(distance(start,raw)<Math.max(4,8/Math.max(.01,scale)))return;const left=Math.min(start.x,raw.x),right=Math.max(start.x,raw.x),top=Math.min(start.y,raw.y),bottom=Math.max(start.y,raw.y),crossing=raw.x<start.x;
+      const matches=(bounds:{left:number;top:number;right:number;bottom:number})=>crossing?bounds.right>=left&&bounds.left<=right&&bounds.bottom>=top&&bounds.top<=bottom:bounds.left>=left&&bounds.right<=right&&bounds.top>=top&&bounds.bottom<=bottom;
+      const bounds=(points:Point[])=>({left:Math.min(...points.map((point)=>point.x)),top:Math.min(...points.map((point)=>point.y)),right:Math.max(...points.map((point)=>point.x)),bottom:Math.max(...points.map((point)=>point.y))});let ids:string[]=[];
+      if(element==="columns")ids=store.columns.filter((item)=>item.viewportId===viewportId&&matches(bounds([{x:item.bbox.x,y:item.bbox.y},{x:item.bbox.x+item.bbox.width,y:item.bbox.y+item.bbox.height}]))).map((item)=>item.id);
+      else if(element==="beams")ids=store.beams.filter((item)=>item.viewportId===viewportId&&matches(bounds([item.start,item.end]))).map((item)=>item.id);
+      else ids=store.slabPlates.filter((item)=>item.viewportId===viewportId&&matches(item.sectionProfile?{left:item.sectionProfile.x0,top:Math.min(item.sectionProfile.topY,item.sectionProfile.bottomY),right:item.sectionProfile.x1,bottom:Math.max(item.sectionProfile.topY,item.sectionProfile.bottomY)}:bounds(item.points))).map((item)=>item.id);
+      store.selectMany(ids);dispatchTakeoffStatus({message:`${crossing?"Crossing":"Window"} selected ${ids.length} item${ids.length===1?"":"s"}`});return;}
+    if (tool !== "draw" || !draft.length) return;
     canvasScale.current = scale;
-    const end = resolveSnap(raw, undefined, draft[0]).point;
+    const end = resolveSnap(raw, undefined, slabDrawShape === "freehand" ? draft[draft.length - 1] : draft[0]).point;
+    if (element === "slab" && !isSection && slabDrawShape === "freehand") {
+      const points = simplifyStructuralStroke([...draft, end], Math.max(2, 4 / Math.max(.01, scale)));
+      if (points.length >= 3) finishSlab(points); else setDraft([]);
+      return;
+    }
+    if (element === "slab" && !isSection && slabDrawShape === "rectangle") {
+      if (distance(draft[0], end) < 8) { setDraft([]); setHoverPoint(null); return; }
+      finishSlab(structuralBoxPoints(draft[0], end));
+      return;
+    }
+    if (draft.length < 2) return;
     const start = draft[0];
     const width = Math.abs(end.x - start.x);
     const height = Math.abs(end.y - start.y);
@@ -224,6 +317,10 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
       store.addColumn({ ...pendingColumn, bbox: { x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width: Math.max(8, width), height: Math.max(8, height) } });
       store.select(pendingColumn.id);
       setPendingColumn(null);
+    } else if (element === "columns" && columnDrawShape === "rectangle") {
+      const id=`COL-${Date.now()}`;
+      store.addColumn({id,familyId:activeFamily,floorId:floorForViewport(viewportId),viewportId,bbox:{x:Math.min(start.x,end.x),y:Math.min(start.y,end.y),width:Math.max(8,width),height:Math.max(8,height)},heightM:heightForFloor(floorForViewport(viewportId)),status:"ready"});
+      store.select(id);
     } else if (pendingBeam) {
       store.addBeam({ ...pendingBeam, start, end });
       store.select(pendingBeam.id);
@@ -239,7 +336,7 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
       store.select(pendingSlab.id);
       setPendingSlab(null);
     }
-    setDraft([]); setHoverPoint(null); setRightTab("item"); setTool("select");
+    setDraft([]); setHoverPoint(null); setRightTab("properties"); setTool("select");
   }
 
   useEffect(() => {
@@ -268,15 +365,16 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
     origin?: Point,
     threshold = 24 / Math.max(0.01, canvasScale.current),
   ): SnapResult {
-    if (!snap || altPressed.current) return { point, target: null };
-    const geometry = nearestStructuralSnap(
+    if ((!snap && !ortho) || altPressed.current) return { point, target: null };
+    const geometry = snap ? nearestStructuralSnap(
       point,
       structuralSnapCandidates(viewportId, store, point, excludeId),
       Math.min(80, Math.max(2, threshold)),
-    );
-    return geometry.target || !origin
-      ? geometry
-      : orthogonalSnap(origin, point);
+    ) : { point, target: null };
+    const pdfTarget = snap ? findPdfVectorSnap(point,pdfVectors.segments,Math.min(80,Math.max(2,threshold)),pdfSnapModes) : null;
+    const geometryDistance = geometry.target ? distance(point,geometry.point) : Number.POSITIVE_INFINITY;
+    if(pdfTarget&&pdfTarget.distance<geometryDistance)return{point:pdfTarget.point,target:{point:pdfTarget.point,label:pdfTarget.label}};
+    return geometry.target || !origin ? geometry : ortho ? orthogonalSnap(origin, point) : geometry;
   }
 
   function canvasClick(point: Point, scale = canvasScale.current) {
@@ -332,13 +430,14 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
         });
         setPendingSlab(null);
         setHoverPoint(null);
-        setRightTab("item");
+        setRightTab("properties");
         setTool("select");
         return [];
       });
       return;
     }
     if (element === "columns") {
+      if(columnDrawShape==="rectangle"&&draft.length){return;}
       store.captureUndo();
       const id = `COL-${Date.now()}`;
       store.addColumn({
@@ -350,9 +449,21 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
         heightM: heightForFloor(floorForViewport(viewportId)),
         status: "ready",
       });
-      setRightTab("item");
+      setRightTab("properties");
       setTool("select");
       return;
+    }
+    if (element === "slab" && !isSection) {
+      if (slabDrawShape === "freehand") return;
+      if (slabDrawShape === "rectangle") {
+        if (!draft.length) setDraft([next]);
+        else finishSlab(structuralBoxPoints(draft[0], next));
+        return;
+      }
+      if (draft.length >= 3 && distance(next, draft[0]) <= Math.max(6, 14 / Math.max(.01, scale))) {
+        finishSlab(draft);
+        return;
+      }
     }
     setDraft((value) => {
       const points = [...value, next];
@@ -370,7 +481,7 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
         store.addBeam({ ...beam, start: points[0], end: points[1] });
         setPendingBeam(null);
         setHoverPoint(null);
-        setRightTab("item");
+        setRightTab("properties");
         setTool("select");
         return [];
       }
@@ -378,15 +489,16 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
     });
   }
 
-  function finishSlab() {
-    if (element !== "slab" || draft.length < 3) return;
+  function finishSlab(points = draft) {
+    if (element !== "slab" || points.length < 3) return;
     store.captureUndo();
     if (slabSign === "remove") {
       const host =
         store.slabPlates.find(
           (x) => x.id === store.selectedId && x.viewportId === viewportId,
-        ) || store.slabPlates.find((x) => x.viewportId === viewportId);
-      if (host) store.updateSlab(host.id, { voids: [...host.voids, draft] });
+        );
+      if (host) store.updateSlab(host.id, { voids: [...host.voids, points] });
+      else dispatchTakeoffStatus({message:`Select the slab to ${slabDrawAction === "cutout" ? "cut out" : "subtract from"} first`});
     } else
       store.addSlab({
         ...(pendingSlab || {
@@ -397,18 +509,126 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
           status: "ready" as const,
         }),
         viewportId,
-        points: draft,
+        points,
         voids: [],
       });
     setPendingSlab(null);
     setDraft([]);
     setTool("select");
-    setRightTab("item");
+    setRightTab("properties");
   }
 
   const allowedDrawings = drawings.filter((v) =>
     isElementDrawing(element, v),
   );
+  function copySelected() {
+    const items = store.selectedIds.map((id) => selectedItem(element, id)).filter((item): item is ColumnInstance | BeamRun | SlabPlate => Boolean(item));
+    if (!items.length) { dispatchTakeoffStatus({ message: "Select an item first" }); return false; }
+    clipboard.current = JSON.parse(JSON.stringify(items));
+    dispatchTakeoffStatus({ message: `Copied ${items.length} item${items.length === 1 ? "" : "s"}` });
+    return true;
+  }
+  function pasteSelected() {
+    if (!clipboard.current.length) { dispatchTakeoffStatus({ message: "Nothing to paste" }); return; }
+    const items: any[] = JSON.parse(JSON.stringify(clipboard.current));
+    const suffix = Date.now().toString().slice(-6);
+    store.captureUndo();
+    const ids = items.map((item, index) => {
+      item.id = `${String(item.id).replace(/-COPY-\d+(?:-\d+)?$/, "")}-COPY-${suffix}-${index + 1}`;
+      item.viewportId = viewportId;
+      if ("bbox" in item) { item.bbox.x += 24; item.bbox.y += 24; store.addColumn(item); }
+      else if ("start" in item) { item.start = { x:item.start.x+24, y:item.start.y+24 }; item.end = { x:item.end.x+24, y:item.end.y+24 }; store.addBeam(item); }
+      else { item.points = item.points.map((point:Point)=>({x:point.x+24,y:point.y+24})); item.voids = item.voids.map((ring:Point[])=>ring.map((point)=>({x:point.x+24,y:point.y+24}))); store.addSlab(item); }
+      return item.id as string;
+    });
+    store.selectMany(ids);
+    dispatchTakeoffStatus({ message: `Created ${ids.length} item${ids.length === 1 ? "" : "s"}`, saving: "editing" });
+  }
+  function setStatus(status: DemoStatus) {
+    const ids = store.selectedIds;
+    if (!ids.length) { dispatchTakeoffStatus({ message: "Select an item first" }); return; }
+    ids.forEach((id) => {
+      if (element === "columns") store.updateColumn(id, { status });
+      else if (element === "beams") store.updateBeam(id, { status });
+      else store.updateSlab(id, { status });
+    });
+    dispatchTakeoffStatus({ message: `${ids.length} item${ids.length === 1 ? "" : "s"}: ${status.replaceAll("_", " ")}`, saving: "editing" });
+  }
+  function stepDrawing(direction:-1|1) {
+    const index=Math.max(0,allowedDrawings.findIndex((item)=>item.id===viewportId));
+    const next=allowedDrawings[(index+direction+allowedDrawings.length)%Math.max(1,allowedDrawings.length)];
+    if(next){setViewportId(next.id);store.select(null);}
+  }
+  function stepIssue(direction:-1|1) {
+    const rows=(element==="columns"?store.columns:element==="beams"?store.beams:store.slabPlates).filter((item)=>item.status==="needs_review");
+    if(!rows.length){dispatchTakeoffStatus({message:"No review issues"});return;}
+    const index=rows.findIndex((item)=>item.id===store.selectedId), next=rows[(Math.max(0,index)+direction+rows.length)%rows.length];
+    store.select(next.id);setViewportId(next.viewportId);setRightTab("properties");
+  }
+  function exportCurrentTakeoff() {
+    const source = element === "columns" ? store.columns : element === "beams" ? store.beams : store.slabPlates;
+    const rows: ExportRow[] = source.map((item) => {
+      let quantity = 1, unit = "nr";
+      if ("start" in item) { quantity = distance(item.start, item.end) * scaleForViewport(item.viewportId); unit = "m"; }
+      else if ("points" in item) { quantity = zoneAreaM2(item.points, item.voids, scaleForViewport(item.viewportId)); unit = "m²"; }
+      return { ID: item.id, Element: elementLabel[element], Family: item.familyId, Level: floorName(item.floorId), Drawing: drawings.find((value) => value.id === item.viewportId)?.name || item.viewportId, Quantity: Number(quantity.toFixed(3)), Unit: unit, Status: item.status };
+    });
+    if (exportTakeoffCsv(`quanto-${element}-takeoff.csv`, rows)) dispatchTakeoffStatus({ message: `Exported ${rows.length} takeoff row${rows.length === 1 ? "" : "s"}` });
+    else dispatchTakeoffStatus({ message: "There is no takeoff data to export" });
+  }
+  useEffect(()=>{dispatchTakeoffStatus({selected:store.selectedIds.length>1?`${store.selectedIds.length} items`:store.selectedId,snap,ortho,saving:"saved"});},[ortho,snap,store.selectedId,store.selectedIds.length]);
+  useEffect(()=>{if(snap&&pdfVectors.vectorAvailable)dispatchTakeoffStatus({message:`${pdfVectors.segments.length.toLocaleString()} PDF snap edges ready`});},[pdfVectors.segments.length,pdfVectors.vectorAvailable,snap]);
+  useTakeoffCommand((command)=>{
+    if(command.element!==element)return;
+    const label=command.label.toLowerCase();
+    const notify=(message:string)=>dispatchTakeoffStatus({message});
+    if(["select","move","edit points","endpoints"].includes(label)){setTool("select");setDraft([]);}
+    else if(label==="pan")setTool("pan");
+    else if(label==="open"||label==="search")setLeftTab("drawings");
+    else if(label==="previous")stepDrawing(-1);
+    else if(label==="next")stepDrawing(1);
+    else if(label==="bookmarks"){setLeftTab("drawings");notify("Viewports opened");}
+    else if(["families","materials","assemblies","project","company","section"].includes(label))setLeftTab("families");
+    else if(label==="copy")copySelected();
+    else if(label==="cut"){if(copySelected())deleteSelected(element,store.selectedId);}
+    else if(label==="paste")pasteSelected();
+    else if(label==="duplicate"){if(copySelected())pasteSelected();}
+    else if(label==="undo")store.undo();
+    else if(label==="redo")store.redo();
+    else if(label==="delete"||label==="remove")deleteSelected(element,store.selectedId);
+    else if(["distance","horizontal","vertical","angle","area","perimeter","radius","dimension","verify scale"].includes(label)&&command.tab==="measure"){setMeasurementKind((["area","perimeter","radius","angle"].includes(label)?label:"distance") as MeasurementKind);setTool("measure");measurement.clearDraft();notify(`${label[0].toUpperCase()+label.slice(1)} measurement active`);}
+    else if(label==="snap")setSnap((value)=>!value);
+    else if(label==="ortho")setOrtho((value)=>!value);
+    else if(label==="set scale"){
+      const entered=window.prompt("Enter drawing scale (for example 100 for 1:100)","100"),denominator=Number(entered?.replace("1:",""));
+      if(denominator>0){useDemoStore.getState().updateViewport(viewportId,{scaleMPerPx:1/(denominator*3.7795275591)});notify(`Scale set to 1:${denominator}`);}
+    }
+    else if(label==="layers")setLeftTab("families");
+    else if(["count","box","rectangle"].includes(label)&&element==="columns"){setColumnDrawShape(label==="count"?"point":"rectangle");setSnap(true);setTool("draw");setDraft([]);setHoverPoint(null);notify(label==="count"?"Click a snapped position to place a column":"Drag between snapped corners to place a rectangular column");}
+    else if(["area","polygon","rectangle","freehand","boundary","add area"].includes(label)&&element==="slab"){setSlabDrawShape(label==="rectangle"?"rectangle":label==="freehand"?"freehand":"polygon");setSlabDrawAction(label==="add area"?"add":"create");setSlabSign("add");setSnap(true);setTool("draw");setDraft([]);setHoverPoint(null);notify(label==="freehand"?"Drag around the slab boundary; release to finish":label==="rectangle"?"Drag or click two opposite slab corners":"Click slab boundary points, then click Finish");}
+    else if(["subtract","cutout","opening"].includes(label)&&element==="slab"){setSlabDrawShape("polygon");setSlabDrawAction(label==="cutout"||label==="opening"?"cutout":"subtract");setSlabSign("remove");setSnap(true);setTool("draw");setDraft([]);setHoverPoint(null);notify(`Select a slab, then draw the ${label==="subtract"?"area to subtract":"enclosed opening"}`);}
+    else if(["linear","segment","multi segment","continue"].includes(label)){setTool("draw");setDraft([]);}
+    else if(label==="new section"||label==="add existing")setAddElementOpen(true);
+    else if(label==="split"&&element==="beams"&&selected&&"start" in selected)splitBeam(selected as BeamRun);
+    else if(label==="confirm")setStatus("confirmed");
+    else if(label==="needs review"||label==="hold"||label==="reject")setStatus("needs_review");
+    else if(label==="previous issue")stepIssue(-1);
+    else if(label==="next issue")stepIssue(1);
+    else if(label==="unreviewed")stepIssue(1);
+    else if(label==="resolve all"){
+      const rows=element==="columns"?store.columns:element==="beams"?store.beams:store.slabPlates;
+      rows.filter((item)=>item.status==="needs_review").forEach((item)=>element==="columns"?store.updateColumn(item.id,{status:"confirmed"}):element==="beams"?store.updateBeam(item.id,{status:"confirmed"}):store.updateSlab(item.id,{status:"confirmed"}));
+    }
+    else if(label==="properties"||["width","depth","height","thickness","support"].includes(label))setRightTab("properties");
+    else if(label==="evidence"||label==="show evidence"||label==="evidence report"||label==="manual changes")setRightTab("properties");
+    else if(["explain","find similar","ai results"].includes(label))setRightTab("ai");
+    else if(label==="workbook"||label.includes("summary")||label==="preview"||["element","family","level"].includes(label))router.push(appRoutes.takeoff(projectId,element,"workbook"));
+    else if(["boq mapping","formulas","waste","rates","units"].includes(label))router.push(appRoutes.workspaceBoq(projectId));
+    else if(label==="export")exportCurrentTakeoff();
+    else if(label==="print")window.print();
+    else if(label==="new template")setLeftTab("families");
+    else notify(`${command.label} is not connected in this workspace yet`);
+  });
   return (
     <>
       <ResizableThreePane
@@ -419,54 +639,15 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
       >
         <aside className="border-r border-slate-200">
           <div className="grid grid-cols-2 border-b border-slate-200 p-2">
-            <button
-              className={leftTab === "viewports" ? active : button}
-              onClick={() => setLeftTab("viewports")}
-            >
-              Viewports
-            </button>
-            <button
-              className={leftTab === "families" ? active : button}
-              onClick={() => setLeftTab("families")}
-            >
-              Families
-            </button>
+            {[["drawings","Viewports"],["families","Families"]].map(([value,label]) => <button key={value} type="button" className={leftTab === value ? "rounded-md bg-slate-900 px-1 py-2 text-[9px] font-semibold text-white" : "rounded-md px-1 py-2 text-[9px] font-semibold text-slate-500 hover:bg-slate-50"} onClick={() => setLeftTab(value as typeof leftTab)}>{label}</button>)}
           </div>
-          {leftTab === "viewports" ? (
-            <div className="space-y-2 p-3">
-              {allowedDrawings.map((v) => (
-                <button
-                  key={v.id}
-                  onClick={() => {
-                    setViewportId(v.id);
-                    store.select(null);
-                  }}
-                  className={
-                    v.id === viewportId
-                      ? "w-full rounded-xl border border-blue-200 bg-blue-50 p-3 text-left"
-                      : "w-full rounded-xl border border-slate-200 p-3 text-left hover:border-blue-200"
-                  }
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold">{v.name}</span>
-                    <span
-                      className={
-                        v.status === "confirmed"
-                          ? "h-2.5 w-2.5 rounded-full bg-emerald-500"
-                          : "h-2.5 w-2.5 rounded-full bg-blue-400"
-                      }
-                    />
-                  </div>
-                  <p className="mt-1 text-xs capitalize text-slate-500">
-                    {v.category}
-                  </p>
-                </button>
-              ))}
-            </div>
+          {leftTab === "drawings" ? (
+            <StructuralDrawingNavigator drawings={allowedDrawings} selected={viewportId} onSelect={(id) => { setViewportId(id); store.select(null); }} />
           ) : (
             <StructuralFamilies
               element={element}
               activeId={activeFamily}
+              revealKey={store.selectedId || ""}
               onSelect={setActiveFamily}
             />
           )}
@@ -474,17 +655,18 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
         <main className="min-w-0 bg-slate-100 p-3">
           <DemoDrawing
             viewportId={viewportId}
+            hideToolbar
             tool={
               tool === "pan"
                 ? "pan"
-                : tool === "draw" || tool === "measure"
+                : tool === "draw" || tool === "measure" || tool === "select"
                   ? "draw"
                   : "select"
             }
             onCanvasClick={canvasClick}
-            onCanvasDragStart={element === "slab" && !isSection ? undefined : dragStart}
-            onCanvasDragMove={element === "slab" && !isSection ? undefined : dragMove}
-            onCanvasDragEnd={element === "slab" && !isSection ? undefined : dragEnd}
+            onCanvasDragStart={dragStart}
+            onCanvasDragMove={dragMove}
+            onCanvasDragEnd={dragEnd}
             onCanvasMove={(point) => {
               if (tool !== "draw" && tool !== "measure") {
                 setSnapTarget(null);
@@ -670,7 +852,7 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
                 ) : null}
                 {element === "slab" && !isSection && draft.length >= 3 ? (
                   <button
-                    onClick={finishSlab}
+                    onClick={() => finishSlab()}
                     className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white"
                   >
                     Finish
@@ -738,11 +920,11 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
                 onSnapTarget={setSnapTarget}
                 onSelect={() => {
                   measurement.clearSelection();
-                  setRightTab("item");
+                    setRightTab("properties");
                 }}
               />
             )}
-            {pendingColumn && draft.length > 1 ? (
+            {(pendingColumn || (element === "columns" && columnDrawShape === "rectangle")) && draft.length > 1 ? (
               <rect
                 x={Math.min(draft[0].x, draft[1].x)} y={Math.min(draft[0].y, draft[1].y)}
                 width={Math.abs(draft[1].x - draft[0].x)} height={Math.abs(draft[1].y - draft[0].y)}
@@ -752,14 +934,17 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
             ) : draft.length ? (
               <Draft
                 points={
-                  hoverPoint && (element === "beams" || (element === "slab" && isSection))
+                  element === "slab" && !isSection && slabDrawShape === "rectangle" && draft.length >= 2
+                    ? structuralBoxPoints(draft[0], draft[draft.length - 1])
+                    : hoverPoint && (element === "beams" || (element === "slab" && isSection))
                     ? [draft[0], hoverPoint]
-                    : hoverPoint && element === "slab" && !isSection
+                    : hoverPoint && element === "slab" && !isSection && slabDrawShape === "polygon"
                       ? [...draft, hoverPoint]
                       : draft
                 }
               />
             ) : null}
+            {selectionBox?<rect pointerEvents="none" x={Math.min(selectionBox.start.x,selectionBox.current.x)} y={Math.min(selectionBox.start.y,selectionBox.current.y)} width={Math.abs(selectionBox.current.x-selectionBox.start.x)} height={Math.abs(selectionBox.current.y-selectionBox.start.y)} fill={selectionBox.current.x<selectionBox.start.x?"#22c55e":"#3b82f6"} fillOpacity={.12} stroke={selectionBox.current.x<selectionBox.start.x?"#16a34a":"#2563eb"} strokeDasharray={selectionBox.current.x<selectionBox.start.x?"7 4":undefined} strokeWidth={1.5} vectorEffect="non-scaling-stroke"/>:null}
             <MeasurementOverlay
               measurements={measurement.measurements}
               selectedId={measurement.selectedId}
@@ -767,38 +952,31 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
               editable={tool === "select" || tool === "measure"}
               previewStart={measurement.start}
               previewEnd={measurement.previewEnd}
+              previewPoints={measurement.previewPoints}
+              previewKind={measurement.kind}
             />
             {snapTarget ? <SnapIndicator target={snapTarget} /> : null}
           </DemoDrawing>
         </main>
-        <aside className="border-l border-slate-200">
-          <div className="grid grid-cols-2 border-b border-slate-200 p-2">
-            <button
-              onClick={() => setRightTab("takeoff")}
-              className={rightTab === "takeoff" ? active : button}
-            >
-              Copilot
-            </button>
-            <button
-              onClick={() => setRightTab("item")}
-              className={rightTab === "item" ? active : button}
-            >
-              Item
-            </button>
+        <aside className="!overflow-hidden flex min-h-0 flex-col border-l border-slate-200">
+          <div className="grid shrink-0 grid-cols-2 border-b border-slate-200 p-2">
+            {[["ai","Copilot"],["properties","Item"]].map(([value,label]) => <button key={value} type="button" onClick={() => setRightTab(value as typeof rightTab)} className={rightTab === value ? "rounded-md bg-slate-900 px-1 py-2 text-[9px] font-semibold text-white" : "rounded-md px-1 py-2 text-[9px] font-semibold text-slate-500 hover:bg-slate-50"}>{label}</button>)}
           </div>
-          {rightTab === "takeoff" ? (
-            <DemoChat
-              chatKey={`takeoff.${element}`}
-              contextLabel={viewport?.name}
-              onOpenItem={() => setRightTab("item")}
-            />
-          ) : selected ? (
-            <StructuralInspector element={element} id={selected.id} />
-          ) : (
-            <div className="p-5 text-sm leading-6 text-slate-500">
-              Select an item on the drawing to inspect and edit it.
-            </div>
-          )}
+          <div className={rightTab === "ai" ? "flex min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto overscroll-contain"}>
+            {rightTab === "ai" ? (
+              <DemoChat
+                chatKey={`takeoff.${element}`}
+                contextLabel={viewport?.name}
+                onOpenItem={() => setRightTab("properties")}
+              />
+            ) : selected ? (
+              <StructuralInspector element={element} id={selected.id} />
+            ) : (
+              <div className="p-5 text-sm leading-6 text-slate-500">
+                Select an item on the drawing to inspect it.
+              </div>
+            )}
+          </div>
         </aside>
       </ResizableThreePane>
       <StructuralAddElementDialog
@@ -810,7 +988,7 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
           setViewportId(beam.viewportId);
           setActiveFamily(beam.familyId);
           store.select(null);
-          setRightTab("item");
+          setRightTab("properties");
           setPendingBeam(beam);
           setSnap(true);
           setDraft([]);
@@ -821,13 +999,13 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
         onPrepareColumn={(column) => {
           setViewportId(column.viewportId); setActiveFamily(column.familyId); store.select(null);
           setPendingColumn(column); setPendingBeam(null); setPendingSlab(null); setDraft([]);
-          setHoverPoint(null); setRightTab("item"); setTool("draw"); setAddElementOpen(false);
+          setHoverPoint(null); setRightTab("properties"); setTool("draw"); setAddElementOpen(false);
         }}
         onPrepareSlab={(slab) => {
           setViewportId(slab.viewportId);
           setActiveFamily(slab.familyId);
           store.select(null);
-          setRightTab("item");
+          setRightTab("properties");
           setPendingSlab(slab);
           setPendingBeam(null);
           setDraft([]);
@@ -840,7 +1018,7 @@ function StructuralDimension({ element }: { element: StructuralElement }) {
           setViewportId(nextViewportId);
           setActiveFamily(familyId);
           store.select(id);
-          setRightTab("item");
+          setRightTab("properties");
           setTool("select");
           setAddElementOpen(false);
         }}
@@ -1072,13 +1250,44 @@ function StructuralAddElementDialog({
   );
 }
 
+function StructuralDrawingNavigator({ drawings, selected, onSelect }: { drawings: Array<{ id:string; name:string; category:string; status:DemoStatus; sheetId:string }>; selected:string; onSelect:(id:string)=>void }) {
+  const [query,setQuery]=useState("");
+  const sheets=useDemoStore((state)=>state.sheets);
+  const filtered=drawings.filter((drawing)=>{const sheet=sheets.find((item)=>item.id===drawing.sheetId);return `${drawing.name} ${drawing.category} ${sheet?.sheetNo||""} ${sheet?.title||""}`.toLowerCase().includes(query.toLowerCase())});
+  const groups=[["Plans",filtered.filter((item)=>item.category==="plan"||item.category==="detail")],["Sections & elevations",filtered.filter((item)=>item.category==="section"||item.category==="elevation")],["Schedules",filtered.filter((item)=>item.category==="schedule")]] as const;
+  return <div className="flex h-full min-h-0 flex-col"><div className="border-b border-slate-200 p-2"><div className="relative"><span className="absolute left-2.5 top-2 text-xs">🔎</span><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search drawings…" className="h-8 w-full rounded-md border border-slate-200 bg-slate-50 pl-8 pr-2 text-[11px] outline-none focus:border-blue-300 focus:bg-white"/></div></div><div className="min-h-0 flex-1 overflow-y-auto p-2">{groups.map(([label,items])=>items.length?<div key={label} className="mb-3"><p className="mb-1 px-1 text-[9px] font-bold uppercase tracking-[.14em] text-slate-400">{label}</p><div className="space-y-1">{items.map((drawing)=>{const sheet=sheets.find((item)=>item.id===drawing.sheetId);return <button key={drawing.id} type="button" onClick={()=>onSelect(drawing.id)} className={selected===drawing.id?"w-full border border-blue-300 bg-blue-50 p-2 text-left shadow-sm":"w-full border border-slate-200 bg-white p-2 text-left hover:border-blue-200 hover:bg-slate-50"}><div className="flex gap-2"><span className="relative flex h-9 w-8 shrink-0 items-center justify-center rounded bg-red-50 text-base ring-1 ring-red-200">📄<span className="absolute -bottom-.5 rounded-sm bg-red-600 px-1 text-[5px] font-black text-white">PDF</span></span><ViewportCardLabel viewportName={drawing.name} sheetTitle={sheet?.title} sheetNumber={sheet?.sheetNo} category={drawing.category} revision={sheet?.revision}/><span className={drawing.status==="confirmed"?"mt-1 h-2 w-2 rounded-full bg-emerald-500":"mt-1 h-2 w-2 rounded-full bg-amber-400"}/></div></button>})}</div></div>:null)}{!filtered.length?<p className="p-5 text-center text-xs text-slate-400">No drawings match this search.</p>:null}</div></div>;
+}
+
+function StructuralTakeoffNavigator({ element, selectedId, onSelect }: { element:StructuralElement; selectedId:string|null; onSelect:(id:string,viewportId:string)=>void }) {
+  const state=useStructuralStore();
+  const [query,setQuery]=useState("");
+  const items=element==="columns"?state.columns:element==="beams"?state.beams:state.slabPlates;
+  const filtered=items.filter((item)=>`${item.id} ${item.familyId} ${item.floorId}`.toLowerCase().includes(query.toLowerCase()));
+  return <div className="flex h-full min-h-0 flex-col"><div className="border-b border-slate-200 p-2"><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder={`Search ${element}…`} className="h-8 w-full rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] outline-none focus:border-blue-300 focus:bg-white"/><div className="mt-2 grid grid-cols-3 gap-1 text-center text-[9px]"><span className="rounded bg-slate-100 px-1 py-1">All {items.length}</span><span className="rounded bg-amber-50 px-1 py-1 text-amber-700">Review {items.filter((item)=>item.status==="needs_review").length}</span><span className="rounded bg-emerald-50 px-1 py-1 text-emerald-700">Done {items.filter((item)=>item.status==="confirmed").length}</span></div></div><div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">{filtered.map((item)=><button key={item.id} type="button" onClick={()=>onSelect(item.id,item.viewportId)} className={selectedId===item.id?"w-full border border-blue-300 bg-blue-50 p-2 text-left":"w-full border border-transparent p-2 text-left hover:border-slate-200 hover:bg-slate-50"}><div className="flex items-center gap-2"><span className={item.status==="confirmed"?"h-2 w-2 rounded-full bg-emerald-500":item.status==="needs_review"?"h-2 w-2 rounded-full bg-amber-500":"h-2 w-2 rounded-full bg-sky-500"}/><span className="min-w-0 flex-1 truncate text-[11px] font-bold text-slate-800">{item.id}</span><span className="text-[8px] uppercase text-slate-400">{item.status.replace("_"," ")}</span></div><p className="ml-4 mt-1 truncate text-[9px] text-slate-500">{item.familyId} · {item.floorId}</p></button>)}</div></div>;
+}
+
+function StructuralBookmarks({ drawings, onSelect }: { drawings:Array<{id:string;name:string;category:string}>; onSelect:(id:string)=>void }) {
+  const items=drawings.filter((item)=>["section","detail","schedule","elevation"].includes(item.category));
+  return <div className="p-2"><div className="mb-2 flex items-center justify-between px-1"><p className="text-[9px] font-bold uppercase tracking-[.14em] text-slate-400">Automatic bookmarks</p><button type="button" className="text-sm text-blue-600">＋</button></div>{items.length?<div className="space-y-1">{items.map((item)=><button key={item.id} type="button" onClick={()=>onSelect(item.id)} className="flex w-full items-center gap-2 border border-slate-200 bg-white px-2 py-2 text-left hover:border-blue-200 hover:bg-blue-50"><span>🔖</span><span className="min-w-0 flex-1 truncate text-[10px] font-semibold text-slate-700">{item.name}</span></button>)}</div>:<div className="border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-[10px] text-slate-500">No detail bookmarks available.</div>}</div>;
+}
+
+function StructuralEvidence({ element, item, drawingName }: { element:StructuralElement; item:ColumnInstance|BeamRun|SlabPlate; drawingName:string }) {
+  return <div className="space-y-3 p-4"><div><p className="text-[9px] font-bold uppercase tracking-[.14em] text-violet-600">Evidence trail</p><h3 className="mt-1 text-sm font-bold text-slate-900">{item.id}</h3></div><div className="border border-slate-200 bg-white p-3"><p className="text-[9px] font-bold uppercase text-slate-400">Detected on</p><p className="mt-1 text-xs font-semibold text-slate-800">{drawingName}</p><p className="mt-1 text-[10px] text-slate-500">Project PDF · {element} source viewport</p></div><div className="border border-slate-200 bg-white p-3"><p className="text-[9px] font-bold uppercase text-slate-400">Classification</p><p className="mt-1 text-xs font-semibold text-slate-800">{item.familyId}</p><p className="mt-1 text-[10px] text-slate-500">Linked family and calculated geometry</p></div><button type="button" className="w-full border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700">Open source drawing</button></div>;
+}
+
+function StructuralHistory({ item }: { item:ColumnInstance|BeamRun|SlabPlate }) {
+  return <div className="space-y-3 p-4"><div><p className="text-[9px] font-bold uppercase tracking-[.14em] text-slate-400">Change history</p><h3 className="mt-1 text-sm font-bold text-slate-900">{item.id}</h3></div><div className="border-l-2 border-blue-300 pl-3"><p className="text-[10px] font-semibold text-slate-700">Current geometry loaded</p><p className="mt-1 text-[9px] text-slate-400">Source: {item.viewportId}</p></div><div className="border-l-2 border-emerald-300 pl-3"><p className="text-[10px] font-semibold text-slate-700">Status: {item.status.replace("_"," ")}</p><p className="mt-1 text-[9px] text-slate-400">Family: {item.familyId}</p></div></div>;
+}
+
 function StructuralFamilies({
   element,
   activeId,
+  revealKey,
   onSelect,
 }: {
   element: StructuralElement;
   activeId: string;
+  revealKey: string;
   onSelect: (id: string) => void;
 }) {
   const store = useStructuralStore();
@@ -1091,7 +1300,7 @@ function StructuralFamilies({
   useEffect(() => setDraft(selected ? { ...selected } : null), [selected?.id]);
   useEffect(() => {
     if (activeId) setExpandedId(activeId);
-  }, [activeId]);
+  }, [activeId, revealKey]);
   function create() {
     const n = list.length + 1;
     if (element === "columns") {
@@ -1168,8 +1377,12 @@ function StructuralFamilies({
                 type="button"
                 aria-expanded={open}
                 onClick={() => {
+                  if (open) {
+                    setExpandedId(null);
+                    return;
+                  }
                   onSelect(f.id);
-                  setExpandedId((current) => (current === f.id ? null : f.id));
+                  setExpandedId(f.id);
                 }}
                 className="w-full p-3 text-left hover:bg-blue-50"
               >
@@ -1786,24 +1999,49 @@ function ColumnBox({
   const store = useStructuralStore();
   const canvasScale = useDrawingZoom();
   const family = store.columnFamilies.find((x) => x.id === item.familyId)!;
-  const selected = store.selectedId === item.id;
+  const selected = store.selectedIds.includes(item.id);
   const [hovered, setHovered] = useState(false);
-  const [drag, setDrag] = useState<{ start: Point; box: BBox } | null>(null);
+  const [drag, setDrag] = useState<{
+    start: Point;
+    box: BBox;
+    group?: boolean;
+    last?: Point;
+  } | null>(null);
   const b = columnDrawingBox(item, family);
   function down(e: ReactPointerEvent<SVGRectElement>) {
+    if (e.button !== 0) return;
     const p = svgPoint(e as any);
     if (!p) return;
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     store.captureUndo();
-    setDrag({ start: p, box: { ...b } });
-    store.select(item.id);
+    setDrag({
+      start: p,
+      box: { ...b },
+      group:
+        selected &&
+        store.selectedIds.length > 1 &&
+        !(e.ctrlKey || e.metaKey || e.shiftKey),
+      last: p,
+    });
+    if (e.ctrlKey || e.metaKey || e.shiftKey) store.toggleSelect(item.id);
+    else store.select(item.id);
     onSelect();
   }
   function move(e: ReactPointerEvent<SVGRectElement>) {
     if (!drag) return;
     const p = svgPoint(e as any);
     if (!p) return;
+    if (drag.group && drag.last) {
+      store.translateSelected(
+        store.selectedIds,
+        p.x - drag.last.x,
+        p.y - drag.last.y,
+      );
+      setDrag({ ...drag, last: p });
+      onSnapTarget(null);
+      return;
+    }
     const rawCenter = {
       x: drag.box.x + drag.box.width / 2 + p.x - drag.start.x,
       y: drag.box.y + drag.box.height / 2 + p.y - drag.start.y,
@@ -1833,7 +2071,8 @@ function ColumnBox({
     <g
       onClick={(e) => {
         e.stopPropagation();
-        store.select(item.id);
+        if (e.ctrlKey || e.metaKey || e.shiftKey) store.toggleSelect(item.id);
+        else store.select(item.id);
         onSelect();
       }}
       onPointerEnter={() => setHovered(true)}
@@ -1923,11 +2162,18 @@ function BeamLine({
 }) {
   type BeamDrag =
     | { type: "start" | "end" }
-    | { type: "move"; origin: Point; start: Point; end: Point };
+    | {
+        type: "move";
+        origin: Point;
+        start: Point;
+        end: Point;
+        group?: boolean;
+        last?: Point;
+      };
   const store = useStructuralStore();
   const canvasScale = useDrawingZoom();
   const family = store.beamFamilies.find((x) => x.id === item.familyId)!;
-  const selected = store.selectedId === item.id;
+  const selected = store.selectedIds.includes(item.id);
   const [hovered, setHovered] = useState(false);
   const [drag, setDrag] = useState<BeamDrag | null>(null);
   function move(e: ReactPointerEvent<SVGElement>) {
@@ -1935,6 +2181,16 @@ function BeamLine({
     const p = svgPoint(e as any);
     if (!p) return;
     if (drag.type === "move") {
+      if (drag.group && drag.last) {
+        store.translateSelected(
+          store.selectedIds,
+          p.x - drag.last.x,
+          p.y - drag.last.y,
+        );
+        setDrag({ ...drag, last: p });
+        onSnapTarget(null);
+        return;
+      }
       const dx = p.x - drag.origin.x,
         dy = p.y - drag.origin.y;
       const rawStart = { x: drag.start.x + dx, y: drag.start.y + dy };
@@ -1980,18 +2236,25 @@ function BeamLine({
     );
   }
   function moveWhole(e: ReactPointerEvent<SVGLineElement>) {
+    if (e.button !== 0) return;
     const p = svgPoint(e as any);
     if (!p) return;
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     store.captureUndo();
-    store.select(item.id);
+    if (e.ctrlKey || e.metaKey || e.shiftKey) store.toggleSelect(item.id);
+    else store.select(item.id);
     onSelect();
     setDrag({
       type: "move",
       origin: p,
       start: { ...item.start },
       end: { ...item.end },
+      group:
+        selected &&
+        store.selectedIds.length > 1 &&
+        !(e.ctrlKey || e.metaKey || e.shiftKey),
+      last: p,
     });
   }
   function stop() {
@@ -2002,7 +2265,8 @@ function BeamLine({
     <g
       onClick={(e) => {
         e.stopPropagation();
-        store.select(item.id);
+        if (e.ctrlKey || e.metaKey || e.shiftKey) store.toggleSelect(item.id);
+        else store.select(item.id);
         onSelect();
       }}
       onPointerEnter={() => setHovered(true)}
@@ -2063,6 +2327,7 @@ function BeamLine({
               pointerEvents="all"
               className="cursor-crosshair"
               onPointerDown={(e) => {
+                if (e.button !== 0) return;
                 e.stopPropagation();
                 e.currentTarget.setPointerCapture(e.pointerId);
                 store.captureUndo();
@@ -2098,11 +2363,18 @@ function SlabShape({
 }) {
   type SlabDrag =
     | { type: "vertex"; index: number }
-    | { type: "move"; origin: Point; points: Point[]; voids: Point[][] };
+    | {
+        type: "move";
+        origin: Point;
+        points: Point[];
+        voids: Point[][];
+        group?: boolean;
+        last?: Point;
+      };
   const store = useStructuralStore();
   const canvasScale = useDrawingZoom();
   const family = store.slabFamilies.find((x) => x.id === item.familyId)!;
-  const selected = store.selectedId === item.id;
+  const selected = store.selectedIds.includes(item.id);
   const [hovered, setHovered] = useState(false);
   const [drag, setDrag] = useState<SlabDrag | null>(null);
   const c = centroid(item.points);
@@ -2115,6 +2387,16 @@ function SlabShape({
     if (!drag) return;
     const p = svgPoint(e as any);
     if (!p) return;
+    if (drag.type === "move" && drag.group && drag.last) {
+      store.translateSelected(
+        store.selectedIds,
+        p.x - drag.last.x,
+        p.y - drag.last.y,
+      );
+      setDrag({ ...drag, last: p });
+      onSnapTarget(null);
+      return;
+    }
     if (drag.type === "vertex") {
       const result = snap
         ? resolveSnap(p, item.id, undefined, 24 / Math.max(0.01, canvasScale))
@@ -2182,7 +2464,8 @@ function SlabShape({
     <g
       onClick={(e) => {
         e.stopPropagation();
-        store.select(item.id);
+        if (e.ctrlKey || e.metaKey || e.shiftKey) store.toggleSelect(item.id);
+        else store.select(item.id);
         onSelect();
       }}
       onPointerEnter={() => setHovered(true)}
@@ -2198,12 +2481,14 @@ function SlabShape({
         vectorEffect="non-scaling-stroke"
         className="cursor-move"
         onPointerDown={(e) => {
+          if (e.button !== 0) return;
           const point = svgPoint(e as any);
           if (!point) return;
           e.stopPropagation();
           e.currentTarget.setPointerCapture(e.pointerId);
           store.captureUndo();
-          store.select(item.id);
+          if (e.ctrlKey || e.metaKey || e.shiftKey) store.toggleSelect(item.id);
+          else store.select(item.id);
           onSelect();
           setDrag({
             type: "move",
@@ -2212,6 +2497,11 @@ function SlabShape({
             voids: item.voids.map((voidPoints) =>
               voidPoints.map((value) => ({ ...value })),
             ),
+            group:
+              selected &&
+              store.selectedIds.length > 1 &&
+              !(e.ctrlKey || e.metaKey || e.shiftKey),
+            last: point,
           });
         }}
         onPointerMove={move}
@@ -2258,6 +2548,7 @@ function SlabShape({
               vectorEffect="non-scaling-stroke"
               className="cursor-crosshair"
               onPointerDown={(e) => {
+                if (e.button !== 0) return;
                 e.stopPropagation();
                 e.currentTarget.setPointerCapture(e.pointerId);
                 store.captureUndo();
@@ -2838,6 +3129,24 @@ function EditableSlabSection() {
       })}
     </g>
   );
+}
+
+function structuralBoxPoints(a: Point, b: Point) {
+  return [
+    { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) },
+    { x: Math.max(a.x, b.x), y: Math.min(a.y, b.y) },
+    { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) },
+    { x: Math.min(a.x, b.x), y: Math.max(a.y, b.y) },
+  ];
+}
+
+function simplifyStructuralStroke(items: Point[], tolerance: number) {
+  if (items.length <= 3) return items;
+  const result = [items[0]];
+  for (let index = 1; index < items.length - 1; index += 1)
+    if (distance(items[index], result[result.length - 1]) >= tolerance) result.push(items[index]);
+  if (distance(items[items.length - 1], result[result.length - 1]) >= tolerance / 2) result.push(items[items.length - 1]);
+  return result;
 }
 
 function Draft({ points: items }: { points: Point[] }) {
@@ -3609,6 +3918,22 @@ type StructuralRow = {
   source: string;
   entityId: string;
 };
+
+// These labels must not read the persisted demo store during SSR. The server
+// and browser can hold different snapshots while Zustand rehydrates, which
+// would otherwise make React see text such as "First" on one side and "FF"
+// on the other.
+function structuralFloorLabel(id: string) {
+  return id === "GF"
+    ? "Ground"
+    : id === "FF"
+      ? "First"
+      : id === "TYP"
+        ? "Typical"
+        : id === "RF"
+          ? "Terrace"
+          : id;
+}
 function StructuralWorkbook({
   projectId,
   element,
@@ -3849,7 +4174,7 @@ function useStructuralRows(element: StructuralElement) {
             familyId: f.id,
             familyLabel: f.description,
             floorId,
-            scope: floorName(floorId),
+            scope: structuralFloorLabel(floorId),
             calc:
               factor > 1
                 ? `${group.length} × ${factor} = ${count}`
@@ -3877,7 +4202,9 @@ function useStructuralRows(element: StructuralElement) {
               factor = floorFactor(floorId);
             const baseLength = group.reduce(
                 (s, x) =>
-                  s + distance(x.start, x.end) * scaleForViewport(x.viewportId),
+                  s +
+                  (x.netLengthM ??
+                    distance(x.start, x.end) * scaleForViewport(x.viewportId)),
                 0,
               ),
               length = baseLength * factor;
@@ -3885,8 +4212,9 @@ function useStructuralRows(element: StructuralElement) {
               group.reduce(
                 (s, x) =>
                   s +
-                  distance(x.start, x.end) *
-                    scaleForViewport(x.viewportId) *
+                  (x.netLengthM ??
+                    distance(x.start, x.end) *
+                      scaleForViewport(x.viewportId)) *
                     (f.widthMm / 1000) *
                     ((x.kind === "Downstand"
                       ? Math.max(x.dropMm, 1)
@@ -3898,8 +4226,9 @@ function useStructuralRows(element: StructuralElement) {
               group.reduce(
                 (s, x) =>
                   s +
-                  (distance(x.start, x.end) *
-                    scaleForViewport(x.viewportId) *
+                  ((x.netLengthM ??
+                    distance(x.start, x.end) *
+                      scaleForViewport(x.viewportId)) *
                     (f.widthMm +
                       2 * (x.kind === "Downstand" ? x.dropMm : f.depthMm))) /
                     1000,
@@ -3910,7 +4239,7 @@ function useStructuralRows(element: StructuralElement) {
               familyId: f.id,
               familyLabel: f.description,
               floorId,
-              scope: `${floorName(floorId)} · ${kind}`,
+              scope: `${structuralFloorLabel(floorId)} · ${kind}`,
               calc: `${baseLength.toFixed(2)} m × section${factor > 1 ? ` × ${factor}` : ""}`,
               qty: volume,
               unit: "m³",
@@ -3944,7 +4273,7 @@ function useStructuralRows(element: StructuralElement) {
             familyId: f.id,
             familyLabel: f.description,
             floorId,
-            scope: floorName(floorId),
+            scope: structuralFloorLabel(floorId),
             calc: variableThickness
               ? `(${gross.toFixed(2)} − ${deduct.toFixed(2)})${factor > 1 ? ` × ${factor}` : ""} · area control only`
               : `(${gross.toFixed(2)} − ${deduct.toFixed(2)}) × ${thickness.toFixed(3)}${factor > 1 ? ` × ${factor}` : ""}`,
@@ -3996,6 +4325,7 @@ function Structural3D({
   const visibleItems = allItems.filter(
     (x) => storey === "all" || x.floorId === storey,
   );
+  const storeys = [...new Set(allItems.map((item) => item.floorId))];
   const selectedItems = selectedIds
     .map((id) => allItems.find((x) => x.id === id))
     .filter(Boolean) as Array<ColumnInstance | BeamRun | SlabPlate>;
@@ -4062,13 +4392,7 @@ function Structural3D({
           </span>
         </div>
         <div className="absolute left-4 top-20 z-10 flex flex-wrap gap-2">
-          {[
-            ["GF", "Ground"],
-            ["FF", "First"],
-            ["TYP", "Typical"],
-            ["RF", "Terrace"],
-            ["all", "All"],
-          ].map(([key, label]) => (
+          {[...storeys.map((key) => [key, key]), ["all", "All"]].map(([key, label]) => (
             <button
               key={key}
               onClick={() => changeStorey(key)}
@@ -4154,7 +4478,16 @@ function StructuralScene({
   onClear: () => void;
 }) {
   const store = useStructuralStore();
-  const floors = storey === "all" ? ["GF", "FF", "TYP", "RF"] : [storey];
+  const primaryItems =
+    element === "columns"
+      ? store.columns
+      : element === "beams"
+        ? store.beams
+        : store.slabPlates;
+  const floors =
+    storey === "all"
+      ? [...new Set(primaryItems.map((item) => item.floorId))]
+      : [storey];
   return (
     <svg
       viewBox="0 0 980 680"
@@ -4174,7 +4507,10 @@ function StructuralScene({
       </defs>
       <g transform="translate(170 70)" filter="url(#shadow)">
         {floors.map((floor, index) => {
-          const level = floors.length === 1 ? 210 : 350 - index * 88;
+          const level =
+            floors.length === 1
+              ? 210
+              : 420 - index * (360 / Math.max(1, floors.length - 1));
           const fade = (key: StructuralElement) => (key === element ? 1 : 0.22);
           const columns = store.columns
             .filter((x) => x.floorId === floor);
@@ -4297,7 +4633,7 @@ function StructuralScene({
                 fill="#64748b"
                 pointerEvents="none"
               >
-                {floorName(floor)}
+                {structuralFloorLabel(floor)}
               </text>
             </g>
           );
@@ -4328,7 +4664,8 @@ function selectionMetric(
     const length = (items as BeamRun[]).reduce(
       (total, item) =>
         total +
-        distance(item.start, item.end) * scaleForViewport(item.viewportId),
+        (item.netLengthM ??
+          distance(item.start, item.end) * scaleForViewport(item.viewportId)),
       0,
     );
     return { label: "Combined length", value: `${length.toFixed(2)} m` };
@@ -4386,7 +4723,7 @@ function Structural3DSelectionPanel({
       </div>
     );
   }
-  const storeys = [...new Set(items.map((x) => floorName(x.floorId)))],
+  const storeys = [...new Set(items.map((x) => structuralFloorLabel(x.floorId)))],
     familyIds = [...new Set(items.map((x) => x.familyId))],
     statuses = [...new Set(items.map((x) => x.status))],
     metric = selectionMetric(element, items);
@@ -4434,7 +4771,7 @@ function Structural3DSelectionPanel({
             <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
               <span>{item.id}</span>
               <span className="text-[10px] font-medium text-slate-400">
-                {item.familyId} · {floorName(item.floorId)} ▾
+                {item.familyId} · {structuralFloorLabel(item.floorId)} ▾
               </span>
             </summary>
             <div className="space-y-2 border-t border-slate-100 p-3">
@@ -4506,7 +4843,7 @@ function Structural3DItemDetails({
           label="Formwork"
           value={`${(girth * column.heightM).toFixed(2)} m²`}
         />
-        <Info label="Storey" value={floorName(column.floorId)} />
+        <Info label="Storey" value={structuralFloorLabel(column.floorId)} />
         <Info label="Drawing" value={family?.source || column.viewportId} />
         <Info label="Status" value={column.status} />
       </div>
@@ -4516,6 +4853,7 @@ function Structural3DItemDetails({
     const beam = item as BeamRun;
     const family = store.beamFamilies.find((x) => x.id === beam.familyId);
     const length =
+      beam.netLengthM ??
       distance(beam.start, beam.end) * scaleForViewport(beam.viewportId);
     const depth =
       beam.kind === "Downstand"
@@ -4535,7 +4873,7 @@ function Structural3DItemDetails({
         />
         <Info label="Length" value={`${length.toFixed(2)} m`} />
         <Info label="Concrete volume" value={`${volume.toFixed(3)} m³`} />
-        <Info label="Storey" value={floorName(beam.floorId)} />
+        <Info label="Storey" value={structuralFloorLabel(beam.floorId)} />
         <Info label="Status" value={beam.status} />
       </div>
     );
@@ -4561,7 +4899,7 @@ function Structural3DItemDetails({
         label="Concrete volume"
         value={`${(area * thickness).toFixed(3)} m³`}
       />
-      <Info label="Storey" value={floorName(slab.floorId)} />
+      <Info label="Storey" value={structuralFloorLabel(slab.floorId)} />
       <Info label="Status" value={slab.status} />
     </div>
   );
@@ -4588,12 +4926,16 @@ function selectedItem(
       : s.slabPlates.find((x) => x.id === id) || null;
 }
 function deleteSelected(element: StructuralElement, id: string | null) {
-  if (!id) return;
   const s = useStructuralStore.getState();
+  const ids = s.selectedIds.length ? s.selectedIds : id ? [id] : [];
+  if (!ids.length) return;
   s.captureUndo();
-  if (element === "columns") s.deleteColumn(id);
-  else if (element === "beams") s.deleteBeam(id);
-  else s.deleteSlab(id);
+  ids.forEach((selectedId) => {
+    if (element === "columns") s.deleteColumn(selectedId);
+    else if (element === "beams") s.deleteBeam(selectedId);
+    else s.deleteSlab(selectedId);
+  });
+  s.selectMany([]);
 }
 function splitBeam(item: BeamRun) {
   const s = useStructuralStore.getState();

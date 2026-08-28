@@ -62,6 +62,7 @@ export function DemoDrawing({
   toolbarRight,
   showMinimap = false,
   showDrawing = true,
+  hideToolbar = false,
   focusBox,
   focusRequest,
 }: {
@@ -78,6 +79,7 @@ export function DemoDrawing({
   toolbarRight?: ReactNode;
   showMinimap?: boolean;
   showDrawing?: boolean;
+  hideToolbar?: boolean;
   focusBox?: [number, number, number, number];
   focusRequest?: number;
 }) {
@@ -88,6 +90,17 @@ export function DemoDrawing({
   );
   const box = viewport?.bbox;
   const size = drawingSize(sheet);
+  const comparisonImages = useMemo(
+    () =>
+      store.sheets
+        .filter((item) => item.id !== sheet?.id && item.image)
+        .map((item) => ({
+          id: item.id,
+          label: `${item.sheetNo} · ${item.title} · Rev ${item.revision || "-"}`,
+          imageUrl: item.image,
+        })),
+    [sheet?.id, store.sheets],
+  );
 
   const [view, setView] = useState<{ zoom: number; pan: Point }>({
     zoom: 1,
@@ -128,8 +141,10 @@ export function DemoDrawing({
         className="h-full min-h-0"
         toolbarLeft={toolbar}
         toolbarRight={toolbarRight}
+        hideToolbar={hideToolbar}
         focusBox={focusBox}
         focusRequest={focusRequest}
+        comparisonImages={comparisonImages}
       >
         {!showDrawing ? (
           <rect

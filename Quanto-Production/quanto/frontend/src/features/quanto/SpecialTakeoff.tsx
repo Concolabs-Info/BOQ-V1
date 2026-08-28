@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { DemoDrawing, svgPoint } from "./components/DemoDrawing";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { DemoDrawing, drawingSize, svgPoint } from "./components/DemoDrawing";
 import {
   ResizableThreePane,
   ResizableTwoPane,
 } from "./components/ResizablePanels";
 import { DemoChat } from "./components/DemoChat";
+import { ViewportCardLabel } from "./components/ViewportCardLabel";
 import { useDemoStore } from "@/features/demo/store";
 import {
   centroid,
@@ -22,8 +24,15 @@ import {
 import { useSpecialStore } from "./specialStore";
 import type { Flight, Pile, PileCap, SpecialElement } from "./specialTypes";
 import type { BBox, Point } from "@/features/demo/types";
+import { appRoutes } from "@/shared/constants/appRoutes";
+import { dispatchTakeoffStatus, useTakeoffCommand } from "./takeoffCommands";
+import { findPdfVectorSnap, usePdfSnapModes, usePdfVectorSource } from "./snapping/pdfVectorSnap";
+import { MeasurementOverlay, useMeasurementTool } from "./measurements/MeasurementOverlay";
+import type { MeasurementKind } from "./measurements/measurementStore";
+import { exportTakeoffCsv, type ExportRow } from "./takeoffExport";
 
 type Mode = "select" | "pan" | "draw" | "measure";
+type SpecialDrawShape = "polygon" | "rectangle" | "freehand";
 const field =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm";
 const button =
@@ -41,6 +50,22 @@ const viewports: Record<SpecialElement, string[]> = {
   ],
   foundation: ["VP-FOUND-INTERNAL", "VP-FOUND-BLIND", "VP-FOUND-COLUMNS", "VP-GROUND", "VP-SITE"],
 };
+
+function specialSnapPoint(point:Point,items:Array<Flight|Pile|PileCap>,snap:boolean,origin:Point|null,ortho:boolean){
+  let next=point;
+  if(snap){
+    const candidates:Point[]=[];
+    items.forEach((item)=>{
+      if("points" in item)candidates.push(...item.points);
+      else candidates.push({x:item.bbox.x,y:item.bbox.y},{x:item.bbox.x+item.bbox.width,y:item.bbox.y},{x:item.bbox.x+item.bbox.width,y:item.bbox.y+item.bbox.height},{x:item.bbox.x,y:item.bbox.y+item.bbox.height},{x:item.bbox.x+item.bbox.width/2,y:item.bbox.y+item.bbox.height/2});
+    });
+    let nearest:Point|null=null,nearestDistance=18;
+    candidates.forEach((candidate)=>{const value=distance(point,candidate);if(value<nearestDistance){nearest=candidate;nearestDistance=value;}});
+    if(nearest)next=nearest;
+  }
+  if(origin&&ortho){const dx=next.x-origin.x,dy=next.y-origin.y;next=Math.abs(dx)>=Math.abs(dy)?{x:next.x,y:origin.y}:{x:origin.x,y:next.y};}
+  return next;
+}
 
 export function SpecialTakeoff({
   projectId,
@@ -67,6 +92,7 @@ function SpecialDimension({
   projectId: string;
   element: SpecialElement;
 }) {
+  const router = useRouter();
   const demo = useDemoStore(),
     st = useSpecialStore();
   const allowed = viewports[element];
@@ -74,11 +100,18 @@ function SpecialDimension({
     demo.viewports.find(
       (v) => v.id === demo.selectedViewportId && allowed.includes(v.id),
     ) || demo.viewports.find((v) => v.id === allowed[0])!;
-  const [tab, setTab] = useState<"viewports" | "families">("viewports"),
-    [rightTab, setRightTab] = useState<"copilot" | "item">("item"),
+  const vectorSheet=demo.sheets.find((sheet)=>sheet.id===viewport?.sheetId);
+  const vectorSize=drawingSize(vectorSheet);
+  const pdfVectors=usePdfVectorSource(
+    vectorSheet?`project-page:${projectId}:${vectorSheet.page}:${vectorSize.width}x${vectorSize.height}`:"",
+    vectorSheet?`/api/v1/projects/${projectId}/pages/${vectorSheet.page}/vectors?width=${vectorSize.width}&height=${vectorSize.height}`:"",
+  );
+  const pdfSnapModes=usePdfSnapModes().modes;
+  const [tab, setTab] = useState<"drawings" | "families">("drawings"),
+    [rightTab, setRightTab] = useState<"properties" | "ai">("ai"),
     [mode, setMode] = useState<Mode>("select"),
     [draft, setDraft] = useState<Point[]>([]),
-    [measure, setMeasure] = useState<Point[]>([]),
+    [measurementKind, setMeasurementKind] = useState<MeasurementKind>("distance"),
     [minimap, setMinimap] = useState(false),
     [layers, setLayers] = useState({
       flights: true,
@@ -86,15 +119,40 @@ function SpecialDimension({
       piles: true,
       caps: true,
     }),
-    [kind, setKind] = useState(element === "stairs-ramps" ? "flight" : "pile");
+    [snap, setSnap] = useState(true),
+    [ortho, setOrtho] = useState(false),
+    [kind, setKind] = useState(element === "stairs-ramps" ? "flight" : "pile"),
+    [drawShape,setDrawShape]=useState<SpecialDrawShape>("polygon"),
+    [drawAction,setDrawAction]=useState<"create"|"subtract"|"cutout">("create"),
+    [selectionBox,setSelectionBox]=useState<{start:Point;current:Point}|null>(null);
+  const clipboard = useRef<Array<Flight | Pile | PileCap>>([]);
   const visibleFlights = st.flights.filter((x) => x.viewportId === viewport.id),
     visiblePiles = st.piles.filter((x) => x.viewportId === viewport.id),
     visibleCaps = st.caps.filter((x) => x.viewportId === viewport.id);
+  const measurement = useMeasurementTool({
+    viewportId: `special:${viewport.id}`,
+    scale: scaleForViewport(viewport.id),
+    active: mode === "measure",
+    deleteEnabled: mode === "select" || mode === "measure",
+    kind: measurementKind,
+  });
+  const visibleSelectableIds = useMemo(() => (element === "stairs-ramps" ? visibleFlights : [...visiblePiles, ...visibleCaps]).map((item) => item.id), [element, visibleCaps, visibleFlights, visiblePiles]);
+  useEffect(()=>{const keyDown=(event:KeyboardEvent)=>{const target=event.target as HTMLElement|null;if(target?.closest("input,textarea,select,[contenteditable=true]")||mode!=="select")return;
+    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="a"){event.preventDefault();st.selectMany(visibleSelectableIds);return;}
+    if(event.key==="Escape"){st.selectMany([]);return;}if(event.key!=="Tab"||!visibleSelectableIds.length)return;event.preventDefault();const current=visibleSelectableIds.indexOf(st.selectedId||"");st.select(visibleSelectableIds[(current+(event.shiftKey?-1:1)+visibleSelectableIds.length)%visibleSelectableIds.length]);};window.addEventListener("keydown",keyDown);return()=>window.removeEventListener("keydown",keyDown);},[mode,st.select,st.selectMany,st.selectedId,visibleSelectableIds]);
+  function snappedPoint(p:Point,origin:Point|null=draft.at(-1)||null){
+    const semantic = specialSnapPoint(p, [...visibleFlights, ...visiblePiles, ...visibleCaps], snap, origin, ortho);
+    const pdfTarget=snap?findPdfVectorSnap(p,pdfVectors.segments,18,pdfSnapModes):null;
+    const semanticDistance=distance(p,semantic);
+    return pdfTarget&&(semanticDistance<0.001||pdfTarget.distance<semanticDistance)?pdfTarget.point:semantic;
+  }
   function click(p: Point) {
+    const point=snappedPoint(p);
     if (mode === "measure") {
-      setMeasure((m) => (m.length ? [m[0], p] : [p]));
+      measurement.canvasClick(point);
       return;
     }
+    if (mode === "select") { st.select(null); return; }
     if (mode !== "draw") return;
     if (element === "foundation" && kind === "pile") {
       if (!st.pileFamilies.length) return;
@@ -106,7 +164,7 @@ function SpecialDimension({
         familyId: f.id,
         floorId: "GF",
         viewportId: viewport.id,
-        bbox: { x: p.x - 22, y: p.y - 22, width: 44, height: 44 },
+        bbox: { x: point.x - 22, y: point.y - 22, width: 44, height: 44 },
         lengthM: 12.5,
         commencingLevelM: 0,
         toeLevelM: -12.5,
@@ -116,32 +174,34 @@ function SpecialDimension({
       return;
     }
     if (element === "stairs-ramps") {
-      if (draft.length >= 3 && distance(p, draft[0]) <= 12) {
+      if(drawShape==="freehand")return;
+      if(drawShape==="rectangle"){
+        if(!draft.length)setDraft([point]);
+        else finish(box(draft[0],point));
+        return;
+      }
+      if (draft.length >= 3 && distance(point, draft[0]) <= 12) {
         finish(draft);
         return;
       }
-      setDraft((current) => [...current, p]);
+      setDraft((current) => [...current, point]);
       return;
     }
-    setDraft((d) => (d.length ? [d[0], p] : [p]));
+    setDraft((d) => (d.length ? [d[0], point] : [point]));
   }
   function finish(points = draft) {
     if (points.length < (element === "stairs-ramps" ? 3 : 2)) return;
     st.captureUndo();
     const a = points[0], b = points[points.length - 1];
     if (element === "stairs-ramps") {
-      const id = `FLT-${Date.now()}`;
-      st.addFlight({
-        id,
-        familyId: st.flightFamilies[0].id,
-        railFamilyId: st.railFamilies[0].id,
-        floorId: floorFor(viewport.id),
-        viewportId: viewport.id,
-        points,
-        voids: [],
-        railEdges: points.map(() => true),
-        status: "ready",
-      });
+      if(drawAction!=="create"){
+        const host=st.flights.find((item)=>item.id===st.selectedId&&item.viewportId===viewport.id);
+        if(host)st.updateFlight(host.id,{voids:[...host.voids,points],status:"needs_review"});
+        else dispatchTakeoffStatus({message:`Select the flight or ramp to ${drawAction==="cutout"?"cut out":"subtract from"} first`});
+      }else{
+        const id = `FLT-${Date.now()}`;
+        st.addFlight({id,familyId:st.flightFamilies[0].id,railFamilyId:st.railFamilies[0].id,floorId:floorFor(viewport.id),viewportId:viewport.id,points,voids:[],railEdges:points.map(()=>true),status:"ready"});
+      }
     } else {
       const id = `CAP-${Date.now()}`;
       st.addCap({
@@ -158,18 +218,116 @@ function SpecialDimension({
     setMode("select");
   }
   function remove() {
-    if (!st.selectedId) return;
+    const ids = st.selectedIds;
+    if (!ids.length) return;
     st.captureUndo();
-    if (st.flights.some((x) => x.id === st.selectedId))
-      st.deleteFlight(st.selectedId);
-    else if (st.piles.some((x) => x.id === st.selectedId))
-      st.deletePile(st.selectedId);
-    else st.deleteCap(st.selectedId);
+    ids.forEach((id) => {
+      if (st.flights.some((x) => x.id === id)) st.deleteFlight(id);
+      else if (st.piles.some((x) => x.id === id)) st.deletePile(id);
+      else st.deleteCap(id);
+    });
+    st.selectMany([]);
   }
   const selected = element === "stairs-ramps"
     ? st.flights.find((x) => x.id === st.selectedId)
     : st.piles.find((x) => x.id === st.selectedId) ||
       st.caps.find((x) => x.id === st.selectedId);
+  useEffect(() => {
+    if (!selected) return;
+    setTab("families");
+    setRightTab("properties");
+  }, [selected?.familyId, selected?.id]);
+  function copySelected() {
+    const items = st.selectedIds.map((id) => st.flights.find((x) => x.id === id) || st.piles.find((x) => x.id === id) || st.caps.find((x) => x.id === id)).filter((item): item is Flight | Pile | PileCap => Boolean(item));
+    if (!items.length) { dispatchTakeoffStatus({ message: "Select an item first" }); return false; }
+    clipboard.current = JSON.parse(JSON.stringify(items));
+    dispatchTakeoffStatus({ message: `Copied ${items.length} item${items.length === 1 ? "" : "s"}` });
+    return true;
+  }
+  function pasteSelected() {
+    if (!clipboard.current.length) { dispatchTakeoffStatus({ message: "Nothing to paste" }); return; }
+    const items:any[]=JSON.parse(JSON.stringify(clipboard.current));
+    const suffix=Date.now().toString(36);
+    st.captureUndo();
+    const ids=items.map((item,index)=>{item.id=`${String(item.id).replace(/-COPY-[^-]+(?:-\d+)?$/,"")}-COPY-${suffix}-${index+1}`;item.viewportId=viewport.id;item.status="needs_review";
+      if("points" in item){item.points=item.points.map((point:Point)=>({x:point.x+24,y:point.y+24}));item.voids=item.voids.map((ring:Point[])=>ring.map((point)=>({x:point.x+24,y:point.y+24})));st.addFlight(item);}
+      else if("lengthM" in item){item.bbox={...item.bbox,x:item.bbox.x+24,y:item.bbox.y+24};st.addPile(item);}
+      else{item.bbox={...item.bbox,x:item.bbox.x+24,y:item.bbox.y+24};st.addCap(item);}return item.id as string;});
+    st.selectMany(ids);setRightTab("properties");
+  }
+  function setSelectedStatus(status:"ready"|"confirmed"|"needs_review"){
+    if(!st.selectedIds.length){dispatchTakeoffStatus({message:"Select an item first"});return;}
+    st.selectedIds.forEach((id)=>{if(st.flights.some((x)=>x.id===id))st.updateFlight(id,{status});
+    else if(st.piles.some((x)=>x.id===id))st.updatePile(id,{status});
+    else st.updateCap(id,{status});});
+  }
+  function stepDrawing(direction:-1|1){const index=Math.max(0,allowed.indexOf(viewport.id));const next=allowed[(index+direction+allowed.length)%allowed.length];if(next)demo.setSelectedViewport(next);}
+  function stepIssue(direction:-1|1){const rows=(element==="stairs-ramps"?st.flights:[...st.piles,...st.caps]).filter((item)=>item.status==="needs_review");if(!rows.length){dispatchTakeoffStatus({message:"No review issues"});return;}const index=rows.findIndex((item)=>item.id===st.selectedId),next=rows[(Math.max(0,index)+direction+rows.length)%rows.length];demo.setSelectedViewport(next.viewportId);st.select(next.id);setRightTab("properties");}
+  function exportCurrentTakeoff(){
+    const source=element==="stairs-ramps"?st.flights:[...st.piles,...st.caps];
+    const rows:ExportRow[]=source.map((item)=>{
+      let quantity:number,unit:string;
+      if("points" in item){quantity=polygonArea(item.points)*scaleForViewport(item.viewportId)**2;unit="m²";}
+      else if("lengthM" in item){quantity=item.lengthM;unit="m";}
+      else{quantity=item.bbox.width*item.bbox.height*scaleForViewport(item.viewportId)**2;unit="m²";}
+      return{ID:item.id,Element:element==="stairs-ramps"?"Stairs & ramps":"Foundation",Family:item.familyId,Level:floorName(item.floorId),Drawing:demo.viewports.find((value)=>value.id===item.viewportId)?.name||item.viewportId,Quantity:Number(quantity.toFixed(3)),Unit:unit,Status:item.status};
+    });
+    if(exportTakeoffCsv(`quanto-${element}-takeoff.csv`,rows))dispatchTakeoffStatus({message:`Exported ${rows.length} takeoff row${rows.length===1?"":"s"}`});
+    else dispatchTakeoffStatus({message:"There is no takeoff data to export"});
+  }
+  useEffect(()=>{dispatchTakeoffStatus({selected:st.selectedIds.length>1?`${st.selectedIds.length} items`:st.selectedId,snap,ortho,saving:"saved"});},[ortho,snap,st.selectedId,st.selectedIds.length]);
+  useEffect(()=>{if(snap&&pdfVectors.vectorAvailable)dispatchTakeoffStatus({message:`${pdfVectors.segments.length.toLocaleString()} PDF snap edges ready`});},[pdfVectors.segments.length,pdfVectors.vectorAvailable,snap]);
+  useTakeoffCommand((command)=>{
+    if(command.element!==element)return;
+    const label=command.label.toLowerCase();
+    const notify=(message:string)=>dispatchTakeoffStatus({message});
+    if(["select","move","edit points","endpoints"].includes(label)){setMode("select");setDraft([]);}
+    else if(label==="pan")setMode("pan");
+    else if(label==="open"||label==="search")setTab("drawings");
+    else if(label==="previous")stepDrawing(-1);
+    else if(label==="next")stepDrawing(1);
+    else if(label==="bookmarks"){setTab("drawings");notify("Viewports opened");}
+    else if(["families","materials","assemblies","project","company"].includes(label))setTab("families");
+    else if(label==="copy")copySelected();
+    else if(label==="cut"){if(copySelected())remove();}
+    else if(label==="paste")pasteSelected();
+    else if(label==="duplicate"){if(copySelected())pasteSelected();}
+    else if(label==="undo")st.undo();
+    else if(label==="redo")st.redo();
+    else if(label==="delete"||label==="remove"){if(measurement.selected)measurement.deleteSelected();else remove();}
+    else if(["distance","horizontal","vertical","angle","area","perimeter","radius","dimension","verify scale"].includes(label)&&command.tab==="measure"){setMeasurementKind((["area","perimeter","radius","angle"].includes(label)?label:"distance") as MeasurementKind);setMode("measure");measurement.clearDraft();notify(`${label[0].toUpperCase()+label.slice(1)} measurement active`);}
+    else if(label==="snap")setSnap((value)=>!value);
+    else if(label==="ortho")setOrtho((value)=>!value);
+    else if(label==="set scale"){
+      const entered=window.prompt("Enter drawing scale (for example 100 for 1:100)","100"),denominator=Number(entered?.replace("1:",""));
+      if(denominator>0){demo.updateViewport(viewport.id,{scaleMPerPx:1/(denominator*3.7795275591)});notify(`Scale set to 1:${denominator}`);}
+    }
+    else if(label==="layers")setTab("families");
+    else if(["area","polygon","rectangle","freehand","boundary","add area","flight","landing"].includes(label)){
+      if(element==="foundation"&&!['rectangle'].includes(label)){notify(`${command.label} applies to polygon-based areas; foundation pile caps use Rectangle`);return;}
+      setKind(element==="stairs-ramps"?"flight":"cap");setDrawShape(label==="rectangle"?"rectangle":label==="freehand"?"freehand":"polygon");setDrawAction("create");setSnap(true);setMode("draw");setDraft([]);
+    }
+    else if(["subtract","cutout","opening"].includes(label)){
+      if(element!=="stairs-ramps"){notify(`${command.label} is not applicable to pile or pile-cap placement`);return;}
+      setKind("flight");setDrawShape("polygon");setDrawAction(label==="subtract"?"subtract":"cutout");setSnap(true);setMode("draw");setDraft([]);notify(`Select a flight or ramp, then draw the ${label==="subtract"?"area to subtract":"enclosed opening"}`);
+    }
+    else if(["count","box","pile"].includes(label)){setKind(element==="foundation"?"pile":"flight");setMode("draw");setDraft([]);}
+    else if(["linear","segment","multi segment","continue","ground beam"].includes(label)){setMode("draw");setDraft([]);}
+    else if(label==="confirm")setSelectedStatus("confirmed");
+    else if(["needs review","reject","hold"].includes(label))setSelectedStatus("needs_review");
+    else if(label==="previous issue")stepIssue(-1);
+    else if(label==="next issue")stepIssue(1);
+    else if(label==="unreviewed")stepIssue(1);
+    else if(label==="resolve all")(element==="stairs-ramps"?st.flights:[...st.piles,...st.caps]).filter((item)=>item.status==="needs_review").forEach((item)=>{if(st.flights.some((x)=>x.id===item.id))st.updateFlight(item.id,{status:"confirmed"});else if(st.piles.some((x)=>x.id===item.id))st.updatePile(item.id,{status:"confirmed"});else st.updateCap(item.id,{status:"confirmed"});});
+    else if(label==="properties"||["width","depth","height","slope","risers"].includes(label))setRightTab("properties");
+    else if(label==="evidence"||label==="show evidence"||label==="evidence report"||label==="manual changes")setRightTab("properties");
+    else if(["explain","find similar","ai results"].includes(label))setRightTab("ai");
+    else if(label==="workbook"||label.includes("summary")||label==="preview"||["element","family","level"].includes(label))router.push(appRoutes.takeoff(projectId,element,"workbook"));
+    else if(["boq mapping","formulas","waste","rates","units"].includes(label))router.push(appRoutes.workspaceBoq(projectId));
+    else if(label==="export")exportCurrentTakeoff();
+    else if(label==="print")window.print();
+    else notify(`${command.label} is not connected in this workspace yet`);
+  });
   return (
     <ResizableThreePane
       storageKey={`special:${element}`}
@@ -180,8 +338,8 @@ function SpecialDimension({
       <aside className="border-r border-slate-200">
         <div className="grid grid-cols-2 gap-1 border-b p-2">
           <button
-            className={tab === "viewports" ? active : button}
-            onClick={() => setTab("viewports")}
+            className={tab === "drawings" ? active : button}
+            onClick={() => setTab("drawings")}
           >
             Viewports
           </button>
@@ -192,48 +350,73 @@ function SpecialDimension({
             Families
           </button>
         </div>
-        {tab === "viewports" ? (
+        {tab === "drawings" ? (
           <div className="space-y-2 p-3">
+            <input className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs" placeholder="Search drawings…" />
+            <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Plans</p>
             {allowed.map((id) => {
               const v = demo.viewports.find((x) => x.id === id);
+              const sheet = v ? demo.sheets.find((x) => x.id === v.sheetId) : null;
               return v ? (
                 <button
                   key={id}
                   onClick={() => demo.setSelectedViewport(id)}
                   className={`w-full rounded-xl border p-3 text-left text-sm ${viewport.id === id ? "border-blue-300 bg-blue-50" : "border-slate-200"}`}
                 >
-                  <b>{v.name}</b>
-                  <span className="mt-1 block text-xs text-slate-500">
-                    {v.category}
-                  </span>
+                  <div className="flex gap-2">
+                    <span className="relative flex h-9 w-8 shrink-0 items-center justify-center rounded bg-red-50 text-base ring-1 ring-red-200">📄<span className="absolute -bottom-0.5 rounded-sm bg-red-600 px-1 text-[5px] font-black text-white">PDF</span></span>
+                    <ViewportCardLabel viewportName={v.name} sheetTitle={sheet?.title} sheetNumber={sheet?.sheetNo} category={v.category} revision={sheet?.revision}/>
+                    <span className={v.status === "confirmed" ? "mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-500" : "mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-400"} />
+                  </div>
                 </button>
               ) : null;
             })}
           </div>
         ) : (
-          <Families element={element} />
+          <Families element={element} activeId={selected?.familyId || null} revealKey={selected?.id || ""} />
         )}
       </aside>
       <main className="relative min-w-0 bg-slate-100 p-3">
         <DemoDrawing
           viewportId={viewport.id}
-          tool={mode === "pan" ? "pan" : mode === "select" ? "select" : "draw"}
+          hideToolbar
+          tool={mode === "pan" ? "pan" : "draw"}
           onCanvasClick={click}
-          onCanvasDragStart={element === "stairs-ramps" ? undefined : (point) => {
-            if (mode === "draw") setDraft([point, point]);
+          onCanvasMove={(point) => {
+            if (mode !== "measure") return;
+            const pdfTarget=snap?findPdfVectorSnap(point,pdfVectors.segments,18,pdfSnapModes):null;
+            measurement.canvasMove(pdfTarget?.point || point);
           }}
-          onCanvasDragMove={element === "stairs-ramps" ? undefined : (point) => {
-            if (mode === "draw") setDraft((current) => current.length ? [current[0], point] : current);
+          onCanvasDragStart={(point) => {
+            if(mode==="select"){setSelectionBox({start:point,current:point});return;}
+            if(mode!=="draw")return;
+            const start=snappedPoint(point,null);
+            if(element!=="stairs-ramps"||drawShape==="rectangle")setDraft([start,start]);
+            else if(drawShape==="freehand")setDraft([start]);
           }}
-          onCanvasDragEnd={element === "stairs-ramps" ? undefined : (point) => {
-            if (mode !== "draw" || draft.length < 2) return;
+          onCanvasDragMove={(point) => {
+            if(mode==="select"&&selectionBox){setSelectionBox((current)=>current?{...current,current:point}:null);return;}
+            if(mode!=="draw"||!draft.length)return;
+            const next=snappedPoint(point,drawShape==="freehand"?draft[draft.length-1]:draft[0]);
+            if(element==="stairs-ramps"&&drawShape==="freehand")setDraft((current)=>distance(current[current.length-1],next)>=4?[...current,next]:current);
+            else setDraft((current)=>current.length?[current[0],next]:current);
+          }}
+          onCanvasDragEnd={(point) => {
+            if(mode==="select"&&selectionBox){const start=selectionBox.start;setSelectionBox(null);if(distance(start,point)<6)return;const left=Math.min(start.x,point.x),right=Math.max(start.x,point.x),top=Math.min(start.y,point.y),bottom=Math.max(start.y,point.y),crossing=point.x<start.x,match=(bounds:{left:number;top:number;right:number;bottom:number})=>crossing?bounds.right>=left&&bounds.left<=right&&bounds.bottom>=top&&bounds.top<=bottom:bounds.left>=left&&bounds.right<=right&&bounds.top>=top&&bounds.bottom<=bottom,bounds=(points:Point[])=>({left:Math.min(...points.map((value)=>value.x)),top:Math.min(...points.map((value)=>value.y)),right:Math.max(...points.map((value)=>value.x)),bottom:Math.max(...points.map((value)=>value.y))});const items=element==="stairs-ramps"?visibleFlights:[...visiblePiles,...visibleCaps],ids=items.filter((item)=>match("points" in item?bounds(item.points):{left:item.bbox.x,top:item.bbox.y,right:item.bbox.x+item.bbox.width,bottom:item.bbox.y+item.bbox.height})).map((item)=>item.id);st.selectMany(ids);dispatchTakeoffStatus({message:`${crossing?"Crossing":"Window"} selected ${ids.length} item${ids.length===1?"":"s"}`});return;}
+            if(mode!=="draw"||!draft.length)return;
+            const snapped=snappedPoint(point,drawShape==="freehand"?draft[draft.length-1]:draft[0]);
+            if(element==="stairs-ramps"){
+              if(drawShape==="freehand"){const points=simplifySpecialStroke([...draft,snapped],4);if(points.length>=3)finish(points);else setDraft([]);}
+              else if(drawShape==="rectangle"&&distance(draft[0],snapped)>=8)finish(box(draft[0],snapped));
+              return;
+            }
             const start = draft[0];
-            if (Math.max(Math.abs(point.x-start.x), Math.abs(point.y-start.y)) < 8) { setDraft([]); return; }
+            if (Math.max(Math.abs(snapped.x-start.x), Math.abs(snapped.y-start.y)) < 8) { setDraft([]); return; }
             if (kind === "pile") {
               st.captureUndo(); const f=st.pileFamilies[0], id=`PILE-${Date.now()}`;
-              st.addPile({id,familyId:f.id,floorId:"GF",viewportId:viewport.id,bbox:toBBox(start,point),lengthM:12.5,commencingLevelM:0,toeLevelM:-12.5,status:"ready"});
+              st.addPile({id,familyId:f.id,floorId:"GF",viewportId:viewport.id,bbox:toBBox(start,snapped),lengthM:12.5,commencingLevelM:0,toeLevelM:-12.5,status:"ready"});
               setDraft([]); setMode("select");
-            } else finish([start, point]);
+            } else finish([start, snapped]);
           }}
           showMinimap={minimap}
           toolbar={
@@ -268,8 +451,9 @@ function SpecialDimension({
               <button
                 className={mode === "measure" ? active : button}
                 onClick={() => {
+                  setMeasurementKind("distance");
                   setMode("measure");
-                  setMeasure([]);
+                  measurement.clearDraft();
                 }}
               >
                 Measure
@@ -360,8 +544,8 @@ function SpecialDimension({
               </button>
               <button
                 className="rounded-lg px-3 py-2 text-xs font-semibold text-red-600 disabled:text-slate-300"
-                disabled={!st.selectedId}
-                onClick={remove}
+                disabled={!st.selectedId && !measurement.selected}
+                onClick={() => measurement.selected ? measurement.deleteSelected() : remove()}
               >
                 Delete
               </button>
@@ -391,10 +575,11 @@ function SpecialDimension({
               </>
             )}
           </g>
+          {selectionBox?<rect pointerEvents="none" x={Math.min(selectionBox.start.x,selectionBox.current.x)} y={Math.min(selectionBox.start.y,selectionBox.current.y)} width={Math.abs(selectionBox.current.x-selectionBox.start.x)} height={Math.abs(selectionBox.current.y-selectionBox.start.y)} fill={selectionBox.current.x<selectionBox.start.x?"#22c55e":"#3b82f6"} fillOpacity={.12} stroke={selectionBox.current.x<selectionBox.start.x?"#16a34a":"#2563eb"} strokeDasharray={selectionBox.current.x<selectionBox.start.x?"7 4":undefined} strokeWidth={1.5} vectorEffect="non-scaling-stroke"/>:null}
           {draft.length ? (
             <g pointerEvents="none">
               <polygon
-                points={draft.map((p) => `${p.x},${p.y}`).join(" ")}
+                points={(drawShape==="rectangle"&&draft.length>=2?box(draft[0],draft[draft.length-1]):draft).map((p) => `${p.x},${p.y}`).join(" ")}
                 fill={element === "stairs-ramps" && draft.length >= 3 ? "rgba(37,99,235,.18)" : "none"}
                 stroke="#2563eb"
                 strokeWidth="5"
@@ -415,9 +600,17 @@ function SpecialDimension({
               )) : null}
             </g>
           ) : null}
-          {measure.length ? (
-            <Measure points={measure} scale={scaleForViewport(viewport.id)} />
-          ) : null}
+          <MeasurementOverlay
+            measurements={measurement.measurements}
+            selectedId={measurement.selectedId}
+            scale={scaleForViewport(viewport.id)}
+            editable={mode === "select" || mode === "measure"}
+            previewStart={measurement.start}
+            previewEnd={measurement.previewEnd}
+            previewPoints={measurement.previewPoints}
+            previewKind={measurement.kind}
+            onSelectMeasurement={() => st.select(null)}
+          />
         </DemoDrawing>
         {element === "foundation" && !st.piles.length && !st.caps.length ? (
           <div className="pointer-events-none absolute bottom-8 left-1/2 w-[min(620px,80%)] -translate-x-1/2 rounded-2xl border border-amber-200 bg-white/95 p-4 shadow-xl">
@@ -426,37 +619,33 @@ function SpecialDimension({
           </div>
         ) : null}
       </main>
-      <aside className="flex min-h-0 flex-col border-l border-slate-200">
-        <div className="grid grid-cols-2 border-b p-2">
+      <aside className="!overflow-hidden flex min-h-0 flex-col border-l border-slate-200">
+        <div className="grid shrink-0 grid-cols-2 gap-1 border-b p-2">
           <button
-            className={rightTab === "copilot" ? active : button}
-            onClick={() => setRightTab("copilot")}
+            className={rightTab === "ai" ? active : button}
+            onClick={() => setRightTab("ai")}
           >
             Copilot
           </button>
           <button
-            className={rightTab === "item" ? active : button}
-            onClick={() => setRightTab("item")}
+            className={rightTab === "properties" ? active : button}
+            onClick={() => setRightTab("properties")}
           >
             Item
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto">
-          {rightTab === "item" ? (
+        <div className={rightTab === "ai" ? "flex min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto overscroll-contain"}>
+          {rightTab === "properties" ? (
             selected ? (
               <Inspector item={selected} element={element} />
             ) : (
-              <div className="p-5 text-sm text-slate-500">
-                Select an item on the drawing to view and edit its details.
-              </div>
+              <div className="p-5 text-sm text-slate-500">Select an item on the drawing to view and edit its details.</div>
             )
           ) : (
             <DemoChat
               chatKey={`takeoff.${element}`}
-              contextLabel={
-                element === "stairs-ramps" ? "Stairs & Ramps" : "Foundation"
-              }
-              onOpenItem={() => setRightTab("item")}
+              contextLabel={element === "stairs-ramps" ? "Stairs & Ramps" : "Foundation"}
+              onOpenItem={() => setRightTab("properties")}
             />
           )}
         </div>
@@ -465,8 +654,13 @@ function SpecialDimension({
   );
 }
 
-function Families({ element }: { element: SpecialElement }) {
+function Families({ element, activeId, revealKey }: { element: SpecialElement; activeId: string | null; revealKey: string }) {
   const st = useSpecialStore();
+  const [expandedId, setExpandedId] = useState<string | null>(activeId);
+  useEffect(() => {
+    if (activeId) setExpandedId(activeId);
+  }, [activeId, revealKey]);
+  const toggleFamily = (id: string) => setExpandedId((current) => current === id ? null : id);
   if (element === "stairs-ramps")
     return (
       <div className="space-y-3 p-3">
@@ -474,8 +668,8 @@ function Families({ element }: { element: SpecialElement }) {
           FLIGHTS & RAMPS
         </h4>
         {st.flightFamilies.map((f) => (
-          <details key={f.id} className="rounded-xl border p-3" open>
-            <summary className="font-semibold">
+          <details key={f.id} className={expandedId === f.id ? "rounded-xl border border-blue-300 bg-blue-50/40 p-3" : "rounded-xl border border-slate-200 p-3"} open={expandedId === f.id}>
+            <summary className="cursor-pointer font-semibold" onClick={(event) => { event.preventDefault(); toggleFamily(f.id); }}>
               {f.mark} · {f.kind}
             </summary>
             <label className="mt-3 block text-xs">
@@ -548,8 +742,8 @@ function Families({ element }: { element: SpecialElement }) {
       <h4 className="text-xs font-semibold text-slate-400">PILE FAMILIES</h4>
       {!st.pileFamilies.length ? <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50 p-3 text-xs leading-5 text-amber-900"><b>Not found in the supplied package.</b><br />The visible Type I/II details are pad footings, not piles or pile caps.</div> : null}
       {st.pileFamilies.map((f) => (
-        <details key={f.id} className="rounded-xl border p-3">
-          <summary className="font-semibold">
+        <details key={f.id} className={expandedId === f.id ? "rounded-xl border border-blue-300 bg-blue-50/40 p-3" : "rounded-xl border border-slate-200 p-3"} open={expandedId === f.id}>
+          <summary className="cursor-pointer font-semibold" onClick={(event) => { event.preventDefault(); toggleFamily(f.id); }}>
             {f.mark} · {f.method}
           </summary>
           <label className="mt-3 block text-xs">
@@ -572,6 +766,26 @@ function Families({ element }: { element: SpecialElement }) {
                 st.updatePileFamily(f.id, { diameterMm: +e.target.value })
               }
             />
+          </label>
+        </details>
+      ))}
+      <h4 className="pt-2 text-xs font-semibold text-slate-400">PILE-CAP FAMILIES</h4>
+      {st.capFamilies.map((f) => (
+        <details key={f.id} className={expandedId === f.id ? "rounded-xl border border-blue-300 bg-blue-50/40 p-3" : "rounded-xl border border-slate-200 p-3"} open={expandedId === f.id}>
+          <summary className="cursor-pointer font-semibold" onClick={(event) => { event.preventDefault(); toggleFamily(f.id); }}>
+            {f.mark} · {f.description}
+          </summary>
+          <label className="mt-3 block text-xs">
+            Name
+            <input className={field} value={f.mark} onChange={(e) => st.updateCapFamily(f.id, { mark: e.target.value })} />
+          </label>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <label className="text-xs">Width (mm)<input className={field} type="number" value={f.widthMm} onChange={(e) => st.updateCapFamily(f.id, { widthMm: +e.target.value })} /></label>
+            <label className="text-xs">Depth (mm)<input className={field} type="number" value={f.depthMm} onChange={(e) => st.updateCapFamily(f.id, { depthMm: +e.target.value })} /></label>
+          </div>
+          <label className="mt-2 block text-xs">
+            Thickness (mm)
+            <input className={field} type="number" value={f.thicknessMm} onChange={(e) => st.updateCapFamily(f.id, { thicknessMm: +e.target.value })} />
           </label>
         </details>
       ))}
@@ -960,7 +1174,7 @@ function Special3D({ element }: { element: SpecialElement }) {
 function FlightShape({ item, showRails }: { item: Flight; showRails: boolean }) {
   const st = useSpecialStore(),
     family = st.flightFamilies.find((f) => f.id === item.familyId)!,
-    selected = st.selectedId === item.id;
+    selected = st.selectedIds.includes(item.id);
   return (
     <MovePolygon
       item={item}
@@ -974,8 +1188,9 @@ function FlightShape({ item, showRails }: { item: Flight; showRails: boolean }) 
         strokeWidth={selected ? 5 : 3}
         vectorEffect="non-scaling-stroke"
         onPointerDown={(e) => {
+          if (e.button !== 0) return;
           e.stopPropagation();
-          st.select(item.id);
+          if (e.ctrlKey || e.metaKey || e.shiftKey) st.toggleSelect(item.id); else st.select(item.id);
         }}
       />
       <text
@@ -1019,11 +1234,12 @@ function FlightShape({ item, showRails }: { item: Flight; showRails: boolean }) 
 function PileShape({ item }: { item: Pile }) {
   const st = useSpecialStore(),
     f = st.pileFamilies.find((x) => x.id === item.familyId)!,
-    selected = st.selectedId === item.id,
+    selected = st.selectedIds.includes(item.id),
     cx = item.bbox.x + item.bbox.width / 2,
     cy = item.bbox.y + item.bbox.height / 2;
   return (
     <MoveBox
+      itemId={item.id}
       box={item.bbox}
       onMove={(bbox) => st.updatePile(item.id, { bbox })}
     >
@@ -1038,8 +1254,9 @@ function PileShape({ item }: { item: Pile }) {
         strokeWidth="4"
         vectorEffect="non-scaling-stroke"
         onPointerDown={(e) => {
+          if (e.button !== 0) return;
           e.stopPropagation();
-          st.select(item.id);
+          if (e.ctrlKey || e.metaKey || e.shiftKey) st.toggleSelect(item.id); else st.select(item.id);
         }}
       />
       <text
@@ -1057,9 +1274,9 @@ function PileShape({ item }: { item: Pile }) {
 function CapShape({ item }: { item: PileCap }) {
   const st = useSpecialStore(),
     f = st.capFamilies.find((x) => x.id === item.familyId)!,
-    selected = st.selectedId === item.id;
+    selected = st.selectedIds.includes(item.id);
   return (
-    <MoveBox box={item.bbox} onMove={(bbox) => st.updateCap(item.id, { bbox })}>
+    <MoveBox itemId={item.id} box={item.bbox} onMove={(bbox) => st.updateCap(item.id, { bbox })}>
       <rect
         {...item.bbox}
         fill={f.color}
@@ -1068,8 +1285,9 @@ function CapShape({ item }: { item: PileCap }) {
         strokeWidth="5"
         vectorEffect="non-scaling-stroke"
         onPointerDown={(e) => {
+          if (e.button !== 0) return;
           e.stopPropagation();
-          st.select(item.id);
+          if (e.ctrlKey || e.metaKey || e.shiftKey) st.toggleSelect(item.id); else st.select(item.id);
         }}
       />
     </MoveBox>
@@ -1084,21 +1302,45 @@ function MovePolygon({
   onMove: (p: Point[]) => void;
   children: React.ReactNode;
 }) {
-  const [drag, setDrag] = useState<{ p: Point; points: Point[] } | null>(null);
+  const st = useSpecialStore();
+  const selected = st.selectedIds.includes(item.id);
+  const [drag, setDrag] = useState<{
+    p: Point;
+    points: Point[];
+    group?: boolean;
+    last?: Point;
+  } | null>(null);
   return (
     <g
       className="cursor-move"
       onPointerDown={(e) => {
+        if (e.button !== 0) return;
         const p = svgPoint(e as never);
         if (p) {
           e.currentTarget.setPointerCapture(e.pointerId);
-          setDrag({ p, points: item.points });
+          st.captureUndo();
+          setDrag({
+            p,
+            points: item.points,
+            group:
+              selected &&
+              st.selectedIds.length > 1 &&
+              !(e.ctrlKey || e.metaKey || e.shiftKey),
+            last: p,
+          });
         }
       }}
       onPointerMove={(e) => {
         if (!drag) return;
         const p = svgPoint(e as never);
-        if (p)
+        if (p && drag.group && drag.last) {
+          st.translateSelected(
+            st.selectedIds,
+            p.x - drag.last.x,
+            p.y - drag.last.y,
+          );
+          setDrag({ ...drag, last: p });
+        } else if (p)
           onMove(
             drag.points.map((x) => ({
               x: x.x + p.x - drag.p.x,
@@ -1113,29 +1355,55 @@ function MovePolygon({
   );
 }
 function MoveBox({
+  itemId,
   box,
   onMove,
   children,
 }: {
+  itemId: string;
   box: BBox;
   onMove: (b: BBox) => void;
   children: React.ReactNode;
 }) {
-  const [drag, setDrag] = useState<{ p: Point; box: BBox } | null>(null);
+  const st = useSpecialStore();
+  const selected = st.selectedIds.includes(itemId);
+  const [drag, setDrag] = useState<{
+    p: Point;
+    box: BBox;
+    group?: boolean;
+    last?: Point;
+  } | null>(null);
   return (
     <g
       className="cursor-move"
       onPointerDown={(e) => {
+        if (e.button !== 0) return;
         const p = svgPoint(e as never);
         if (p) {
           e.currentTarget.setPointerCapture(e.pointerId);
-          setDrag({ p, box });
+          st.captureUndo();
+          setDrag({
+            p,
+            box,
+            group:
+              selected &&
+              st.selectedIds.length > 1 &&
+              !(e.ctrlKey || e.metaKey || e.shiftKey),
+            last: p,
+          });
         }
       }}
       onPointerMove={(e) => {
         if (!drag) return;
         const p = svgPoint(e as never);
-        if (p)
+        if (p && drag.group && drag.last) {
+          st.translateSelected(
+            st.selectedIds,
+            p.x - drag.last.x,
+            p.y - drag.last.y,
+          );
+          setDrag({ ...drag, last: p });
+        } else if (p)
           onMove({
             ...drag.box,
             x: drag.box.x + p.x - drag.p.x,
@@ -1162,6 +1430,7 @@ function Vertex({ p, onMove }: { p: Point; onMove: (p: Point) => void }) {
       vectorEffect="non-scaling-stroke"
       className="cursor-crosshair"
       onPointerDown={(e) => {
+        if (e.button !== 0) return;
         e.stopPropagation();
         e.currentTarget.setPointerCapture(e.pointerId);
       }}
@@ -1333,6 +1602,14 @@ function box(a: Point, b: Point): Point[] {
     { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) },
     { x: Math.min(a.x, b.x), y: Math.max(a.y, b.y) },
   ];
+}
+function simplifySpecialStroke(items: Point[], tolerance: number) {
+  if (items.length <= 3) return items;
+  const result = [items[0]];
+  for (let index = 1; index < items.length - 1; index += 1)
+    if (distance(items[index], result[result.length - 1]) >= tolerance) result.push(items[index]);
+  if (distance(items[items.length - 1], result[result.length - 1]) >= tolerance / 2) result.push(items[items.length - 1]);
+  return result;
 }
 function toBBox(a: Point, b: Point): BBox {
   return {

@@ -4,11 +4,19 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Point } from "@/features/demo/types";
 
-export type DrawingMeasurement = { id: string; viewportId: string; start: Point; end: Point };
+export type MeasurementKind = "distance" | "area" | "perimeter" | "angle" | "radius";
+export type DrawingMeasurement = {
+  id: string;
+  viewportId: string;
+  kind?: MeasurementKind;
+  points?: Point[];
+  start: Point;
+  end: Point;
+};
 type MeasurementState = {
   measurements: DrawingMeasurement[]; selectedId: string | null;
   select: (id: string | null) => void; add: (measurement: DrawingMeasurement) => void;
-  update: (id: string, patch: Partial<Pick<DrawingMeasurement, "start" | "end">>) => void; remove: (id: string) => void;
+  update: (id: string, patch: Partial<DrawingMeasurement>) => void; remove: (id: string) => void;
 };
 export const useMeasurementStore = create<MeasurementState>()(persist((set, get) => ({
   measurements: [], selectedId: null,

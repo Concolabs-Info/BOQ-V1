@@ -31,7 +31,7 @@ export function DemoChat({chatKey,onPrimary,primaryLabel="Confirm",onShowEvidenc
   const selectedViewport=demo.viewports.find(viewport=>viewport.id===demo.selectedViewportId)?.name;
 
   useEffect(()=>{const node=scrollRef.current;if(node)node.scrollTo({top:node.scrollHeight,behavior:messages.length>1?"smooth":"auto"})},[messages.length,busy]);
-  useEffect(()=>{const node=inputRef.current;if(!node)return;node.style.height="auto";node.style.height=`${Math.min(220,Math.max(76,node.scrollHeight))}px`;node.style.overflowY=node.scrollHeight>220?"auto":"hidden"},[input]);
+  useEffect(()=>{const node=inputRef.current;if(!node)return;node.style.height="auto";node.style.height=`${Math.min(160,Math.max(42,node.scrollHeight))}px`;node.style.overflowY=node.scrollHeight>160?"auto":"hidden"},[input]);
 
   function add(message:ChatMessage){demo.addChatMessage(chatKey,message)}
 
@@ -54,18 +54,18 @@ export function DemoChat({chatKey,onPrimary,primaryLabel="Confirm",onShowEvidenc
   function action(actionType:ChatMessage["action"]){if(actionType==="item"){onOpenItem?.();return}if(actionType==="evidence"){if(onShowEvidence)onShowEvidence();else if(chatKey==="pre.scale")window.dispatchEvent(new CustomEvent("quanto:show-scale-evidence"));else onOpenItem?.()}}
   function keyDown(event:KeyboardEvent<HTMLTextAreaElement>){if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();void sendPrompt(input)}}
 
-  return <section className="flex h-full min-h-0 flex-col bg-white" aria-label={`${profile.label} Copilot`}>
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+  return <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white" aria-label={`${profile.label} Copilot`}>
+    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
       <div className="space-y-5" aria-live="polite">
         {messages.map(message=><CopilotMessage key={message.id} message={message} actionEnabled={message.action==="item"?Boolean(onOpenItem):message.action==="evidence"?Boolean(onShowEvidence||onOpenItem||chatKey==="pre.scale"):false} onAction={()=>action(message.action)}/>) }
         {busy?<ThinkingMessage/>:null}
       </div>
     </div>
 
-    <footer className="border-t border-slate-200 bg-white p-3">
+    <footer className="shrink-0 border-t border-slate-200 bg-white p-3">
       {onPrimary?<button onClick={onPrimary} className="mb-3 h-10 w-full rounded-xl bg-blue-600 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700">{primaryLabel}</button>:null}
       <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm transition focus-within:border-blue-300 focus-within:ring-2 focus-within:ring-blue-100">
-        <textarea ref={inputRef} rows={3} className="block min-h-[76px] max-h-[220px] w-full resize-none border-0 bg-transparent px-2 py-1 text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400" placeholder="Message Copilot…" value={input} onChange={event=>setInput(event.target.value)} onKeyDown={keyDown}/>
+        <textarea ref={inputRef} rows={1} className="block min-h-[42px] max-h-[160px] w-full resize-none border-0 bg-transparent px-2 py-2 text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400" placeholder="Message Copilot…" value={input} onChange={event=>setInput(event.target.value)} onKeyDown={keyDown}/>
         <div className="flex items-center justify-between gap-2 px-1 pt-1">
           <span className="text-[10px] text-slate-400">Enter to send · Shift+Enter for a new line</span>
           {busy?<button onClick={stop} title="Stop response" className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-950 text-white"><span className="h-2.5 w-2.5 rounded-sm bg-white"/></button>:<button onClick={()=>void sendPrompt(input)} disabled={!input.trim()} title="Send message" className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-950 text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"><SendIcon/></button>}

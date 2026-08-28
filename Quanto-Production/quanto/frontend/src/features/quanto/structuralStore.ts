@@ -70,10 +70,15 @@ type StructuralState = {
   slabFamilies: SlabFamily[];
   slabPlates: SlabPlate[];
   selectedId: string | null;
+  selectedIds: string[];
   geometryUndo: Snapshot[];
+  geometryRedo: Snapshot[];
   workbookOverrides: Record<string, number>;
   workbookConfirmed: Record<string, boolean>;
   select: (id: string | null) => void;
+  selectMany: (ids: string[]) => void;
+  toggleSelect: (id: string) => void;
+  translateSelected: (ids: string[], dx: number, dy: number) => void;
   updateColumn: (id: string, patch: Partial<ColumnInstance>) => void;
   addColumn: (item: ColumnInstance) => void;
   deleteColumn: (id: string) => void;
@@ -94,6 +99,7 @@ type StructuralState = {
   confirmWorkbook: (key: string, value: boolean) => void;
   captureUndo: () => void;
   undo: () => void;
+  redo: () => void;
   invalidateDerived: () => void;
   reset: () => void;
 };
@@ -147,14 +153,65 @@ export const useStructuralStore = create<StructuralState>()(
     (set, get) => ({
       ...seed(),
       selectedId: null,
+      selectedIds: [],
       beamDataSource: "demo",
       workbookOverrides: {},
       workbookConfirmed: {},
       geometryUndo: [],
+      geometryRedo: [],
       select: (selectedId) => {
-        if (selectedId === get().selectedId) return;
-        requestGuardedAction(() => set({ selectedId }), "select another item");
+        if (selectedId === get().selectedId && get().selectedIds.length <= 1) return;
+        requestGuardedAction(() => set({ selectedId, selectedIds: selectedId ? [selectedId] : [] }), "select another item");
       },
+      selectMany: (ids) => {
+        const selectedIds = [...new Set(ids)];
+        requestGuardedAction(() => set({ selectedIds, selectedId: selectedIds.at(-1) || null }), "change selection");
+      },
+      toggleSelect: (id) => {
+        const current = get().selectedIds;
+        const selectedIds = current.includes(id) ? current.filter((value) => value !== id) : [...current, id];
+        requestGuardedAction(() => set({ selectedIds, selectedId: selectedIds.at(-1) || null }), "change selection");
+      },
+      translateSelected: (ids, dx, dy) =>
+        set((s) => {
+          const selected = new Set(ids);
+          const movePoint = (point: { x: number; y: number }) => ({
+            x: point.x + dx,
+            y: point.y + dy,
+          });
+          return {
+            columns: s.columns.map((item) =>
+              selected.has(item.id)
+                ? {
+                    ...item,
+                    bbox: { ...item.bbox, x: item.bbox.x + dx, y: item.bbox.y + dy },
+                    status: item.status === "confirmed" ? "ready" : item.status,
+                  }
+                : item,
+            ),
+            beams: s.beams.map((item) =>
+              selected.has(item.id)
+                ? {
+                    ...item,
+                    start: movePoint(item.start),
+                    end: movePoint(item.end),
+                    status: item.status === "confirmed" ? "ready" : item.status,
+                  }
+                : item,
+            ),
+            slabPlates: s.slabPlates.map((item) =>
+              selected.has(item.id)
+                ? {
+                    ...item,
+                    points: item.points.map(movePoint),
+                    voids: item.voids.map((points) => points.map(movePoint)),
+                    status: item.status === "confirmed" ? "ready" : item.status,
+                  }
+                : item,
+            ),
+            workbookConfirmed: {},
+          };
+        }),
       updateColumn: (id, patch) => {
         const original = get().columns.find((x) => x.id === id);
         if (
@@ -196,7 +253,7 @@ export const useStructuralStore = create<StructuralState>()(
           )
         )
           return;
-        set((s) => ({ columns: [...s.columns, item], selectedId: item.id }));
+        set((s) => ({ columns: [...s.columns, item], selectedId: item.id, selectedIds: [item.id] }));
       },
       deleteColumn: (id) => {
         const original = get().columns.find((x) => x.id === id),
@@ -218,6 +275,7 @@ export const useStructuralStore = create<StructuralState>()(
         set((s) => ({
           columns: s.columns.filter((x) => x.id !== id),
           selectedId: s.selectedId === id ? null : s.selectedId,
+          selectedIds: s.selectedIds.filter((value) => value !== id),
         }));
       },
       updateBeam: (id, patch) => {
@@ -261,7 +319,7 @@ export const useStructuralStore = create<StructuralState>()(
           )
         )
           return;
-        set((s) => ({ beams: [...s.beams, item], selectedId: item.id }));
+        set((s) => ({ beams: [...s.beams, item], selectedId: item.id, selectedIds: [item.id] }));
       },
       deleteBeam: (id) => {
         const original = get().beams.find((x) => x.id === id),
@@ -283,6 +341,7 @@ export const useStructuralStore = create<StructuralState>()(
         set((s) => ({
           beams: s.beams.filter((x) => x.id !== id),
           selectedId: s.selectedId === id ? null : s.selectedId,
+          selectedIds: s.selectedIds.filter((value) => value !== id),
         }));
       },
       replaceBeamData: (families, beams) =>
@@ -291,6 +350,7 @@ export const useStructuralStore = create<StructuralState>()(
           beams: clone(beams),
           beamDataSource: "production",
           selectedId: beams.some((beam) => beam.id === s.selectedId) ? s.selectedId : null,
+          selectedIds: s.selectedIds.filter((id) => beams.some((beam) => beam.id === id)),
           workbookOverrides: Object.fromEntries(
             Object.entries(s.workbookOverrides).filter(([key]) => !key.startsWith("beams:")),
           ),
@@ -342,6 +402,7 @@ export const useStructuralStore = create<StructuralState>()(
         set((s) => ({
           slabPlates: [...s.slabPlates, item],
           selectedId: item.id,
+          selectedIds: [item.id],
         }));
       },
       deleteSlab: (id) => {
@@ -364,6 +425,7 @@ export const useStructuralStore = create<StructuralState>()(
         set((s) => ({
           slabPlates: s.slabPlates.filter((x) => x.id !== id),
           selectedId: s.selectedId === id ? null : s.selectedId,
+          selectedIds: s.selectedIds.filter((value) => value !== id),
         }));
       },
       updateColumnFamily: (id, patch) => {
@@ -493,6 +555,7 @@ export const useStructuralStore = create<StructuralState>()(
               slabPlates: clone(s.slabPlates),
             },
           ],
+          geometryRedo: [],
         })),
       undo: () =>
         set((s) => {
@@ -503,28 +566,47 @@ export const useStructuralStore = create<StructuralState>()(
                 beams: clone(previous.beams),
                 slabPlates: clone(previous.slabPlates),
                 geometryUndo: s.geometryUndo.slice(0, -1),
+                geometryRedo: [...(s.geometryRedo || []).slice(-19), { columns: clone(s.columns), beams: clone(s.beams), slabPlates: clone(s.slabPlates) }],
                 selectedId: null,
+                selectedIds: [],
               }
             : {};
+        }),
+      redo: () =>
+        set((s) => {
+          const next = (s.geometryRedo || []).at(-1);
+          return next ? {
+            columns: clone(next.columns), beams: clone(next.beams), slabPlates: clone(next.slabPlates),
+            geometryUndo: [...s.geometryUndo.slice(-19), { columns: clone(s.columns), beams: clone(s.beams), slabPlates: clone(s.slabPlates) }],
+            geometryRedo: s.geometryRedo.slice(0, -1), selectedId: null, selectedIds: [],
+          } : {};
         }),
       invalidateDerived: () => set({ workbookConfirmed: {} }),
       reset: () =>
         set({
           ...seed(),
           selectedId: null,
+          selectedIds: [],
           beamDataSource: "demo",
           workbookOverrides: {},
           workbookConfirmed: {},
           geometryUndo: [],
+          geometryRedo: [],
         }),
     }),
     {
       name: "quanto-structural-demo-v1",
-      version: 11,
+      version: 12,
+      partialize: (state) => {
+        const { geometryUndo: _geometryUndo, geometryRedo: _geometryRedo, ...persisted } = state;
+        return persisted;
+      },
       migrate: (persisted) => {
         const state = persisted as Partial<StructuralState>;
         return {
           ...state,
+          geometryUndo: [],
+          geometryRedo: [],
           beamDataSource: state.beamDataSource || "demo",
           columns: (state.columns || []).filter((column) => !legacyColumnIds.has(column.id)),
           beams: (state.beams || []).filter((beam) => !legacyBeamIds.has(beam.id)),
@@ -571,6 +653,9 @@ export const useStructuralStore = create<StructuralState>()(
               ["familyId","floorId","viewportId","points","voids","sectionProfile","thicknessOverrideMm","thicknessStatus","thicknessRangeMm","linkedPlanSlabId","quantityExcludedReason","status"],
             ),
           ),
+          selectedIds: state.selectedIds || (state.selectedId ? [state.selectedId] : []),
+          geometryUndo: [],
+          geometryRedo: [],
         };
       },
     },

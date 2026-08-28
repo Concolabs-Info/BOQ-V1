@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { QuantoPageShell } from "./QuantoPageShell";
-import { DemoDrawing } from "./components/DemoDrawing";
+import { DemoDrawing, drawingSize } from "./components/DemoDrawing";
 import { DemoChat } from "./components/DemoChat";
+import { ViewportCardLabel } from "./components/ViewportCardLabel";
 import {
   ResizableThreePane,
   ResizableTwoPane,
@@ -43,7 +44,7 @@ import {
   openingFamily,
   scaleForViewport,
 } from "@/features/demo/builders";
-import { distance } from "@/features/demo/geometry";
+import { centroid, distance } from "@/features/demo/geometry";
 import { StructuralTakeoff } from "./StructuralTakeoff";
 import type { StructuralElement } from "./structuralTypes";
 import { SpecialTakeoff } from "./SpecialTakeoff";
@@ -54,9 +55,15 @@ import {
   MeasurementOverlay,
   useMeasurementTool,
 } from "./measurements/MeasurementOverlay";
+import type { MeasurementKind } from "./measurements/measurementStore";
 import { beginLiveEdit } from "./editing/editSessionStore";
 import { useRealFloorCeilingTakeoff } from "@/features/takeoff/shared/useRealFloorCeilingTakeoff";
 import { ScopeStatus } from "@/features/scope/components/ScopeStatus";
+import { TakeoffStatusBar } from "./components/TakeoffProductionPanels";
+import { TakeoffOfficeRibbon, TakeoffOfficeStatusBar } from "./components/TakeoffOfficeRibbon";
+import { dispatchTakeoffStatus, useTakeoffCommand } from "./takeoffCommands";
+import { findPdfVectorSnap, usePdfSnapModes, usePdfVectorSource } from "./snapping/pdfVectorSnap";
+import { exportTakeoffCsv, type ExportRow } from "./takeoffExport";
 import {
   MATTEGODA_FLOOR_AREAS,
   MATTEGODA_MASONRY,
@@ -137,14 +144,17 @@ export function TakeoffPage({
     <QuantoPageShell
       projectId={projectId}
       title={name}
+      desktop
       subtitle={
         planned.has(element)
           ? "Review, correct and quantify this element"
           : "This element is listed in the workflow, but its detailed workspace is not available yet."
       }
     >
-      <TakeoffTabs projectId={projectId} element={element} view={view} />
-      {planned.has(element) ? <ScopeStatus projectId={projectId} element={element} /> : null}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+      <TakeoffOfficeRibbon projectId={projectId} element={element} view={view} elementName={name} />
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#e8edf3] p-2">
+      {planned.has(element) && element !== "beams" ? <ScopeStatus projectId={projectId} element={element} /> : null}
       {runtime.module && runtime.analysis?.status === "running" ? (
         <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
           <span className="font-semibold">Finding {name.toLowerCase()} areas…</span>
@@ -162,7 +172,7 @@ export function TakeoffPage({
           </button>
         </div>
       ) : null}
-      {isStructuralElement(element) ? (
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{isStructuralElement(element) ? (
         <StructuralTakeoff
           projectId={projectId}
           element={element}
@@ -178,7 +188,10 @@ export function TakeoffPage({
         <SceneView projectId={projectId} element={element} />
       ) : (
         <DimensionView projectId={projectId} element={element} />
-      )}
+      )}</div>
+      </div>
+      <TakeoffOfficeStatusBar elementName={name} />
+      </div>
     </QuantoPageShell>
   );
 }
@@ -203,7 +216,7 @@ function TakeoffTabs({
               : "rounded-xl px-5 py-2.5 text-sm font-semibold capitalize text-slate-500 hover:bg-slate-50 hover:text-slate-900"
           }
         >
-          {v === "3d" ? "3D" : v}
+          {v === "3d" ? "3D" : v === "dimension" ? "Takeoff" : v}
         </Link>
       ))}
     </div>
@@ -231,6 +244,8 @@ function isSpecialElement(element: string): element is SpecialElement {
 }
 
 type Mode = "select" | "pan" | "measure" | "draw";
+type DrawShape = "line" | "box" | "polyline" | "freehand";
+type AreaAction = "create" | "add" | "subtract" | "cutout";
 type SnapPreview = { point: Point; label: string };
 const toolClass =
   "list-none rounded-lg px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50";
@@ -243,37 +258,48 @@ function DimensionView({
   projectId: string;
   element: string;
 }) {
+  const router = useRouter();
   const search = useSearchParams();
   const st = useDemoStore();
   const viewports = st.viewports,
     selectedViewportId = st.selectedViewportId,
     setViewport = st.setSelectedViewport,
     selectedEntityId = st.selectedEntityId,
+    selectedEntityIds = st.selectedEntityIds,
     setSelected = st.setSelectedEntity,
     leftCollapsed = st.leftCollapsed,
     setLeftCollapsed = st.setLeftCollapsed;
   const [leftTab, setLeftTab] = useState<"viewports" | "families">("viewports");
   const [mode, setMode] = useState<Mode>("select");
-  const [shape, setShape] = useState<"line" | "box" | "polyline">(
+  const [shape, setShape] = useState<DrawShape>(
     element === "walls" ? "line" : "box",
   );
   const [sign, setSign] = useState<"add" | "remove">("add");
+  const [areaAction, setAreaAction] = useState<AreaAction>("create");
   const [draft, setDraft] = useState<Point[]>([]);
   const [drawHover, setDrawHover] = useState<Point | null>(null);
   const [measureMode, setMeasureMode] = useState<
     "horizontal" | "vertical" | "any"
   >("any");
+  const [measurementKind, setMeasurementKind] =
+    useState<MeasurementKind>("distance");
   const [snap, setSnapState] = useState(false);
+  const [ortho, setOrthoState] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
   const [snapTarget, setSnapTarget] = useState<SnapPreview | null>(null);
+  const [selectionBox, setSelectionBox] = useState<{ start: Point; current: Point } | null>(null);
   const [showMinimap, setShowMinimap] = useState(false);
   const [showDrawing, setShowDrawing] = useState(true);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [addElementOpen, setAddElementOpen] = useState(false);
   const [pendingAdd, setPendingAdd] = useState<ElementFormValues | null>(null);
   const altPressed = useRef(false);
+  const additiveSelectionPressed = useRef(false);
   const canvasScale = useRef(1);
+  const clipboard = useRef<Array<{ kind: "opening" | "floor" | "ceiling" | "wall" | "roof"; value: any }>>([]);
   useEffect(() => {
     setSnapState(window.localStorage.getItem("quanto.snap.enabled") === "true");
+    setOrthoState(window.localStorage.getItem("quanto.ortho.enabled") === "true");
   }, []);
   useEffect(() => {
     if (!pendingAdd) return;
@@ -288,6 +314,13 @@ function DimensionView({
     setSnapState((current) => {
       const next = typeof value === "function" ? value(current) : value;
       window.localStorage.setItem("quanto.snap.enabled", String(next));
+      return next;
+    });
+  }
+  function setOrtho(value: boolean | ((current: boolean) => boolean)) {
+    setOrthoState((current) => {
+      const next = typeof value === "function" ? value(current) : value;
+      window.localStorage.setItem("quanto.ortho.enabled", String(next));
       return next;
     });
   }
@@ -306,12 +339,64 @@ function DimensionView({
       },
     [allowed.join("|"), selectedViewportId, viewports],
   );
+  const vectorSheet = st.sheets.find((sheet) => sheet.id === viewport.sheetId);
+  const vectorSize = drawingSize(vectorSheet);
+  const pdfVectors = usePdfVectorSource(
+    vectorSheet ? `project-page:${projectId}:${vectorSheet.page}:${vectorSize.width}x${vectorSize.height}` : "",
+    vectorSheet ? `/api/v1/projects/${projectId}/pages/${vectorSheet.page}/vectors?width=${vectorSize.width}&height=${vectorSize.height}` : "",
+  );
+  const pdfSnapModes=usePdfSnapModes().modes;
+  const selectableIds = useMemo(() => {
+    if (isOpeningElement(element)) return st.openings.filter((item) => item.viewportId === viewport.id).map((item) => item.id);
+    if (element === "floor") return st.floorZones.filter((item) => item.viewportId === viewport.id).map((item) => item.id);
+    if (element === "ceiling") return st.ceilingZones.filter((item) => item.viewportId === viewport.id).map((item) => item.id);
+    if (element === "walls") return st.walls.filter((item) => item.viewportId === viewport.id).map((item) => item.id);
+    if (element === "roof") return st.roofZones.filter((item) => item.viewportId === viewport.id).map((item) => item.id);
+    return [];
+  }, [element, st.ceilingZones, st.floorZones, st.openings, st.roofZones, st.walls, viewport.id]);
+  const selectedFamilyId = selectedEntityId
+    ? isOpeningElement(element)
+      ? st.openings.find((item) => item.id === selectedEntityId)?.familyId
+      : element === "floor"
+        ? st.floorZones.find((item) => item.id === selectedEntityId)?.familyId
+        : element === "ceiling"
+          ? st.ceilingZones.find((item) => item.id === selectedEntityId)?.familyId
+          : element === "walls"
+            ? st.walls.find((item) => item.id === selectedEntityId)?.familyId
+            : element === "roof"
+              ? st.roofZones.find((item) => item.id === selectedEntityId)?.familyId
+              : undefined
+    : undefined;
+  useEffect(() => {
+    if (!selectedEntityId || !selectedFamilyId) return;
+    setActiveFamily(selectedFamilyId);
+    setLeftTab("families");
+  }, [selectedEntityId, selectedFamilyId]);
+  useEffect(() => {
+    const keyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input,textarea,select,[contenteditable=true]") || mode !== "select") return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+        event.preventDefault(); st.setSelectedEntities(selectableIds); return;
+      }
+      if (event.key === "Escape") { st.setSelectedEntities([]); return; }
+      if (event.key !== "Tab" || !selectableIds.length) return;
+      event.preventDefault();
+      const current = selectableIds.indexOf(selectedEntityId || "");
+      const next = selectableIds[(current + (event.shiftKey ? -1 : 1) + selectableIds.length) % selectableIds.length];
+      setSelected(next);
+      dispatchTakeoffStatus({ message: `Selected ${next} · Tab cycles overlapping/visible items` });
+    };
+    window.addEventListener("keydown", keyDown);
+    return () => window.removeEventListener("keydown", keyDown);
+  }, [mode, selectableIds, selectedEntityId, setSelected, st.setSelectedEntities]);
   const measurement = useMeasurementTool({
     viewportId: element === "walls" ? `walls:${viewport.id}` : viewport.id,
     scale: viewport.scaleMPerPx || 0.018,
     active: mode === "measure",
     deleteEnabled: mode === "select" || mode === "measure",
     mode: measureMode,
+    kind: measurementKind,
   });
   useEffect(() => {
     if (selectedEntityId) measurement.clearSelection();
@@ -332,12 +417,16 @@ function DimensionView({
   useEffect(() => {
     function down(event: KeyboardEvent) {
       if (event.key === "Alt") altPressed.current = true;
+      if (event.key === "Control" || event.key === "Meta" || event.key === "Shift") additiveSelectionPressed.current = true;
     }
     function up(event: KeyboardEvent) {
       if (event.key === "Alt") altPressed.current = false;
+      if (event.key === "Control" || event.key === "Meta" || event.key === "Shift")
+        additiveSelectionPressed.current = event.ctrlKey || event.metaKey || event.shiftKey;
     }
     function reset() {
       altPressed.current = false;
+      additiveSelectionPressed.current = false;
     }
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
@@ -352,8 +441,9 @@ function DimensionView({
     point: Point,
     origin?: Point,
   ): { point: Point; target: SnapPreview | null } {
-    if (!snap || altPressed.current) return { point, target: null };
-    const candidates = snapCandidatePoints(element, viewport.id, point);
+    if (altPressed.current) return { point, target: null };
+    if (!snap && !(origin && ortho)) return { point, target: null };
+    const candidates = snap ? snapCandidatePoints(element, viewport.id, point) : [];
     let best: Point | undefined,
       bestD = Math.min(
         80,
@@ -366,12 +456,15 @@ function DimensionView({
         bestD = candidateDistance;
       }
     }
+    const pdfTarget = snap ? findPdfVectorSnap(point, pdfVectors.segments, bestD, pdfSnapModes) : null;
+    if (pdfTarget && (!best || pdfTarget.distance < bestD))
+      return { point: pdfTarget.point, target: { point: pdfTarget.point, label: pdfTarget.label } };
     if (best)
       return {
         point: best,
         target: { point: best, label: snapLabel(element) },
       };
-    return origin
+    return origin && ortho
       ? genericOrthogonalSnap(origin, point)
       : { point, target: null };
   }
@@ -390,6 +483,11 @@ function DimensionView({
       measurement.canvasClick(point);
       return;
     }
+    if (mode === "select") {
+      setSelected(null);
+      measurement.clearSelection();
+      return;
+    }
     if (mode === "draw") {
       if (
         shape === "polyline" &&
@@ -397,6 +495,12 @@ function DimensionView({
         distance(point, draft[0]) <= Math.max(6, 14 / Math.max(0.01, scale))
       ) {
         finish(draft);
+        return;
+      }
+      if (shape === "freehand") return;
+      if (shape === "box" || shape === "line") {
+        if (!draft.length) setDraft([point]);
+        else finish([draft[0], point]);
         return;
       }
       setDraft((d) => [...d, point]);
@@ -449,9 +553,10 @@ function DimensionView({
             ? useDemoStore.getState().floorZones
             : useDemoStore.getState().ceilingZones
         ).filter((z) => z.viewportId === viewport.id);
-        const host = zones.find((z) => z.id === selectedEntityId) || zones[0];
+        const host = zones.find((z) => z.id === selectedEntityId);
         if (host)
           st.updateZone(kind, host.id, { deducts: [...host.deducts, boundary] });
+        else dispatchTakeoffStatus({ message: `Select the ${kind} area to ${areaAction === "cutout" ? "cut out" : "subtract from"} first` });
       } else if (boundary.length >= 3) {
         const id = pendingAdd ? String(pendingAdd.id) : `${kind === "floor" ? "FZ" : "CZ"}-${Date.now()}`;
         st.addZone(kind, {
@@ -462,7 +567,7 @@ function DimensionView({
           viewportId: viewport.id,
           points: boundary,
           deducts: [],
-          room: pendingAdd ? String(pendingAdd.room) : "Added zone",
+          room: pendingAdd ? String(pendingAdd.room) : areaAction === "add" ? "Added area" : "Added zone",
           status: pendingAdd ? String(pendingAdd.status) as DemoStatus : "ready",
         });
         setSelected(id);
@@ -489,9 +594,10 @@ function DimensionView({
         shape === "box" ? boxPoints(points[0], points[points.length - 1]) : points;
       if (sign === "remove") {
         const zones = st.roofZones.filter((z) => z.viewportId === viewport.id);
-        const host = zones.find((z) => z.id === selectedEntityId) || zones[0];
+        const host = zones.find((z) => z.id === selectedEntityId);
         if (host)
           st.updateRoofZone(host.id, { deducts: [...host.deducts, boundary] });
+        else dispatchTakeoffStatus({ message: `Select the roof area to ${areaAction === "cutout" ? "cut out" : "subtract from"} first` });
       } else if (boundary.length >= 3) {
         const id = pendingAdd ? String(pendingAdd.id) : `RZ-${Date.now()}`;
         st.addRoofZone({
@@ -516,20 +622,278 @@ function DimensionView({
     setPendingAdd(null);
     setMode("select");
   }
-  function deleteSelected() {
-    if (!selectedEntityId) return;
-    st.captureGeometryUndo();
-    if (st.openings.some((x) => x.id === selectedEntityId))
-      st.deleteOpening(selectedEntityId);
-    else if (st.floorZones.some((x) => x.id === selectedEntityId))
-      st.deleteZone("floor", selectedEntityId);
-    else if (st.ceilingZones.some((x) => x.id === selectedEntityId))
-      st.deleteZone("ceiling", selectedEntityId);
-    else if (st.walls.some((x) => x.id === selectedEntityId))
-      st.deleteWall(selectedEntityId);
-    else if (st.roofZones.some((x) => x.id === selectedEntityId))
-      st.deleteRoofZone(selectedEntityId);
+  function selectInBox(start: Point, end: Point) {
+    const left = Math.min(start.x, end.x), right = Math.max(start.x, end.x);
+    const top = Math.min(start.y, end.y), bottom = Math.max(start.y, end.y);
+    const crossing = end.x < start.x;
+    const matches = (bounds: { left: number; top: number; right: number; bottom: number }) =>
+      crossing
+        ? bounds.right >= left && bounds.left <= right && bounds.bottom >= top && bounds.top <= bottom
+        : bounds.left >= left && bounds.right <= right && bounds.top >= top && bounds.bottom <= bottom;
+    const pointBounds = (points: Point[]) => ({
+      left: Math.min(...points.map((point) => point.x)),
+      top: Math.min(...points.map((point) => point.y)),
+      right: Math.max(...points.map((point) => point.x)),
+      bottom: Math.max(...points.map((point) => point.y)),
+    });
+    const ids: string[] = [];
+    if (isOpeningElement(element)) st.openings.filter((item) => item.viewportId === viewport.id).forEach((item) => {
+      if (matches({ left: item.bbox.x, top: item.bbox.y, right: item.bbox.x + item.bbox.width, bottom: item.bbox.y + item.bbox.height })) ids.push(item.id);
+    });
+    if (element === "floor" || element === "ceiling") {
+      const zones = element === "floor" ? st.floorZones : st.ceilingZones;
+      zones.filter((item) => item.viewportId === viewport.id).forEach((item) => { if (matches(pointBounds(item.points))) ids.push(item.id); });
+    }
+    if (element === "walls") st.walls.filter((item) => item.viewportId === viewport.id).forEach((item) => { if (matches(pointBounds([item.start, item.end]))) ids.push(item.id); });
+    if (element === "roof") st.roofZones.filter((item) => item.viewportId === viewport.id).forEach((item) => { if (matches(pointBounds(item.points))) ids.push(item.id); });
+    st.setSelectedEntities(additiveSelectionPressed.current ? [...selectedEntityIds, ...ids] : ids);
+    dispatchTakeoffStatus({ message: `${crossing ? "Crossing" : "Window"} selected ${ids.length} item${ids.length === 1 ? "" : "s"}` });
   }
+  function deleteSelected() {
+    const ids = selectedEntityIds.length ? selectedEntityIds : selectedEntityId ? [selectedEntityId] : [];
+    if (!ids.length) return;
+    st.captureGeometryUndo();
+    ids.forEach((id) => {
+      if (st.openings.some((x) => x.id === id)) st.deleteOpening(id);
+      else if (st.floorZones.some((x) => x.id === id)) st.deleteZone("floor", id);
+      else if (st.ceilingZones.some((x) => x.id === id)) st.deleteZone("ceiling", id);
+      else if (st.walls.some((x) => x.id === id)) st.deleteWall(id);
+      else if (st.roofZones.some((x) => x.id === id)) st.deleteRoofZone(id);
+    });
+    st.setSelectedEntities([]);
+    dispatchTakeoffStatus({ message: `Deleted ${ids.length} item${ids.length === 1 ? "" : "s"}`, saving: "editing" });
+  }
+  function copySelected() {
+    const ids = selectedEntityIds.length ? selectedEntityIds : selectedEntityId ? [selectedEntityId] : [];
+    const copied = ids.flatMap((id) => {
+      const candidates: Array<{ kind: "opening" | "floor" | "ceiling" | "wall" | "roof"; value: any }> = [
+        { kind: "opening", value: st.openings.find((x) => x.id === id) },
+        { kind: "floor", value: st.floorZones.find((x) => x.id === id) },
+        { kind: "ceiling", value: st.ceilingZones.find((x) => x.id === id) },
+        { kind: "wall", value: st.walls.find((x) => x.id === id) },
+        { kind: "roof", value: st.roofZones.find((x) => x.id === id) },
+      ];
+      const found = candidates.find((candidate) => candidate.value);
+      return found ? [{ kind: found.kind, value: JSON.parse(JSON.stringify(found.value)) }] : [];
+    });
+    if (!copied.length) return false;
+    clipboard.current = copied;
+    dispatchTakeoffStatus({ message: `Copied ${copied.length} item${copied.length === 1 ? "" : "s"}` });
+    return true;
+  }
+  function pasteSelected() {
+    const copied = clipboard.current;
+    if (!copied.length) { dispatchTakeoffStatus({ message: "Nothing to paste" }); return; }
+    const suffix = Date.now().toString().slice(-6);
+    st.captureGeometryUndo();
+    const createdIds = copied.map((item, index) => {
+      const value = JSON.parse(JSON.stringify(item.value));
+      value.id = `${String(value.id).replace(/-COPY-\d+(?:-\d+)?$/, "")}-COPY-${suffix}-${index + 1}`;
+      value.viewportId = viewport.id;
+      if (item.kind === "opening") {
+        value.bbox = { ...value.bbox, x: value.bbox.x + 24, y: value.bbox.y + 24 };
+        st.addOpening(value);
+      } else if (item.kind === "wall") {
+        value.start = { x: value.start.x + 24, y: value.start.y + 24 };
+        value.end = { x: value.end.x + 24, y: value.end.y + 24 };
+        st.addWall(value);
+      } else {
+        value.points = value.points.map((point: Point) => ({ x: point.x + 24, y: point.y + 24 }));
+        value.deducts = value.deducts.map((ring: Point[]) => ring.map((point) => ({ x: point.x + 24, y: point.y + 24 })));
+        if (item.kind === "roof") st.addRoofZone(value);
+        else st.addZone(item.kind, value);
+      }
+      return value.id as string;
+    });
+    st.setSelectedEntities(createdIds);
+    dispatchTakeoffStatus({ message: `Created ${createdIds.length} item${createdIds.length === 1 ? "" : "s"}`, saving: "editing" });
+  }
+  function selectSameFamily() {
+    const activeId=selectedEntityId;
+    if(!activeId)return;
+    const all=[...st.openings,...st.floorZones,...st.ceilingZones,...st.walls,...st.roofZones];
+    const active=all.find((item)=>item.id===activeId);
+    if(!active)return;
+    st.setSelectedEntities(all.filter((item)=>item.viewportId===viewport.id&&item.familyId===active.familyId).map((item)=>item.id));
+  }
+  function toggleSelectedLock() {
+    const ids=selectedEntityIds.length?selectedEntityIds:selectedEntityId?[selectedEntityId]:[];
+    if(!ids.length)return;
+    const all=[...st.openings,...st.floorZones,...st.ceilingZones,...st.walls,...st.roofZones];
+    const shouldLock=ids.some((id)=>!all.find((item)=>item.id===id)?.locked);
+    ids.forEach((id)=>{if(st.openings.some((item)=>item.id===id))st.updateOpening(id,{locked:shouldLock});
+      else if(st.floorZones.some((item)=>item.id===id))st.updateZone("floor",id,{locked:shouldLock});
+      else if(st.ceilingZones.some((item)=>item.id===id))st.updateZone("ceiling",id,{locked:shouldLock});
+      else if(st.walls.some((item)=>item.id===id))st.updateWall(id,{locked:shouldLock});
+      else if(st.roofZones.some((item)=>item.id===id))st.updateRoofZone(id,{locked:shouldLock});});
+    dispatchTakeoffStatus({message:`${shouldLock?"Locked":"Unlocked"} ${ids.length} item${ids.length===1?"":"s"}`,saving:"editing"});
+  }
+  function rotateSelected() {
+    const ids=selectedEntityIds.length?selectedEntityIds:selectedEntityId?[selectedEntityId]:[];
+    if(!ids.length)return;st.captureGeometryUndo();
+    const rotate=(point:Point,center:Point)=>({x:center.x-(point.y-center.y),y:center.y+(point.x-center.x)});
+    ids.forEach((id)=>{const opening=st.openings.find((item)=>item.id===id);if(opening&&!opening.locked){const b=opening.bbox,c={x:b.x+b.width/2,y:b.y+b.height/2};st.updateOpening(id,{bbox:{x:c.x-b.height/2,y:c.y-b.width/2,width:b.height,height:b.width}});return;}
+      const wall=st.walls.find((item)=>item.id===id);if(wall&&!wall.locked){const c={x:(wall.start.x+wall.end.x)/2,y:(wall.start.y+wall.end.y)/2};st.updateWall(id,{start:rotate(wall.start,c),end:rotate(wall.end,c)});return;}
+      const floor=st.floorZones.find((item)=>item.id===id),ceiling=st.ceilingZones.find((item)=>item.id===id),zone=floor||ceiling;if(zone&&!zone.locked){const c=centroid(zone.points),patch={points:zone.points.map((point)=>rotate(point,c)),deducts:zone.deducts.map((ring)=>ring.map((point)=>rotate(point,c)))};st.updateZone(zone.kind,id,patch);return;}
+      const roof=st.roofZones.find((item)=>item.id===id);if(roof&&!roof.locked){const c=centroid(roof.points);st.updateRoofZone(id,{points:roof.points.map((point)=>rotate(point,c)),deducts:roof.deducts.map((ring)=>ring.map((point)=>rotate(point,c)))});}});
+  }
+  function changeSelectedVertex(add:boolean) {
+    const ids=selectedEntityIds.length?selectedEntityIds:selectedEntityId?[selectedEntityId]:[];
+    if(!ids.length)return;st.captureGeometryUndo();
+    ids.forEach((id)=>{const floor=st.floorZones.find((item)=>item.id===id),ceiling=st.ceilingZones.find((item)=>item.id===id),roof=st.roofZones.find((item)=>item.id===id),item=floor||ceiling||roof;if(!item||item.locked)return;const points=[...item.points];
+      if(add){let edge=0,longest=-1;points.forEach((point,index)=>{const next=points[(index+1)%points.length],length=distance(point,next);if(length>longest){longest=length;edge=index;}});const next=points[(edge+1)%points.length];points.splice(edge+1,0,{x:(points[edge].x+next.x)/2,y:(points[edge].y+next.y)/2});}
+      else if(points.length>3){let remove=0,smallest=Infinity;points.forEach((point,index)=>{const score=distance(points[(index-1+points.length)%points.length],point)+distance(point,points[(index+1)%points.length]);if(score<smallest){smallest=score;remove=index;}});points.splice(remove,1);}
+      if(roof)st.updateRoofZone(id,{points,upstandEdges:points.map((_,index)=>roof.upstandEdges[index]!==false)});else if(floor)st.updateZone("floor",id,{points});else if(ceiling)st.updateZone("ceiling",id,{points});});
+  }
+  function offsetSelectedWalls() {
+    const ids=(selectedEntityIds.length?selectedEntityIds:selectedEntityId?[selectedEntityId]:[]).filter((id)=>st.walls.some((wall)=>wall.id===id));
+    if(!ids.length)return;const entered=window.prompt("Offset distance in metres. Use a negative value for the opposite side.","0.20"),metres=Number(entered);if(!Number.isFinite(metres)||metres===0)return;st.captureGeometryUndo();const created:string[]=[];
+    ids.forEach((id,index)=>{const wall=st.walls.find((item)=>item.id===id)!;if(wall.locked)return;const dx=wall.end.x-wall.start.x,dy=wall.end.y-wall.start.y,length=Math.hypot(dx,dy),pixels=metres/scaleForViewport(wall.viewportId);if(length<1e-6)return;const ox=-dy/length*pixels,oy=dx/length*pixels,next={...wall,id:`${wall.id}-OFFSET-${Date.now().toString(36)}-${index+1}`,start:{x:wall.start.x+ox,y:wall.start.y+oy},end:{x:wall.end.x+ox,y:wall.end.y+oy},status:"needs_review" as const,locked:false};st.addWall(next);created.push(next.id);});st.setSelectedEntities(created);
+  }
+  function trimOrExtendSelectedWalls(action:"trim"|"extend") {
+    const ids=(selectedEntityIds.length?selectedEntityIds:selectedEntityId?[selectedEntityId]:[]).filter((id)=>st.walls.some((wall)=>wall.id===id));if(!ids.length)return;st.captureGeometryUndo();
+    ids.forEach((id)=>{const wall=st.walls.find((item)=>item.id===id);if(!wall||wall.locked)return;const r={x:wall.end.x-wall.start.x,y:wall.end.y-wall.start.y};const candidates:{point:Point;t:number}[]=[];st.walls.filter((other)=>other.id!==id&&other.viewportId===wall.viewportId).forEach((other)=>{const s={x:other.end.x-other.start.x,y:other.end.y-other.start.y},den=r.x*s.y-r.y*s.x;if(Math.abs(den)<1e-8)return;const q={x:other.start.x-wall.start.x,y:other.start.y-wall.start.y},t=(q.x*s.y-q.y*s.x)/den,u=(q.x*r.y-q.y*r.x)/den;if(u>=-0.001&&u<=1.001&&((action==="trim"&&t>0.001&&t<0.999)||(action==="extend"&&(t<0||t>1))))candidates.push({point:{x:wall.start.x+t*r.x,y:wall.start.y+t*r.y},t});});if(!candidates.length)return;const chosen=candidates.sort((a,b)=>Math.min(Math.abs(a.t),Math.abs(1-a.t))-Math.min(Math.abs(b.t),Math.abs(1-b.t)))[0];st.updateWall(id,chosen.t<.5?{start:chosen.point}:{end:chosen.point});});
+  }
+  function setSelectedStatus(status: DemoStatus) {
+    const ids = selectedEntityIds.length ? selectedEntityIds : selectedEntityId ? [selectedEntityId] : [];
+    if (!ids.length) { dispatchTakeoffStatus({ message: "Select an item first" }); return; }
+    ids.forEach((id) => {
+      const opening = st.openings.find((x) => x.id === id);
+      const floor = st.floorZones.find((x) => x.id === id);
+      const ceiling = st.ceilingZones.find((x) => x.id === id);
+      const wall = st.walls.find((x) => x.id === id);
+      const roof = st.roofZones.find((x) => x.id === id);
+      if (opening) st.updateOpening(opening.id, { status });
+      else if (floor) st.updateZone("floor", floor.id, { status });
+      else if (ceiling) st.updateZone("ceiling", ceiling.id, { status });
+      else if (wall) st.updateWall(wall.id, { status });
+      else if (roof) st.updateRoofZone(roof.id, { status });
+    });
+    dispatchTakeoffStatus({ message: `${ids.length} item${ids.length === 1 ? "" : "s"}: ${status.replaceAll("_", " ")}`, saving: "editing" });
+  }
+  function stepPage(direction: -1 | 1) {
+    const current = Math.max(0, allowed.indexOf(viewport.id));
+    const next = allowed[(current + direction + allowed.length) % Math.max(1, allowed.length)];
+    if (next) setViewport(next);
+  }
+  function stepIssue(direction: -1 | 1) {
+    const rows = [
+      ...st.openings,
+      ...(element === "floor" ? st.floorZones : []),
+      ...(element === "ceiling" ? st.ceilingZones : []),
+      ...(element === "walls" ? st.walls : []),
+      ...(element === "roof" ? st.roofZones : []),
+    ].filter((item) => item.status === "needs_review" && allowed.includes(item.viewportId));
+    if (!rows.length) { dispatchTakeoffStatus({ message: "No review issues" }); return; }
+    const current = rows.findIndex((item) => item.id === selectedEntityId);
+    const next = rows[(Math.max(0, current) + direction + rows.length) % rows.length];
+    setViewport(next.viewportId); setSelected(next.id);
+  }
+  function exportCurrentTakeoff() {
+    const source = isOpeningElement(element)
+      ? st.openings.filter((item) => (element === "doors-windows" || item.kind === (element === "doors" ? "door" : "window")) && allowed.includes(item.viewportId))
+      : element === "floor"
+        ? st.floorZones.filter((item) => allowed.includes(item.viewportId))
+        : element === "ceiling"
+          ? st.ceilingZones.filter((item) => allowed.includes(item.viewportId))
+          : element === "walls"
+            ? st.walls.filter((item) => allowed.includes(item.viewportId))
+            : st.roofZones.filter((item) => allowed.includes(item.viewportId));
+    const rows: ExportRow[] = source.map((item) => {
+      let quantity = 1, unit = "nr";
+      if ("start" in item) { quantity = distance(item.start, item.end) * scaleForViewport(item.viewportId); unit = "m"; }
+      else if ("points" in item) { quantity = "upstandEdges" in item ? roofNetAreaM2(item) : zoneNetAreaM2(item); unit = "m²"; }
+      return { ID: item.id, Element: elementNames[element] || element, Family: item.familyId, Level: floorName(item.floorId), Drawing: st.viewports.find((value) => value.id === item.viewportId)?.name || item.viewportId, Quantity: Number(quantity.toFixed(3)), Unit: unit, Status: item.status };
+    });
+    if (exportTakeoffCsv(`quanto-${element}-takeoff.csv`, rows)) dispatchTakeoffStatus({ message: `Exported ${rows.length} takeoff row${rows.length === 1 ? "" : "s"}` });
+    else dispatchTakeoffStatus({ message: "There is no takeoff data to export" });
+  }
+  useEffect(() => {
+    dispatchTakeoffStatus({ selected: selectedEntityIds.length > 1 ? `${selectedEntityIds.length} items` : selectedEntityId, snap, ortho, saving: "saved" });
+  }, [ortho, selectedEntityId, selectedEntityIds.length, snap]);
+  useEffect(() => {
+    if (!snap || pdfVectors.loading) return;
+    if (pdfVectors.vectorAvailable) dispatchTakeoffStatus({ message: `${pdfVectors.segments.length.toLocaleString()} PDF snap edges ready` });
+    else if (pdfVectors.data && !pdfVectors.vectorAvailable) dispatchTakeoffStatus({ message: "Raster drawing: PDF vector snapping unavailable" });
+  }, [pdfVectors.data, pdfVectors.loading, pdfVectors.segments.length, pdfVectors.vectorAvailable, snap]);
+  useTakeoffCommand((command) => {
+    if (command.element !== element) return;
+    const label = command.label.toLowerCase();
+    const notify = (message: string) => dispatchTakeoffStatus({ message });
+    if (label === "select" || label === "move" || label === "edit points" || label === "endpoints") { setMode("select"); notify("Select mode"); }
+    else if (label === "multi select" || label === "select area") { setMode("select"); notify("Drag a selection window; Ctrl/Shift-click adds or removes items"); }
+    else if (label === "same family") selectSameFamily();
+    else if (label === "pan") { setMode("pan"); notify("Pan mode"); }
+    else if (label === "open" || label === "search") { setLeftTab("viewports"); notify("Drawing navigator opened"); }
+    else if (label === "previous") stepPage(-1);
+    else if (label === "next") stepPage(1);
+    else if (label === "bookmarks") { setLeftTab("viewports"); notify("Viewports opened"); }
+    else if (label === "families" || label === "materials" || label === "assemblies" || label === "project" || label === "company") setLeftTab("families");
+    else if (label === "copy") copySelected();
+    else if (label === "cut") { if (copySelected()) deleteSelected(); }
+    else if (label === "paste") pasteSelected();
+    else if (label === "duplicate") { if (copySelected()) pasteSelected(); }
+    else if (label === "undo") st.undoGeometry();
+    else if (label === "redo") st.redoGeometry();
+    else if (label === "delete" || label === "remove") measurement.selected ? measurement.deleteSelected() : deleteSelected();
+    else if (label === "rotate") rotateSelected();
+    else if (label === "add vertex") changeSelectedVertex(true);
+    else if (label === "delete vertex") changeSelectedVertex(false);
+    else if (label === "lock") toggleSelectedLock();
+    else if (label === "offset" && element === "walls") offsetSelectedWalls();
+    else if (label === "trim" && element === "walls") trimOrExtendSelectedWalls("trim");
+    else if (label === "extend" && element === "walls") trimOrExtendSelectedWalls("extend");
+    else if (["area", "perimeter", "radius", "angle"].includes(label) && command.tab === "measure") { setMeasureMode("any"); setMeasurementKind(label as MeasurementKind); setMode("measure"); notify(`${label[0].toUpperCase()+label.slice(1)} measurement · Enter or click the first point to finish polygons`); }
+    else if (["distance", "dimension", "verify scale"].includes(label)) { setMeasureMode("any"); setMeasurementKind("distance"); setMode("measure"); }
+    else if (label === "horizontal") { setMeasureMode("horizontal"); setMeasurementKind("distance"); setMode("measure"); }
+    else if (label === "vertical") { setMeasureMode("vertical"); setMeasurementKind("distance"); setMode("measure"); }
+    else if (["area", "polygon", "freehand", "boundary", "add area", "subtract", "deduct", "cutout"].includes(label)) {
+      if (!["floor", "ceiling", "roof"].includes(element)) { notify(`${command.label} is available for area-based takeoff elements`); return; }
+      setShape(label === "freehand" ? "freehand" : "polyline");
+      const action:AreaAction=label === "add area" ? "add" : label === "cutout" ? "cutout" : label === "subtract" || label === "deduct" ? "subtract" : "create";
+      setAreaAction(action);setSign(action === "subtract" || action === "cutout" ? "remove" : "add");setDraft([]);setDrawHover(null);setSnap(true);setMode("draw");
+      notify(label === "freehand" ? "Drag around the boundary; release to finish" : action === "add" ? "Draw an additional boundary using the selected family" : action === "cutout" ? "Select a host area, then draw the enclosed opening" : action === "subtract" ? "Select a host area, then draw the area to subtract" : "Click boundary points; click the first point to finish");
+    }
+    else if (["rectangle", "box", "count"].includes(label)) { setShape("box"); setAreaAction("create"); setSign("add"); setDraft([]); setDrawHover(null); setSnap(true); setMode("draw"); notify("Drag or click two opposite corners"); }
+    else if (["linear", "segment", "multi segment", "continue"].includes(label)) { setShape("line"); setSign("add"); setMode("draw"); notify("Click the start and end points"); }
+    else if (label === "opening") { setShape("polyline"); setAreaAction("cutout"); setSign("remove"); setDraft([]); setSnap(true); setMode("draw"); notify("Select a host area, then draw the enclosed opening"); }
+    else if (label === "snap") setSnap((value) => !value);
+    else if (label === "ortho") setOrtho((value) => !value);
+    else if (label === "layers") setLeftTab("families");
+    else if (label === "drawing") setShowDrawing((value) => !value);
+    else if (label === "takeoff") setHidden((current) => current.size ? new Set() : new Set(familyIdsFor(element)));
+    else if (label === "set scale") {
+      const entered = window.prompt("Enter drawing scale (for example 100 for 1:100)", "100");
+      const denominator = Number(entered?.replace("1:", ""));
+      if (denominator > 0) { st.updateViewport(viewport.id, { scaleMPerPx: 1 / (denominator * 3.7795275591) }); notify(`Scale set to 1:${denominator}`); }
+    }
+    else if (label === "split" && element === "walls" && selectedEntityId) splitWall(selectedEntityId);
+    else if ((label === "merge" || label === "join") && element === "walls" && selectedEntityId) mergeWall(selectedEntityId);
+    else if (label === "confirm") setSelectedStatus("confirmed");
+    else if (label === "needs review" || label === "hold") setSelectedStatus("needs_review");
+    else if (label === "reject") { setSelectedStatus("needs_review"); notify("Item marked for rejection review"); }
+    else if (label === "previous issue") stepIssue(-1);
+    else if (label === "next issue") stepIssue(1);
+    else if (label === "unreviewed") stepIssue(1);
+    else if (label === "resolve all") {
+      const items = [...st.openings, ...st.floorZones, ...st.ceilingZones, ...st.walls, ...st.roofZones].filter((item) => allowed.includes(item.viewportId) && item.status === "needs_review");
+      items.forEach((item) => {
+        if (st.openings.some((x) => x.id === item.id)) st.updateOpening(item.id, { status: "confirmed" });
+        else if (st.floorZones.some((x) => x.id === item.id)) st.updateZone("floor", item.id, { status: "confirmed" });
+        else if (st.ceilingZones.some((x) => x.id === item.id)) st.updateZone("ceiling", item.id, { status: "confirmed" });
+        else if (st.walls.some((x) => x.id === item.id)) st.updateWall(item.id, { status: "confirmed" });
+        else st.updateRoofZone(item.id, { status: "confirmed" });
+      }); notify(`${items.length} issues confirmed`);
+    }
+    else if (label === "workbook" || label.includes("summary") || label === "preview" || ["element", "family", "level"].includes(label)) router.push(appRoutes.takeoff(projectId, element, "workbook"));
+    else if (["boq mapping", "formulas", "waste", "rates", "units"].includes(label)) router.push(appRoutes.workspaceBoq(projectId));
+    else if (label === "export") exportCurrentTakeoff();
+    else if (label === "print") window.print();
+    else if (label === "new template") { setLeftTab("families"); notify("Use New family in the Families panel"); }
+    else if (["new section", "add existing"].includes(label)) setAddElementOpen(true);
+    else if (["width", "depth", "height", "thickness", "finish", "finishes", "pitch", "host wall", "schedule", "support"].includes(label)) notify("Select an item and edit this value in Properties");
+    else notify(`${command.label} is not connected in this workspace yet`);
+  });
   return (
     <>
       <ResizableThreePane
@@ -550,39 +914,14 @@ function DimensionView({
           {leftCollapsed ? null : (
             <>
               <div className="grid grid-cols-2 border-b border-slate-200 p-2 pr-12">
-                <button
-                  onClick={() => setLeftTab("viewports")}
-                  className={
-                    leftTab === "viewports"
-                      ? "rounded-lg bg-slate-950 px-2 py-2 text-xs font-semibold text-white"
-                      : "rounded-lg px-2 py-2 text-xs font-semibold text-slate-500"
-                  }
-                >
-                  Viewports
-                </button>
-                <button
-                  onClick={() => setLeftTab("families")}
-                  className={
-                    leftTab === "families"
-                      ? "rounded-lg bg-slate-950 px-2 py-2 text-xs font-semibold text-white"
-                      : "rounded-lg px-2 py-2 text-xs font-semibold text-slate-500"
-                  }
-                >
-                  Families
-                </button>
+                {[["viewports", "Viewports"], ["families", "Families"]].map(([value, label]) => (
+                  <button key={value} onClick={() => setLeftTab(value as "viewports" | "families")} className={leftTab === value ? "rounded-md bg-slate-900 px-1 py-2 text-[9px] font-semibold text-white" : "rounded-md px-1 py-2 text-[9px] font-semibold text-slate-500 hover:bg-slate-50"}>{label}</button>
+                ))}
               </div>
               {leftTab === "viewports" ? (
-                <ViewportList
-                  allowed={allowed}
-                  selected={viewport.id}
-                  onSelect={setViewport}
-                />
+                <ViewportList allowed={allowed} selected={viewport.id} onSelect={setViewport} />
               ) : (
-                <FamilyList
-                  element={element}
-                  active={activeFamily}
-                  onSelect={setActiveFamily}
-                />
+                <FamilyList element={element} active={activeFamily} revealKey={selectedEntityId || ""} onSelect={setActiveFamily} />
               )}
             </>
           )}
@@ -590,26 +929,40 @@ function DimensionView({
         <main className="min-w-0 bg-slate-100 p-3">
           <DemoDrawing
             viewportId={viewport.id}
+            hideToolbar
             tool={
               mode === "pan"
                 ? "pan"
-                : mode === "draw" || mode === "measure"
+                : mode === "draw" || mode === "measure" || mode === "select"
                   ? "draw"
                   : "select"
             }
             onCanvasClick={click}
-            onCanvasDragStart={shape === "polyline" ? undefined : (point, scale) => {
-              if (mode !== "draw" || !pendingAdd) return;
-              canvasScale.current = scale; const start = resolveSnap(point).point; setDraft([start, start]);
+            onCanvasDragStart={(point, scale) => {
+              if (mode === "select") { canvasScale.current = scale; setSelectionBox({ start: point, current: point }); return; }
+              if (shape === "polyline") return;
+              if (mode !== "draw") return;
+              canvasScale.current = scale; const start = resolveSnap(point).point; setDraft(shape === "freehand" ? [start] : [start, start]);
             }}
-            onCanvasDragMove={shape === "polyline" ? undefined : (point, scale) => {
-              if (mode !== "draw" || !pendingAdd || draft.length < 2) return;
-              canvasScale.current = scale; const end = resolveSnap(point, draft[0]).point;
+            onCanvasDragMove={(point, scale) => {
+              if (mode === "select" && selectionBox) { canvasScale.current = scale; setSelectionBox((current) => current ? { ...current, current: point } : null); return; }
+              if (shape === "polyline") return;
+              if (mode !== "draw" || !draft.length) return;
+              canvasScale.current = scale; const end = resolveSnap(point, shape === "freehand" ? draft[draft.length - 1] : draft[0]).point;
+              if (shape === "freehand") { setDraft((current) => !current.length || distance(current[current.length - 1], end) >= Math.max(2, 5 / Math.max(.01, scale)) ? [...current, end] : current); return; }
               setDraft((current) => current.length ? [current[0], end] : current);
             }}
-            onCanvasDragEnd={shape === "polyline" ? undefined : (point, scale) => {
-              if (mode !== "draw" || !pendingAdd || draft.length < 2) return;
-              canvasScale.current = scale; const end = resolveSnap(point, draft[0]).point;
+            onCanvasDragEnd={(point, scale) => {
+              if (mode === "select" && selectionBox) {
+                canvasScale.current = scale;
+                if (distance(selectionBox.start, point) >= Math.max(4, 8 / Math.max(.01, scale))) selectInBox(selectionBox.start, point);
+                setSelectionBox(null);
+                return;
+              }
+              if (shape === "polyline") return;
+              if (mode !== "draw" || !draft.length) return;
+              canvasScale.current = scale; const end = resolveSnap(point, shape === "freehand" ? draft[draft.length - 1] : draft[0]).point;
+              if (shape === "freehand") { const points=simplifyFreehandPoints([...draft,end],Math.max(2,4/Math.max(.01,scale))); if(points.length>=3)finish(points);else setDraft([]); return; }
               if (Math.max(Math.abs(end.x-draft[0].x), Math.abs(end.y-draft[0].y)) < 8) { setDraft([]); return; }
               finish([draft[0], end]);
             }}
@@ -625,7 +978,7 @@ function DimensionView({
                 setDrawHover(null);
                 return;
               }
-              const result = resolveSnap(point, shape === "polyline" ? draft[draft.length - 1] : undefined);
+              const result = resolveSnap(point, shape === "polyline" || shape === "freehand" ? draft[draft.length - 1] : undefined);
               setSnapTarget(result.target);
               setDrawHover(shape === "polyline" && draft.length ? result.point : null);
             }}
@@ -654,6 +1007,9 @@ function DimensionView({
                   setSnap(value);
                   if (!value) setSnapTarget(null);
                 }}
+                ortho={ortho}
+                setOrtho={setOrtho}
+                onCommand={() => setCommandOpen(true)}
                 onAddElement={() => setAddElementOpen(true)}
                 onFinish={() => finish()}
                 canFinish={
@@ -732,11 +1088,13 @@ function DimensionView({
                 />
               )}
             </g>
+            {selectionBox ? <g pointerEvents="none"><rect x={Math.min(selectionBox.start.x,selectionBox.current.x)} y={Math.min(selectionBox.start.y,selectionBox.current.y)} width={Math.abs(selectionBox.current.x-selectionBox.start.x)} height={Math.abs(selectionBox.current.y-selectionBox.start.y)} fill={selectionBox.current.x < selectionBox.start.x ? "#22c55e" : "#3b82f6"} fillOpacity={.12} stroke={selectionBox.current.x < selectionBox.start.x ? "#16a34a" : "#2563eb"} strokeWidth={1.5} strokeDasharray={selectionBox.current.x < selectionBox.start.x ? "7 4" : undefined} vectorEffect="non-scaling-stroke"/></g> : null}
             {draft.length ? (
               <DraftOverlay
                 points={shape === "polyline" && drawHover ? [...draft, drawHover] : draft}
                 shape={shape}
                 fixedPointCount={draft.length}
+                operation={areaAction}
               />
             ) : null}
             {!isOpeningElement(element) ? (
@@ -747,15 +1105,31 @@ function DimensionView({
                 editable={mode === "select" || mode === "measure"}
                 previewStart={measurement.start}
                 previewEnd={measurement.previewEnd}
+                previewPoints={measurement.previewPoints}
+                previewKind={measurement.kind}
               />
             ) : null}
             {snapTarget ? <GenericSnapIndicator target={snapTarget} /> : null}
           </DemoDrawing>
+          <TakeoffStatusBar element={element} viewportName={viewport.name} scale={viewport.scaleMPerPx || 0.018} snap={snap} ortho={ortho} />
         </main>
-        <aside className="border-l border-slate-200">
+        <aside className="!overflow-hidden border-l border-slate-200">
           <RightPane projectId={projectId} element={element} />
         </aside>
       </ResizableThreePane>
+      {commandOpen ? <TakeoffCommandPalette element={element} onClose={() => setCommandOpen(false)} onAction={(action) => {
+        if (action === "select") setMode("select");
+        if (action === "pan") setMode("pan");
+        if (action === "measure") setMode("measure");
+        if (action === "area") { setShape("polyline"); setSign("add"); setMode("draw"); }
+        if (action === "linear") { setShape("line"); setMode("draw"); }
+        if (action === "count") { setShape("box"); setMode("draw"); }
+        if (action === "add") setAddElementOpen(true);
+        if (action === "snap") setSnap((v) => !v);
+        if (action === "ortho") setOrtho((v) => !v);
+        if (action === "undo") st.undoGeometry();
+        setCommandOpen(false);
+      }} /> : null}
       <GenericAddElementDialog
         open={addElementOpen}
         element={element}
@@ -1004,33 +1378,58 @@ function ViewportList({
   onSelect: (id: string) => void;
 }) {
   const viewports = useDemoStore((s) => s.viewports);
+  const sheets = useDemoStore((s) => s.sheets);
+  const [query, setQuery] = useState("");
   const vs = viewports.filter((v) => allowed.includes(v.id));
+  const filtered = vs.filter((v) => {
+    const sheet = sheets.find((item) => item.id === v.sheetId);
+    return `${v.name} ${v.category} ${sheet?.sheetNo || ""} ${sheet?.title || ""}`.toLowerCase().includes(query.toLowerCase());
+  });
+  const groups = [
+    ["Plans", filtered.filter((v) => v.category === "plan")],
+    ["Sections & elevations", filtered.filter((v) => v.category === "section" || v.category === "elevation")],
+    ["Details & schedules", filtered.filter((v) => !["plan", "section", "elevation"].includes(v.category))],
+  ] as const;
   return (
-    <div className="space-y-2 p-3">
-      {vs.map((v) => (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-slate-200 p-2"><div className="relative"><span className="pointer-events-none absolute left-2.5 top-2 text-xs">🔎</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search drawings…" className="h-8 w-full rounded-md border border-slate-200 bg-slate-50 pl-8 pr-2 text-[11px] outline-none focus:border-blue-300 focus:bg-white" /></div></div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      {groups.map(([label, items]) => items.length ? <div key={label} className="mb-3"><p className="mb-1 px-1 text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">{label}</p><div className="space-y-1">{items.map((v) => {
+        const sheet = sheets.find((item) => item.id === v.sheetId);
+        return (
         <button
           key={v.id}
           onClick={() => onSelect(v.id)}
           className={
             selected === v.id
-              ? "w-full rounded-xl border border-blue-200 bg-blue-50 p-3 text-left"
-              : "w-full rounded-xl border border-slate-200 p-3 text-left hover:border-blue-200"
+              ? "w-full border border-blue-300 bg-blue-50 p-2 text-left shadow-sm"
+              : "w-full border border-slate-200 bg-white p-2 text-left hover:border-blue-200 hover:bg-slate-50"
           }
         >
-          <p className="text-sm font-semibold">{v.name}</p>
-          <p className="mt-1 text-xs capitalize text-slate-500">{v.category}</p>
+          <div className="flex gap-2"><span className="relative flex h-9 w-8 shrink-0 items-center justify-center rounded bg-red-50 text-base ring-1 ring-red-200">📄<span className="absolute -bottom-0.5 rounded-sm bg-red-600 px-1 text-[5px] font-black text-white">PDF</span></span><ViewportCardLabel viewportName={v.name} sheetTitle={sheet?.title} sheetNumber={sheet?.sheetNo} category={v.category} revision={sheet?.revision}/><span className={v.status === "confirmed" ? "mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-500" : "mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-400"} /></div>
         </button>
-      ))}
+        );
+      })}</div></div> : null)}
+      {!filtered.length ? <p className="p-5 text-center text-xs text-slate-400">No drawings match this search.</p> : null}
+      </div>
     </div>
   );
+}
+
+function TakeoffBookmarks({ allowed, onSelect }: { allowed: string[]; onSelect: (id: string) => void }) {
+  const viewports = useDemoStore((state) => state.viewports);
+  const candidates = viewports.filter((item) => allowed.includes(item.id) && ["section", "detail", "schedule", "elevation"].includes(item.category));
+  return <div className="p-2"><div className="mb-2 flex items-center justify-between px-1"><p className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">Automatic bookmarks</p><button type="button" className="text-sm text-blue-600" title="Add bookmark">＋</button></div>{candidates.length ? <div className="space-y-1">{candidates.map((item) => <button key={item.id} type="button" onClick={() => onSelect(item.id)} className="flex w-full items-center gap-2 border border-slate-200 bg-white px-2 py-2 text-left hover:border-blue-200 hover:bg-blue-50"><span>🔖</span><span className="min-w-0 flex-1 truncate text-[10px] font-semibold text-slate-700">{item.name}</span></button>)}</div> : <div className="border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-[10px] leading-4 text-slate-500">No section or detail bookmarks are available yet.<br />Use ＋ to add one.</div>}</div>;
 }
 function FamilyList({
   element,
   active,
+  revealKey,
   onSelect,
 }: {
   element: string;
   active: string;
+  revealKey: string;
   onSelect: (id: string) => void;
 }) {
   const st = useDemoStore();
@@ -1058,7 +1457,7 @@ function FamilyList({
   ]);
   useEffect(() => {
     if (active) setExpandedId(active);
-  }, [active]);
+  }, [active, revealKey]);
   const groups = isOpeningElement(element)
     ? element === "doors-windows"
       ? [
@@ -1293,10 +1692,12 @@ function FamilyList({
                     type="button"
                     aria-expanded={open}
                     onClick={() => {
+                      if (open) {
+                        setExpandedId(null);
+                        return;
+                      }
                       onSelect(f.id);
-                      setExpandedId((current) =>
-                        current === f.id ? null : f.id,
-                      );
+                      setExpandedId(f.id);
                     }}
                     className="w-full p-3 text-left hover:bg-blue-50"
                   >
@@ -1533,6 +1934,9 @@ function DimensionToolbar({
   setMeasureMode,
   snap,
   setSnap,
+  ortho,
+  setOrtho,
+  onCommand,
   onAddElement,
   onFinish,
   canFinish,
@@ -1548,7 +1952,10 @@ function DimensionToolbar({
   measureMode: "horizontal" | "vertical" | "any";
   setMeasureMode: (s: "horizontal" | "vertical" | "any") => void;
   snap: boolean;
-  setSnap: (v: boolean) => void;
+  setSnap: (v: boolean | ((current: boolean) => boolean)) => void;
+  ortho: boolean;
+  setOrtho: (v: boolean | ((current: boolean) => boolean)) => void;
+  onCommand: () => void;
   onAddElement: () => void;
   onFinish: () => void;
   canFinish: boolean;
@@ -1628,13 +2035,8 @@ function DimensionToolbar({
           ) : null}
         </div>
       ) : null}
-      <button
-        title={mode === "draw" ? "Exit drawing mode" : "Draw on the plan"}
-        onClick={() => setMode(mode === "draw" ? "select" : "draw")}
-        className={mode === "draw" ? activeTool : toolClass}
-      >
-        {mode === "draw" ? "Drawing" : "Draw"}
-      </button>
+      <button title={mode === "draw" ? "Exit drawing mode" : "Draw on the plan"} onClick={() => setMode(mode === "draw" ? "select" : "draw")} className={mode === "draw" ? activeTool : toolClass}>{mode === "draw" ? "Drawing" : "Draw"}</button>
+      <button type="button" title="Open all takeoff commands (Ctrl+K)" onClick={onCommand} className={toolClass}>Commands</button>
       {mode === "draw" ? (
         <div className="flex items-center gap-1 rounded-lg border border-blue-100 bg-blue-50 p-1">
           {drawsAreaPolygon ? (
@@ -1720,6 +2122,7 @@ function DimensionToolbar({
           >
             Snap {snap ? "On" : "Off"}
           </button>
+          <button title="Lock new geometry to orthogonal directions (O)" onClick={() => setOrtho(!ortho)} className={ortho ? "rounded-lg bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700" : toolClass}>Ortho {ortho ? "On" : "Off"}</button>
         </>
       ) : null}
       {mode === "measure" ? (
@@ -1782,17 +2185,20 @@ function DimensionActions({
     </div>
   );
 }
-function DraftOverlay({ points, shape, fixedPointCount = points.length }: { points: Point[]; shape: string; fixedPointCount?: number }) {
+function DraftOverlay({ points, shape, fixedPointCount = points.length, operation = "create" }: { points: Point[]; shape: string; fixedPointCount?: number; operation?: AreaAction }) {
   const ps =
     shape === "box" && points.length >= 2
       ? boxPoints(points[0], points[points.length - 1])
       : points;
+  const subtracting = operation === "subtract" || operation === "cutout";
+  const stroke = subtracting ? "#dc2626" : operation === "add" ? "#059669" : "#2563eb";
+  const fill = subtracting ? "rgba(220,38,38,.14)" : operation === "add" ? "rgba(5,150,105,.14)" : "rgba(37,99,235,.14)";
   return (
     <g pointerEvents="none">
       <polygon
         points={ps.map((p) => `${p.x},${p.y}`).join(" ")}
-        fill={shape === "polyline" && ps.length >= 3 ? "rgba(37,99,235,.18)" : ps.length >= 3 ? "rgba(37,99,235,.12)" : "none"}
-        stroke="#2563eb"
+        fill={ps.length >= 3 ? fill : "none"}
+        stroke={stroke}
         strokeWidth={4}
         strokeDasharray="7 5"
         vectorEffect="non-scaling-stroke"
@@ -1803,7 +2209,7 @@ function DraftOverlay({ points, shape, fixedPointCount = points.length }: { poin
           cx={p.x}
           cy={p.y}
           r={i === 0 && fixedPointCount >= 3 ? 9 : 6}
-          fill={i === 0 && fixedPointCount >= 3 ? "#10b981" : "#2563eb"}
+          fill={i === 0 && fixedPointCount >= 3 ? "#10b981" : stroke}
           stroke="white"
           strokeWidth={2}
         />
@@ -1921,56 +2327,19 @@ function GenericSnapIndicator({ target }: { target: SnapPreview }) {
   );
 }
 
-function RightPane({
-  projectId,
-  element,
-}: {
-  projectId: string;
-  element: string;
-}) {
-  const tab = useDemoStore((s) => s.rightTab);
-  const setTab = useDemoStore((s) => s.setRightTab);
-  useEffect(() => {
-    const chatKey = `takeoff.${element}`;
-    const messages = useDemoStore.getState().chat[chatKey];
-    if (copilotQuestionPending(chatKey, messages || [])) setTab("takeoff");
-  }, [element, setTab]);
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="grid shrink-0 grid-cols-2 border-b border-slate-200 p-2">
-        <button
-          onClick={() => setTab("takeoff")}
-          className={
-            tab === "takeoff"
-              ? "rounded-lg bg-slate-950 px-2 py-2 text-xs font-semibold text-white"
-              : "rounded-lg px-2 py-2 text-xs font-semibold text-slate-500"
-          }
-        >
-          Copilot
-        </button>
-        <button
-          onClick={() => setTab("item")}
-          className={
-            tab === "item"
-              ? "rounded-lg bg-slate-950 px-2 py-2 text-xs font-semibold text-white"
-              : "rounded-lg px-2 py-2 text-xs font-semibold text-slate-500"
-          }
-        >
-          Item
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        {tab === "takeoff" ? (
-          <DemoChat
-            chatKey={`takeoff.${element}`}
-            onOpenItem={() => setTab("item")}
-          />
-        ) : (
-          <ItemInspector element={element} />
-        )}
-      </div>
-    </div>
-  );
+function RightPane({ projectId, element }: { projectId: string; element: string }) {
+  const [tab,setTab] = useState<"properties"|"ai">("ai");
+  const selectedId = useDemoStore((state) => state.selectedEntityId);
+  useEffect(() => { if (selectedId) setTab("properties"); }, [selectedId]);
+  useEffect(() => { const key=`takeoff.${element}`; const messages=useDemoStore.getState().chat[key]; if(copilotQuestionPending(key,messages||[])) setTab("ai"); },[element]);
+  useTakeoffCommand((command) => {
+    if (command.element !== element) return;
+    const label = command.label.toLowerCase();
+    if (label === "properties" || ["width","depth","height","thickness","finish","finishes","pitch","host wall","schedule","support"].includes(label)) setTab("properties");
+    else if (label === "evidence" || label === "show evidence" || label === "evidence report" || label === "manual changes") setTab("properties");
+    else if (["explain","find similar","ai results"].includes(label)) setTab("ai");
+  });
+  return <div className="flex h-full min-h-0 flex-col overflow-hidden"><div className="grid shrink-0 grid-cols-2 border-b border-slate-200 p-2">{[["ai","Copilot"],["properties","Item"]].map(([v,l])=><button key={v} onClick={()=>setTab(v as "properties"|"ai")} className={tab===v?"rounded-lg bg-slate-950 px-1 py-2 text-[10px] font-semibold text-white":"rounded-lg px-1 py-2 text-[10px] font-semibold text-slate-500 hover:bg-slate-50"}>{l}</button>)}</div><div className={tab==="ai"?"flex min-h-0 flex-1 overflow-hidden":"min-h-0 flex-1 overflow-y-auto overscroll-contain"}>{tab==="ai"?<DemoChat chatKey={`takeoff.${element}`} onOpenItem={()=>setTab("properties")}/>:<ItemInspector element={element}/>}</div></div>;
 }
 function ItemInspector({ element }: { element: string }) {
   const id = useDemoStore((s) => s.selectedEntityId);
@@ -2228,6 +2597,15 @@ function WallInspector({ id }: { id: string }) {
   }
   const preview = st.wallFamilies.find((x) => x.id === draft.familyId) || f;
   const candidates = mergeCandidates(wall, st.walls);
+  const wallScale = scaleForViewport(wall.viewportId);
+  const wallLengthM = distance(wall.start, wall.end) * wallScale;
+  function setExactLength(lengthM: number) {
+    if (!(lengthM > 0) || !(wallScale > 0)) return;
+    const dx=wall.end.x-wall.start.x,dy=wall.end.y-wall.start.y,current=Math.hypot(dx,dy);
+    if(current<1e-6)return;
+    const target=lengthM/wallScale;
+    st.updateWall(wall.id,{end:{x:wall.start.x+dx/current*target,y:wall.start.y+dy/current*target}});
+  }
   return (
     <Inspector
       title={wall.id}
@@ -2259,8 +2637,11 @@ function WallInspector({ id }: { id: string }) {
       />
       <InfoRow
         label="Length"
-        value={`${(distance(wall.start, wall.end) * scaleForViewport(wall.viewportId)).toFixed(2)} m`}
+        value={`${wallLengthM.toFixed(3)} m`}
       />
+      <Field label="Exact length (m)">
+        <input className="input w-full" type="number" min="0.001" step="0.001" value={Number(wallLengthM.toFixed(3))} onFocus={()=>st.captureGeometryUndo()} onChange={(event)=>setExactLength(Number(event.target.value))}/>
+      </Field>
       <Field label="Height override">
         <input
           className="input w-full"
@@ -4025,6 +4406,11 @@ function findEntityTarget(
   return null;
 }
 
+function TakeoffCommandPalette({ element,onClose,onAction }:{ element:string; onClose:()=>void; onAction:(action:string)=>void }) {
+  const [query,setQuery]=useState(""); const commands=[["select","Select objects","V"],["pan","Pan drawing","H"],["measure","Measure distance","M"],["area","Draw area / polygon","A"],["linear","Draw linear / segment","L"],["count","Draw count / box","C"],["add",`Add ${elementNames[element]||element} element`,"+"],["snap","Toggle snapping","F3"],["ortho","Toggle Ortho","O"],["undo","Undo last geometry change","Ctrl+Z"]]; const filtered=commands.filter((c)=>c[1].toLowerCase().includes(query.toLowerCase()));
+  return <div className="fixed inset-0 z-[120] flex items-start justify-center bg-slate-950/20 pt-[12vh] backdrop-blur-[1px]" onMouseDown={onClose}><div className="w-[520px] max-w-[92vw] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onMouseDown={(e)=>e.stopPropagation()}><div className="border-b border-slate-200 p-3"><input autoFocus value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search commands…" className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none focus:border-blue-300 focus:bg-white"/></div><div className="max-h-[420px] overflow-y-auto p-2">{filtered.map(([action,label,key])=><button key={action} onClick={()=>onAction(action)} className="flex w-full items-center justify-between rounded-xl px-3 py-3 text-left hover:bg-slate-50"><span className="text-sm font-semibold text-slate-700">{label}</span><span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-400">{key}</span></button>)}</div></div></div>;
+}
+
 function isOpeningElement(element: string) {
   return (
     element === "doors-windows" || element === "doors" || element === "windows"
@@ -4081,6 +4467,18 @@ function boxPoints(a: Point, b: Point) {
     { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) },
     { x: Math.min(a.x, b.x), y: Math.max(a.y, b.y) },
   ];
+}
+
+function simplifyFreehandPoints(points: Point[], tolerance: number) {
+  if (points.length <= 3) return points;
+  const simplified = [points[0]];
+  for (let index = 1; index < points.length - 1; index += 1) {
+    if (distance(points[index], simplified[simplified.length - 1]) >= tolerance)
+      simplified.push(points[index]);
+  }
+  if (distance(points[points.length - 1], simplified[simplified.length - 1]) >= tolerance / 2)
+    simplified.push(points[points.length - 1]);
+  return simplified;
 }
 function targetViewport(row: WorkbookRow) {
   const st = useDemoStore.getState();

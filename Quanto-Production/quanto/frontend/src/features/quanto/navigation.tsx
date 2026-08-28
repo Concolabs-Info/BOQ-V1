@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { usePreStore } from "@/features/pre/state/preStore";
 
@@ -29,8 +29,9 @@ export const TAKEOFF_ELEMENTS = [
 ] as const;
 
 type ProgressState = "current" | "complete" | "pending";
+type ExpandableSection = "pre" | "takeoff" | null;
 
-export function QuantoWorkflowNav({ projectId }: { projectId: string }) {
+export function QuantoWorkflowNav({ projectId, office = false }: { projectId: string; office?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const viewports = usePreStore((state) => state.viewports);
@@ -40,6 +41,8 @@ export function QuantoWorkflowNav({ projectId }: { projectId: string }) {
   const [showPlansGuard, setShowPlansGuard] = useState(false);
   const preOpen = pathname.includes("/pre/");
   const takeoffOpen = pathname.includes("/takeoff/");
+  const activeExpandable: ExpandableSection = preOpen ? "pre" : takeoffOpen ? "takeoff" : null;
+  const [expandedSection, setExpandedSection] = useState<ExpandableSection>(activeExpandable);
   const reviewActive = pathname.endsWith("/review") || pathname.includes("/review/");
   const boqActive = pathname.includes("/boq");
 
@@ -52,6 +55,10 @@ export function QuantoWorkflowNav({ projectId }: { projectId: string }) {
   const includedViewports = viewports.filter((viewport) => includedSheetIds.has(viewport.sheetId));
   const pendingPlans = includedViewports.filter((viewport) => viewport.status !== "confirmed");
   const invalidPlans = pendingPlans.filter((viewport) => !viewport.name.trim() || viewport.bbox[2] <= viewport.bbox[0] || viewport.bbox[3] <= viewport.bbox[1]);
+
+  useEffect(() => {
+    setExpandedSection(activeExpandable);
+  }, [activeExpandable, pathname]);
 
   function openScale(event: MouseEvent<HTMLAnchorElement>) {
     if (!pathname.includes("/pre/plans") || pendingPlans.length === 0) return;
@@ -72,15 +79,18 @@ export function QuantoWorkflowNav({ projectId }: { projectId: string }) {
   }
 
   return (
-    <nav aria-label="Quanto workflow" className="flex min-w-0 flex-1 items-center gap-2">
+    <nav aria-label="Quanto workflow" className={office ? "flex min-w-0 flex-1 items-stretch" : "flex min-w-0 flex-1 items-center gap-2"}>
       <MainLink
         href={appRoutes.pre(projectId, "upload")}
         label="Pre"
         state={preOpen ? "current" : preComplete ? "complete" : "pending"}
+        expanded={expandedSection === "pre"}
+        office={office}
+        onCurrentClick={() => setExpandedSection((current) => current === "pre" ? null : "pre")}
       />
 
-      {preOpen ? (
-        <SubTabsScroller>
+      {preOpen && expandedSection === "pre" ? (
+        <SubTabsScroller office={office}>
           {PRE_STEPS.map(([key, label], index) => (
             <SubLink
               key={key}
@@ -88,6 +98,7 @@ export function QuantoWorkflowNav({ projectId }: { projectId: string }) {
               label={label}
               state={index === currentPreIndex ? "current" : index < currentPreIndex ? "complete" : "pending"}
               onClick={key === "scale" ? openScale : undefined}
+              office={office}
             />
           ))}
         </SubTabsScroller>
@@ -97,16 +108,20 @@ export function QuantoWorkflowNav({ projectId }: { projectId: string }) {
         href={appRoutes.takeoff(projectId, "columns")}
         label="Takeoff"
         state={takeoffOpen ? "current" : takeoffComplete ? "complete" : "pending"}
+        expanded={expandedSection === "takeoff"}
+        office={office}
+        onCurrentClick={() => setExpandedSection((current) => current === "takeoff" ? null : "takeoff")}
       />
 
-      {takeoffOpen ? (
-        <SubTabsScroller>
+      {takeoffOpen && expandedSection === "takeoff" ? (
+        <SubTabsScroller office={office}>
           {TAKEOFF_ELEMENTS.map(([key, label], index) => (
             <SubLink
               key={key}
               href={appRoutes.takeoff(projectId, key)}
               label={label}
               state={index === currentTakeoffIndex ? "current" : index < currentTakeoffIndex ? "complete" : "pending"}
+              office={office}
             />
           ))}
         </SubTabsScroller>
@@ -116,11 +131,13 @@ export function QuantoWorkflowNav({ projectId }: { projectId: string }) {
         href={appRoutes.workflowStep(projectId, "review")}
         label="Review"
         state={reviewActive ? "current" : boqActive ? "complete" : "pending"}
+        office={office}
       />
       <MainLink
         href={appRoutes.workflowStep(projectId, "boq")}
         label="BOQ"
         state={boqActive ? "current" : "pending"}
+        office={office}
       />
       {showPlansGuard ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="plans-confirm-title">
@@ -152,32 +169,59 @@ export function QuantoWorkflowNav({ projectId }: { projectId: string }) {
   );
 }
 
-function SubTabsScroller({ children }: { children: ReactNode }) {
+function SubTabsScroller({ children, office = false }: { children: ReactNode; office?: boolean }) {
   return (
-    <div className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <div className="flex min-w-max items-center gap-1 px-1">{children}</div>
+    <div className={office ? "min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : "min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"}>
+      <div className={office ? "flex h-full min-w-max items-stretch" : "flex min-w-max items-center gap-1 px-1"}>{children}</div>
     </div>
   );
 }
 
-function MainLink({ href, label, state }: { href: string; label: string; state: ProgressState }) {
-  const className =
+function MainLink({
+  href,
+  label,
+  state,
+  expanded,
+  office = false,
+  onCurrentClick,
+}: {
+  href: string;
+  label: string;
+  state: ProgressState;
+  expanded?: boolean;
+  office?: boolean;
+  onCurrentClick?: () => void;
+}) {
+  const className = office
+    ? state === "current"
+      ? "flex h-full shrink-0 items-center border-b-2 border-blue-600 bg-white px-4 text-[11px] font-bold uppercase tracking-wide text-blue-700"
+      : state === "complete"
+        ? "flex h-full shrink-0 items-center gap-1.5 border-b-2 border-transparent px-4 text-[11px] font-bold uppercase tracking-wide text-emerald-700 transition hover:bg-white"
+        : "flex h-full shrink-0 items-center border-b-2 border-transparent px-4 text-[11px] font-bold uppercase tracking-wide text-slate-600 transition hover:bg-white hover:text-blue-700"
+    :
     state === "current"
       ? "flex h-9 shrink-0 items-center rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm"
       : state === "complete"
         ? "flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
         : "flex h-9 shrink-0 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700";
 
-  return (
-    <Link href={href} className={className}>
-      {state === "complete" ? <CheckIcon /> : null}
-      {label}
-    </Link>
-  );
+  const content = <>{state === "complete" ? <CheckIcon /> : null}{label}{onCurrentClick ? <ChevronIcon expanded={Boolean(expanded)} /> : null}</>;
+
+  if (state === "current" && onCurrentClick) {
+    return <button type="button" className={`${className} gap-1.5`} aria-expanded={expanded} onClick={onCurrentClick}>{content}</button>;
+  }
+
+  return <Link href={href} className={className}>{content}</Link>;
 }
 
-function SubLink({ href, label, state, onClick }: { href: string; label: string; state: ProgressState; onClick?: (event: MouseEvent<HTMLAnchorElement>) => void }) {
-  const className =
+function SubLink({ href, label, state, onClick, office = false }: { href: string; label: string; state: ProgressState; onClick?: (event: MouseEvent<HTMLAnchorElement>) => void; office?: boolean }) {
+  const className = office
+    ? state === "current"
+      ? "flex h-full shrink-0 items-center border-b-2 border-blue-600 bg-white px-3 text-[11px] font-bold text-blue-700"
+      : state === "complete"
+        ? "flex h-full shrink-0 items-center gap-1 border-b-2 border-transparent px-3 text-[11px] font-semibold text-emerald-700 transition hover:bg-white"
+        : "flex h-full shrink-0 items-center border-b-2 border-transparent px-3 text-[11px] font-semibold text-slate-600 transition hover:bg-white hover:text-blue-700"
+    :
     state === "current"
       ? "flex h-8 shrink-0 items-center rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white shadow-sm"
       : state === "complete"
@@ -201,6 +245,14 @@ function CheckIcon({ small = false }: { small?: boolean }) {
       className={small ? "h-3 w-3" : "h-3.5 w-3.5"}
     >
       <path d="m4.5 10.5 3.2 3.2 7.8-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`}>
+      <path d="m5.5 7.5 4.5 4.5 4.5-4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
