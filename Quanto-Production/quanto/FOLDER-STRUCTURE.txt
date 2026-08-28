@@ -18,7 +18,12 @@ Quanto/
 │       │   │   ├── services/
 │       │   │   ├── state/
 │       │   │   └── types/
-│       │   ├── takeoff/              # Demo/product boundary; production later
+│       │   ├── takeoff/              # Production Takeoff frontend boundary
+│       │   │   ├── floor/            # Floor module boundary / API contract notes
+│       │   │   ├── ceiling/          # Ceiling module boundary / API contract notes
+│       │   │   └── shared/           # Real PostgreSQL/API bridge into unchanged demo UI
+│       │   ├── floors/               # Existing future/detail feature boundary (unchanged)
+│       │   ├── ceilings/             # Existing future/detail feature boundary (unchanged)
 │       │   ├── review/               # Demo/product boundary; production later
 │       │   ├── boq/                  # Demo/product boundary; production later
 │       │   ├── quanto/               # Shared product shell/navigation
@@ -30,7 +35,7 @@ Quanto/
 │   │   ├── api/v1/routes/
 │   │   ├── modules/
 │   │   │   ├── pre/                  # Production Pre business logic
-│   │   │   ├── takeoff/              # Reserved for later
+│   │   │   ├── takeoff/              # Production Floor + Ceiling now; other elements later
 │   │   │   ├── review/               # Reserved for later
 │   │   │   └── boq/                  # Reserved for later
 │   │   ├── services/
@@ -48,8 +53,10 @@ Quanto/
 │   ├── seeds/
 │   └── indexes/
 ├── storage/                          # Local persistent project files
-│   ├── projects/
-│   └── temp/
+│   └── {project_id}/                 # created automatically at runtime
+│       ├── source/
+│       ├── renders/
+│       └── crops/
 ├── shared/                           # Cross-service contracts/schemas
 ├── infrastructure/                   # Docker/deployment/scripts/monitoring
 ├── docs/                             # Plan + implementation/runbooks

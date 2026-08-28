@@ -1,185 +1,288 @@
-# Quanto — Production Foundation with Complete Pre
+# Quanto — Production Pre + Floor + Ceiling
 
-This repository is the production foundation for the full Quanto application. It keeps the established demo workspace and navigation, replaces demo state with real APIs and persistent data, and completely implements the **Pre** module.
+This repository is the current production Quanto codebase. It preserves the supplied **demo UI and workflow** and replaces demo Floor/Ceiling data with real PostgreSQL-backed project data and real drawing analysis.
 
-The visible product structure remains:
+Visible product navigation remains unchanged:
 
 ```text
 Pre | Takeoff | Review | BOQ
 ```
 
-Only Pre is active in this delivery:
+Implemented production modules in this delivery:
 
 ```text
-Upload → Plans → Scale → Height → Specifications → Start takeoff
+Pre
+Upload → Plans → Scale → Height → Specifications → Start Takeoff
+
+Takeoff
+Floor   → Dimension | Workbook | 3D
+Ceiling → Dimension | Workbook | 3D
 ```
 
-Takeoff, Review and BOQ have clean feature/module boundaries but are intentionally not implemented yet.
+Other Takeoff elements, Review and BOQ remain in the existing project exactly where they were and can be implemented later.
 
-## What is implemented
+## What is production-backed now
 
-- Project creation and persistent project state.
-- Multi-PDF upload with file validation, SHA-256 and stored originals.
-- PyMuPDF ingestion with page metadata and 72/150 DPI renders.
-- Page triage into sheets and editable viewports.
-- Manual add, move, resize, rename, classify, include/exclude and delete controls.
-- Deterministic storey ordering, manual storey creation, typical groups and stack confirmation.
-- Scale evidence from printed scale plus independent X/Y dimension lines.
-- 1% evidence comparison and anisotropy refusal above 1.01.
-- Two-point manual calibration.
-- Human-selected primary height source and optional supporting source.
-- Storey-band extraction, printed/measured cross-check, nearest-10-mm conversion and manual correction.
-- Specification, notes, schedules and table extraction with explicit “not found” records.
-- Content-hash confirmations; an edit automatically makes old confirmation stale.
-- Readiness gate and immutable `project-frame-v1` freeze.
-- PostgreSQL schema, local persistent drawing storage, Docker, CI and tests.
+### Pre
+- Multi-PDF upload and SHA-256 source records.
+- PyMuPDF page metadata and 72/150 DPI renders.
+- Drawing/sheet/viewport triage and editable viewport geometry.
+- Storey stack, typical groups and height evidence.
+- Printed/manual scale handling and confirmations.
+- Specification/schedule/notes extraction.
+- Content-hash confirmation and stale-on-edit behaviour.
+- Frozen Project Frame gate before Takeoff.
 
-Pre is deterministic. Model calls are limited to the three controlled reading tasks in the supplied plan: viewport triage, scale/height evidence and specification evidence. Models return literal text and locations; application code calculates factors and measurements.
+### Floor
+- Uses the confirmed Pre plan viewport and confirmed scale.
+- OpenAI structured vision reads physical FloorSpace geometry in exact crop pixels.
+- Deterministic code calculates areas/perimeters from confirmed scale.
+- Supports room/space polygons, holes, void/open-to-below exclusions, external floors, balconies/terraces, landings, under-stair areas and doorway/connector strips.
+- Open-plan functional zones can carry explicit different finish evidence without duplicating physical room geometry.
+- Floor finish catalog and room rules are extracted from project schedules/specifications.
+- Supports direct finish tags/codes plus room-rule fallback; unresolved evidence remains visibly unassigned for QS review.
+- Floor-related work data model covers screed, waterproofing, underlay, insulation/membranes, sealer and skirting.
+- Skirting is measured linearly and retained as reviewable edges.
+- AI output never becomes official measurement by itself: invalid/out-of-bounds/overlapping geometry is rejected and quantities are calculated by code.
+- User drawing/family/status edits in the existing Dimension UI persist back to PostgreSQL.
+- Workbook overrides/confirmation state persists.
+
+### Ceiling
+- Reuses confirmed FloorSpace geometry when there is no separate RCP, as specified in the ceiling plan.
+- Uses a real RCP/ceiling-plan viewport when Pre has identified one and its scale is confirmed.
+- Extracts C01/C02/etc ceiling/soffit definitions and room rules from project specification evidence.
+- Supports flat, suspended, exposed/external soffit, dropped, raked/sloped, vaulted, multi-plane, stair-soffit, double-height, no-ceiling and open-to-sky states in the production data model.
+- Uses targeted confirmed section/elevation crops for special-ceiling evidence when no RCP is available; ambiguous level-only evidence is not silently applied to every room.
+- Stores bulkheads/soffits/access panels and other ceiling features separately.
+- Flat surface quantities are deterministic. Special/sloped surfaces remain review-required unless enough evidence exists to calculate a true surface area.
+- User Dimension/Workbook edits persist back to PostgreSQL.
 
 ## Repository structure
 
 ```text
 Quanto/
-├── frontend/                 # Same Quanto demo workspace, production-organised
+├── frontend/                         # existing demo UI, production data bridge added
 │   └── src/
-│       ├── app/              # Next.js routes
+│       ├── app/
 │       ├── features/
-│       │   ├── quanto/       # app shell and main navigation
-│       │   ├── projects/     # project start page
-│       │   ├── pre/          # all six implemented Pre stages
-│       │   ├── takeoff/      # future boundary
-│       │   ├── review/       # future boundary
-│       │   └── boq/          # future boundary
-│       └── shared/           # UI, API client, providers and data contracts
-├── backend/                  # FastAPI production API
+│       │   ├── pre/
+│       │   ├── quanto/               # same main Quanto shell / Takeoff UI
+│       │   ├── floors/               # existing future/detail feature boundary
+│       │   ├── ceilings/             # existing future/detail feature boundary
+│       │   ├── review/
+│       │   └── boq/
+│       └── shared/
+├── backend/
 │   └── app/
-│       ├── api/v1/           # REST routes
-│       ├── modules/pre/      # Pre business rules
-│       ├── services/         # shared AI/PDF services
-│       ├── database/         # connection and runtime schema copy
-│       └── core/             # settings
-├── database/                 # source-controlled PostgreSQL schema/migrations
-├── storage/                  # local development originals/renders/crops
-├── shared/                   # cross-service schemas and OpenAPI contract
-├── infrastructure/          # Docker/deployment/scripts/monitoring notes
-├── docs/                     # supplied plans plus implementation/runbook
-└── tests/                    # future end-to-end fixtures and flows
+│       ├── api/v1/routes/
+│       │   ├── ... Pre routes ...
+│       │   ├── floors.py             # production Floor API
+│       │   └── ceilings.py           # production Ceiling API
+│       ├── modules/
+│       │   ├── pre/
+│       │   └── takeoff/
+│       │       ├── common.py
+│       │       ├── floors.py
+│       │       ├── ceilings.py
+│       │       ├── model_schemas.py
+│       │       └── prompts.py
+│       └── services/
+├── database/
+│   ├── schema/001_pre.sql
+│   ├── schema/002_floor_ceiling.sql
+│   └── migrations/
+├── storage/                          # plan-defined local project storage
+├── shared/
+├── infrastructure/
+├── docs/
+│   ├── pre/
+│   ├── takeoff/floor-plan/           # supplied Floor planning source
+│   ├── takeoff/ceiling-plan/         # supplied Ceiling planning source
+│   └── ui-reference/                 # supplied Takeoff UI plan
+└── tests/
 ```
 
-## Run the complete application with Docker
+## Windows local setup — no Docker
 
-Requirements: Docker Desktop or Docker Engine with Compose.
+This is the recommended setup for the current 8 GB development machine.
 
-1. Extract the ZIP and enter the folder:
+### 1. PostgreSQL
 
-```bash
-cd Quanto
+The database must already exist:
+
+```sql
+CREATE DATABASE quanto;
 ```
 
-2. Create local environment settings:
+Apply schemas from the repository root. If `psql` is on PATH:
 
-```bash
-cp .env.example .env
+```powershell
+psql -U postgres -d quanto -f ".\database\schema\001_pre.sql"
+psql -U postgres -d quanto -f ".\database\schema\002_floor_ceiling.sql"
 ```
 
-3. Start PostgreSQL, API and frontend:
+If PostgreSQL is installed on E: and is not on PATH, use the full executable path, for example:
 
-```bash
-docker compose up --build
+```powershell
+& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\001_pre.sql"
+& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\002_floor_ceiling.sql"
 ```
 
-4. Open:
+Both SQL files are idempotent (`IF NOT EXISTS`), so running them on the existing Quanto database is safe.
 
-```text
-http://localhost:3000
+For the **existing Pre-only database you already created**, `001_pre.sql` is already present, so after replacing the project files the only new schema you need is:
+
+```powershell
+& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\002_floor_ceiling.sql"
 ```
 
-API documentation is available at:
+Or run all idempotent migrations with:
+
+```powershell
+.\infrastructure\scripts\migrations\apply-windows.ps1 -PsqlPath "E:\Softwares\PostgreSQL-17\bin\psql.exe"
+```
+
+### 2. Environment
+
+Copy:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Set your real PostgreSQL password in `.env`:
+
+```env
+POSTGRES_DB=quanto
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=YOUR_PASSWORD
+DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/quanto
+```
+
+The backend now reads the root `.env`; a separate `backend/.env` is optional.
+
+### 3. Backend
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e .
+uvicorn app.main:app --reload
+```
+
+Open API docs:
 
 ```text
 http://localhost:8000/docs
 ```
 
-Stop the stack with:
+### 4. Frontend
 
-```bash
-docker compose down
-```
+In another terminal:
 
-The default `AI_PROVIDER=local` is deliberately conservative. It uses extractable PDF text where available and leaves visual decisions, scale and height calibration for human review. It never pretends to have visually inspected a page.
-
-## Enable the planned Gemini visual extraction for Pre
-
-Edit `.env`:
-
-```env
-AI_PROVIDER=gemini
-GEMINI_API_KEY=your_server_side_key
-GEMINI_MODEL=gemini-flash-latest
-```
-
-Then restart:
-
-```bash
-docker compose up --build
-```
-
-Keep the API key only in the backend environment. The model name is configurable rather than hard-coded so the application can use the approved production model for the deployment. Pre saves accepted extraction records in PostgreSQL; refreshing a page reuses them instead of making another model call. Re-uploading or re-running source analysis can intentionally create new calls.
-
-The shared adapter also retains `AI_PROVIDER=openai` for future modules. Pre production deployments should use Gemini to match the supplied plan.
-
-## Run without Docker for application code
-
-Start PostgreSQL first:
-
-```bash
-docker compose up -d db
-```
-
-Backend:
-
-```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
-pip install -e "./backend[dev]"
-set -a; source .env; set +a          # macOS/Linux
-cd backend
-uvicorn app.main:app --reload
-```
-
-On Windows PowerShell, set the values from `.env` in the shell before starting Uvicorn.
-
-Frontend, in another terminal:
-
-```bash
+```powershell
 cd frontend
 npm install
-cp .env.example .env.local
 npm run dev
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+## OpenAI Floor/Ceiling detection
+
+Do **not** put the API key in frontend code and do not commit `.env`.
+
+After normal Pre is working, edit root `.env`:
+
+```env
+AI_PROVIDER=openai
+OPENAI_API_KEY=YOUR_OPENAI_API_KEY
+OPENAI_MODEL=gpt-5.6-terra
+```
+
+Restart the backend.
+
+The existing Floor/Ceiling Takeoff UI then loads the project from PostgreSQL. On the first Floor/Ceiling entry with no saved zones, the production bridge requests analysis once and hydrates the same UI with real project families/zones. Saved results are reused; normal refreshes do not resend already-saved geometry.
+
+Server quality mapping is kept behind the UI:
+
+```text
+Easy     → gpt-5.6-luna
+Medium   → gpt-5.6-terra
+Expert   → gpt-5.6-sol
+Maximum  → gpt-5.6-sol
+```
+
+A deployment can pin another model through `OPENAI_MODEL`.
+
+## Required workflow
+
+Floor/Ceiling analysis deliberately requires the frozen Pre Project Frame:
+
+```text
+Upload
+→ Plans confirmed
+→ Scale confirmed
+→ Height confirmed
+→ Specifications reviewed
+→ Start Takeoff / freeze Project Frame
+→ Floor
+→ Ceiling
+```
+
+Ceiling is intentionally run after Floor. When there is no dedicated RCP, it will not derive ceiling geometry until the Floor zones have been reviewed/confirmed in Floor → Dimension; this prevents unreviewed AI room geometry from silently becoming ceiling measurement geometry.
+
+## Floor/Ceiling API endpoints
+
+```text
+GET  /api/v1/projects/{project_id}/takeoff/floors
+GET  /api/v1/projects/{project_id}/takeoff/floor/demo-state
+PUT  /api/v1/projects/{project_id}/takeoff/floor/demo-state
+POST /api/v1/projects/{project_id}/takeoff/floor/analyze
+POST /api/v1/projects/{project_id}/takeoff/floor/{floor_id}/analyze
+GET  /api/v1/projects/{project_id}/takeoff/floor-spaces
+GET  /api/v1/projects/{project_id}/takeoff/floor-quantities
+GET  /api/v1/projects/{project_id}/takeoff/floor-finish-definitions
+GET  /api/v1/projects/{project_id}/takeoff/floor-work-assignments
+GET  /api/v1/projects/{project_id}/takeoff/skirting-edges
+
+GET  /api/v1/projects/{project_id}/takeoff/ceiling/demo-state
+PUT  /api/v1/projects/{project_id}/takeoff/ceiling/demo-state
+POST /api/v1/projects/{project_id}/takeoff/ceiling/analyze
+GET  /api/v1/projects/{project_id}/takeoff/ceiling-zones
+GET  /api/v1/projects/{project_id}/takeoff/ceiling-quantities
+GET  /api/v1/projects/{project_id}/takeoff/ceiling-definitions
+GET  /api/v1/projects/{project_id}/takeoff/ceiling-features
 ```
 
 ## Verification
 
-```bash
-cd backend
-PYTHONPATH=. pytest -q
+Backend:
 
-cd ../frontend
+```powershell
+cd backend
+python -m pytest -q
+python -m compileall -q app
+```
+
+Frontend after dependencies are installed:
+
+```powershell
+cd frontend
 npm run typecheck
 npm run test:syntax
 npm run build
 ```
 
-The delivery was assembled in an environment without reliable npm registry access, so dependency installation and the full `next build` must run on a normal development machine or in CI. During packaging, the complete Python test suite, Python compile pass and a TypeScript/TSX syntax pass were run. Run `npm run typecheck` and `npm run build` after `npm install` on your development machine.
+The package was verified with the backend test suite and a TypeScript/TSX syntax pass. The packaging environment could not complete npm registry installation, so the full Next.js build must be run on the normal development PC/CI after `npm install`.
 
-## Production deployment boundary
+## Docker / deployment
 
-- Deploy `frontend/` as the Next.js web service.
-- Deploy `backend/` as a persistent Python service.
-- Use managed PostgreSQL and run `database/migrations/` in order.
-- Mount persistent storage at `STORAGE_ROOT`, or replace only the shared storage service before using an ephemeral API host.
-- Put authentication and tenant enforcement at the existing Quanto identity/gateway boundary; the supplied Pre plan did not define a new authentication system, so this repository does not invent one.
-- Takeoff must read the frozen Project Frame instead of re-reading Pre drawings independently.
+Docker remains optional. `docker-compose.yml` initializes both `001_pre.sql` and `002_floor_ceiling.sql` for a fresh database.
 
-See `docs/RUNBOOK.md`, `docs/IMPLEMENTATION-MAP.md` and `docs/PRE-DATA-CONTRACT.md` for the operational and data details.
+For deployment, keep PostgreSQL persistent and keep the plan-defined `STORAGE_ROOT` persistent. Floor/Ceiling records store evidence and geometry in PostgreSQL while original PDFs/renders/crops stay in project storage.

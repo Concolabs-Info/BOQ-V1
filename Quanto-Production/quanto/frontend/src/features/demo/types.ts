@@ -1,7 +1,7 @@
 export type Point = { x: number; y: number };
 export type BBox = { x: number; y: number; width: number; height: number };
 export type DemoStatus = "ready" | "confirmed" | "needs_review";
-export type Sheet = { id:string; sheetNo:string; title:string; revision:string; image:string; page:number; included:boolean };
+export type Sheet = { id:string; sheetNo:string; title:string; revision:string; image:string; page:number; included:boolean; width?:number; height?:number };
 export type ViewportCategory = "plan"|"elevation"|"section"|"detail"|"schedule";
 export type ScaleDistanceUnit = "m" | "cm" | "mm" | "ft-in";
 export type ScaleCalibration = { printedScale:string; printedScaleLabel:string; printedEvidenceBox?:[number,number,number,number]; printedEvidenceSource:string; printedEvidenceLocation:string; printedEvidenceKind?:"printed"|"inherited"|"missing"; printedScaleInheritedFrom?:string; x:{line:[number,number,number,number];knownDistanceM:number;label:string;unit?:ScaleDistanceUnit;value?:string}; y:{line:[number,number,number,number];knownDistanceM:number;label:string;unit?:ScaleDistanceUnit;value?:string}; manualAxis?:"x"|"y"; notToScale?:boolean; printedScaleOnly?:boolean };

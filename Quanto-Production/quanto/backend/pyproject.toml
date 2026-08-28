@@ -1,7 +1,7 @@
 [project]
 name = "quanto-api"
 version = "1.0.0"
-description = "Quanto production API — Pre module"
+description = "Quanto production API — Pre + Floor + Ceiling"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.116,<1",
@@ -11,6 +11,7 @@ dependencies = [
   "psycopg[binary,pool]>=3.2,<4",
   "PyMuPDF>=1.26,<2",
   "Pillow>=11,<13",
+  "shapely>=2.0,<3",
   "python-multipart>=0.0.20,<1",
   "openai>=1.100,<3",
   "google-genai>=1.0",

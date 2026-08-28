@@ -1,0 +1,965 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "quanto.floor-detection-v3",
+  "title": "FloorDetectionV3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_image",
+    "floor_identity",
+    "surface_envelopes",
+    "units",
+    "spaces",
+    "functional_zones",
+    "connector_floor_regions",
+    "special_floor_regions",
+    "non_floor_regions",
+    "obstructions",
+    "openings",
+    "text_evidence",
+    "finish_visual_evidence",
+    "review_items",
+    "coverage_summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "floor-detection-v3"
+    },
+    "source_image": {
+      "$ref": "#/$defs/sourceImage"
+    },
+    "floor_identity": {
+      "$ref": "#/$defs/floorIdentity"
+    },
+    "surface_envelopes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/surfaceEnvelope"
+      }
+    },
+    "units": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unit"
+      }
+    },
+    "spaces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/space"
+      }
+    },
+    "functional_zones": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/functionalZone"
+      }
+    },
+    "connector_floor_regions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/connector"
+      }
+    },
+    "special_floor_regions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/specialRegion"
+      }
+    },
+    "non_floor_regions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonFloor"
+      }
+    },
+    "obstructions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/obstruction"
+      }
+    },
+    "openings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/opening"
+      }
+    },
+    "text_evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/textEvidence"
+      }
+    },
+    "finish_visual_evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finishEvidence"
+      }
+    },
+    "review_items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/reviewItem"
+      }
+    },
+    "coverage_summary": {
+      "$ref": "#/$defs/coverageSummary"
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "integer",
+          "minimum": 0
+        }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "polygon": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "$ref": "#/$defs/point"
+      }
+    },
+    "bbox": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "$ref": "#/$defs/point"
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "sourceImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width_px",
+        "height_px",
+        "coordinate_origin"
+      ],
+      "properties": {
+        "width_px": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height_px": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "coordinate_origin": {
+          "const": "top_left"
+        }
+      }
+    },
+    "floorIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "floor_id",
+        "raw_floor_label",
+        "level_type",
+        "is_typical_floor",
+        "applies_to_levels",
+        "evidence_ids",
+        "confidence"
+      ],
+      "properties": {
+        "floor_id": {
+          "type": "string"
+        },
+        "raw_floor_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "is_typical_floor": {
+          "type": "boolean"
+        },
+        "applies_to_levels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        }
+      }
+    },
+    "surfaceEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "envelope_id",
+        "polygon_px",
+        "scope",
+        "confidence",
+        "evidence_ids"
+      ],
+      "properties": {
+        "envelope_id": {
+          "type": "string"
+        },
+        "polygon_px": {
+          "$ref": "#/$defs/polygon"
+        },
+        "scope": {
+          "enum": [
+            "mixed_floor_surface",
+            "internal_floor_surface",
+            "external_floor_surface",
+            "semi_external_floor_surface",
+            "unknown"
+          ]
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit_id",
+        "raw_label",
+        "unit_type",
+        "polygon_px",
+        "associated_space_ids",
+        "confidence",
+        "evidence_ids"
+      ],
+      "properties": {
+        "unit_id": {
+          "type": "string"
+        },
+        "raw_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "polygon_px": {
+          "$ref": "#/$defs/polygon"
+        },
+        "associated_space_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "space": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "space_id",
+        "unit_id",
+        "raw_labels",
+        "normalized_type",
+        "functional_tags",
+        "environment",
+        "physical_space_kind",
+        "polygon_px",
+        "is_enclosed",
+        "is_partial_crop",
+        "label_evidence_ids",
+        "finish_evidence_ids",
+        "printed_dimension_evidence_ids",
+        "printed_area_evidence_ids",
+        "geometry_confidence",
+        "semantic_confidence",
+        "warnings"
+      ],
+      "properties": {
+        "space_id": {
+          "type": "string"
+        },
+        "unit_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "normalized_type": {
+          "type": "string"
+        },
+        "functional_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "environment": {
+          "enum": [
+            "internal",
+            "external",
+            "semi_external",
+            "unknown"
+          ]
+        },
+        "physical_space_kind": {
+          "enum": [
+            "room",
+            "circulation",
+            "common_area",
+            "balcony",
+            "terrace",
+            "verandah",
+            "external_landing",
+            "garage",
+            "carport",
+            "parking",
+            "landing",
+            "service_space",
+            "other",
+            "unknown"
+          ]
+        },
+        "polygon_px": {
+          "$ref": "#/$defs/polygon"
+        },
+        "is_enclosed": {
+          "type": "boolean"
+        },
+        "is_partial_crop": {
+          "type": "boolean"
+        },
+        "label_evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "finish_evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "printed_dimension_evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "printed_area_evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "geometry_confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "semantic_confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "functionalZone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "zone_id",
+        "parent_space_id",
+        "raw_label",
+        "normalized_type",
+        "polygon_px",
+        "evidence_ids",
+        "confidence"
+      ],
+      "properties": {
+        "zone_id": {
+          "type": "string"
+        },
+        "parent_space_id": {
+          "type": "string"
+        },
+        "raw_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "normalized_type": {
+          "type": "string"
+        },
+        "polygon_px": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/polygon"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        }
+      }
+    },
+    "connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "region_id",
+        "connector_type",
+        "polygon_px",
+        "adjacent_space_ids",
+        "opening_id",
+        "finish_transition_status",
+        "evidence_ids",
+        "confidence",
+        "warnings"
+      ],
+      "properties": {
+        "region_id": {
+          "type": "string"
+        },
+        "connector_type": {
+          "enum": [
+            "door_threshold",
+            "wall_opening",
+            "passage_threshold",
+            "external_threshold",
+            "other"
+          ]
+        },
+        "polygon_px": {
+          "$ref": "#/$defs/polygon"
+        },
+        "adjacent_space_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2
+        },
+        "opening_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finish_transition_status": {
+          "enum": [
+            "same_finish_likely",
+            "different_finish_likely",
+            "unresolved",
+            "not_applicable"
+          ]
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "specialRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "region_id",
+        "region_type",
+        "polygon_px",
+        "host_space_id",
+        "surface_status",
+        "evidence_ids",
+        "confidence",
+        "warnings"
+      ],
+      "properties": {
+        "region_id": {
+          "type": "string"
+        },
+        "region_type": {
+          "enum": [
+            "under_stair",
+            "landing",
+            "recess",
+            "alcove",
+            "bay",
+            "external_landing",
+            "split_level_area",
+            "other"
+          ]
+        },
+        "polygon_px": {
+          "$ref": "#/$defs/polygon"
+        },
+        "host_space_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "surface_status": {
+          "enum": [
+            "floor_surface",
+            "uncertain_surface"
+          ]
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "nonFloor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "region_id",
+        "region_type",
+        "polygon_px",
+        "raw_label",
+        "evidence_ids",
+        "confidence",
+        "warnings"
+      ],
+      "properties": {
+        "region_id": {
+          "type": "string"
+        },
+        "region_type": {
+          "enum": [
+            "void",
+            "open_to_below",
+            "stair_opening",
+            "lift_shaft",
+            "service_shaft",
+            "open_well",
+            "floor_opening",
+            "other"
+          ]
+        },
+        "polygon_px": {
+          "$ref": "#/$defs/polygon"
+        },
+        "raw_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "obstruction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "obstruction_id",
+        "obstruction_type",
+        "polygon_px",
+        "host_space_id",
+        "evidence_ids",
+        "confidence"
+      ],
+      "properties": {
+        "obstruction_id": {
+          "type": "string"
+        },
+        "obstruction_type": {
+          "enum": [
+            "column",
+            "plinth",
+            "fixed_obstruction",
+            "other"
+          ]
+        },
+        "polygon_px": {
+          "$ref": "#/$defs/polygon"
+        },
+        "host_space_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        }
+      }
+    },
+    "opening": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "opening_id",
+        "opening_type",
+        "span_points_px",
+        "adjacent_space_ids",
+        "raw_label",
+        "evidence_ids",
+        "confidence"
+      ],
+      "properties": {
+        "opening_id": {
+          "type": "string"
+        },
+        "opening_type": {
+          "enum": [
+            "door",
+            "large_opening",
+            "external_opening",
+            "unknown"
+          ]
+        },
+        "span_points_px": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/point"
+          }
+        },
+        "adjacent_space_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2
+        },
+        "raw_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        }
+      }
+    },
+    "textEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "evidence_type",
+        "raw_text",
+        "bbox_px",
+        "associated_ids",
+        "confidence"
+      ],
+      "properties": {
+        "evidence_id": {
+          "type": "string"
+        },
+        "evidence_type": {
+          "enum": [
+            "room_label",
+            "room_number",
+            "floor_label",
+            "dimension",
+            "printed_area",
+            "level_note",
+            "stair_note",
+            "void_note",
+            "finish_tag",
+            "material_text",
+            "keynote",
+            "other"
+          ]
+        },
+        "raw_text": {
+          "type": "string"
+        },
+        "bbox_px": {
+          "$ref": "#/$defs/bbox"
+        },
+        "associated_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        }
+      }
+    },
+    "finishEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "evidence_type",
+        "raw_value",
+        "bbox_px",
+        "polygon_px",
+        "associated_space_ids",
+        "confidence",
+        "notes"
+      ],
+      "properties": {
+        "evidence_id": {
+          "type": "string"
+        },
+        "evidence_type": {
+          "enum": [
+            "finish_tag",
+            "direct_material_text",
+            "colour_region",
+            "hatch_region",
+            "finish_boundary",
+            "keynote",
+            "other"
+          ]
+        },
+        "raw_value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bbox_px": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/bbox"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "polygon_px": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/polygon"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "associated_space_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "reviewItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "review_id",
+        "issue_type",
+        "related_ids",
+        "reason",
+        "suggested_action",
+        "severity"
+      ],
+      "properties": {
+        "review_id": {
+          "type": "string"
+        },
+        "issue_type": {
+          "enum": [
+            "missed_space_suspected",
+            "boundary_uncertain",
+            "floor_or_void_uncertain",
+            "label_association_uncertain",
+            "room_type_uncertain",
+            "connector_uncertain",
+            "under_stair_uncertain",
+            "overlap_suspected",
+            "gap_suspected",
+            "finish_evidence_uncertain",
+            "crop_partial",
+            "other"
+          ]
+        },
+        "related_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        },
+        "suggested_action": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    "coverageSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "space_count",
+        "connector_count",
+        "special_floor_count",
+        "non_floor_count",
+        "unresolved_regions_exist",
+        "notes"
+      ],
+      "properties": {
+        "space_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "connector_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "special_floor_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "non_floor_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved_regions_exist": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

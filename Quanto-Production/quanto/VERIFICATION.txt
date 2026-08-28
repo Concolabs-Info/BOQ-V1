@@ -1,0 +1,21 @@
+Quanto Floor + Ceiling release verification
+===========================================
+
+Backend test suite: PASS (32 tests)
+Backend Python compileall: PASS
+Frontend TypeScript/TSX syntax scan: PASS (299 source files, 0 syntax failures)
+Floor/Ceiling migration/schema copies: MATCH
+Provided Mattegoda PDF: opened successfully with PyMuPDF (28 pages); real vector text/render path exercised during implementation checks.
+
+Not executed in the packaging sandbox:
+- Full npm install / next build (registry installation timed out in this sandbox).
+- Live OpenAI Floor/Ceiling model call (no user API secret is stored in this package).
+- Live PostgreSQL integration against the user's Windows database (the supplied SQL migration is intended to be applied there).
+
+After extraction on the development PC, run:
+  cd frontend
+  npm install
+  npm run typecheck
+  npm run build
+
+Then configure OPENAI_API_KEY in the root .env and test a real frozen Pre project through Floor -> Ceiling.

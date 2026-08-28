@@ -55,6 +55,7 @@ import {
   useMeasurementTool,
 } from "./measurements/MeasurementOverlay";
 import { beginLiveEdit } from "./editing/editSessionStore";
+import { useRealFloorCeilingTakeoff } from "./takeoff/useRealFloorCeilingTakeoff";
 import {
   MATTEGODA_FLOOR_AREAS,
   MATTEGODA_MASONRY,
@@ -111,6 +112,15 @@ const viewportsByElement: Record<string, string[]> = {
   ceiling: ["VP-GROUND", "VP-FIRST", "VP-TYP", "VP-TERRACE", "VP-ROOF"],
   roof: ["VP-TERRACE", "VP-ROOF"],
 };
+function allowedViewportsFor(element: string, viewports: Array<{ id: string; category: string }>) {
+  const configured = viewportsByElement[element] || [];
+  const hasDemoIds = viewports.some((viewport) => configured.includes(viewport.id));
+  if ((element === "floor" || element === "ceiling") && !hasDemoIds) {
+    return viewports.filter((viewport) => viewport.category === "plan").map((viewport) => viewport.id);
+  }
+  return configured;
+}
+
 export function TakeoffPage({
   projectId,
   element,
@@ -121,6 +131,7 @@ export function TakeoffPage({
   view: string;
 }) {
   const name = elementNames[element] || element;
+  useRealFloorCeilingTakeoff(projectId, element);
   return (
     <QuantoPageShell
       projectId={projectId}
@@ -265,12 +276,15 @@ function DimensionView({
   const entityParam = search.get("entity");
   const defaultFamily = familyParam || familyIdsFor(element)[0] || "";
   const [activeFamily, setActiveFamily] = useState(defaultFamily);
-  const allowed = viewportsByElement[element] || [];
+  const allowed = allowedViewportsFor(element, viewports);
   const viewport = useMemo(
     () =>
       viewports.find(
         (v) => v.id === selectedViewportId && allowed.includes(v.id),
-      ) || viewports.find((v) => v.id === allowed[0])!,
+      ) || viewports.find((v) => v.id === allowed[0]) || {
+        id: "", name: "No plan viewport available", category: "plan" as const, sheetId: "",
+        bbox: [0, 0, 1, 1] as [number, number, number, number], status: "needs_review" as DemoStatus,
+      },
     [allowed.join("|"), selectedViewportId, viewports],
   );
   const measurement = useMeasurementTool({
@@ -761,7 +775,7 @@ function GenericAddElementDialog({
   onPrepare: (values: ElementFormValues) => void;
 }) {
   const st = useDemoStore();
-  const allowed = viewportsByElement[element] || [];
+  const allowed = allowedViewportsFor(element, st.viewports);
   const viewportOptions = st.viewports
     .filter((viewport) => allowed.includes(viewport.id))
     .map((viewport) => ({
@@ -2437,7 +2451,7 @@ function ElementLocationFields({
   }) => void;
 }) {
   const st = useDemoStore();
-  const allowed = viewportsByElement[element] || [];
+  const allowed = allowedViewportsFor(element, st.viewports);
   return (
     <>
       <Field label="Storey">
@@ -2985,46 +2999,62 @@ function useWorkbookRows(element: string) {
         });
       }
     } else if (element === "floor") {
+      const realFloorIds = [...new Set(st.floorZones.map((zone) => zone.floorId))];
       for (const family of st.floorFamilies) {
-        for (const floorId of ["GF","FF","TYP","RF"]) {
-          const zones=st.floorZones.filter((zone)=>zone.familyId===family.id&&zone.floorId===floorId);
-          if(!zones.length) continue;
-          const base=zones.reduce((total,zone)=>total+zoneNetAreaM2(zone),0), factor=floorFactor(floorId);
+        const familyFloorIds = realFloorIds.filter((floorId) =>
+          st.floorZones.some((zone) => zone.familyId === family.id && zone.floorId === floorId),
+        );
+        for (const floorId of familyFloorIds) {
+          const zones = st.floorZones.filter(
+            (zone) => zone.familyId === family.id && zone.floorId === floorId,
+          );
+          if (!zones.length) continue;
+          const base = zones.reduce((total, zone) => total + zoneNetAreaM2(zone), 0);
+          const factor = floorFactor(floorId);
+          const storey = st.storeys.find((item) => item.id === floorId);
           rows.push({
-            key:`floor:${family.id}:${floorId}`,
-            parent:"Floor finishes",
-            familyId:family.id,
-            familyLabel:`${family.mark} · ${family.description}`,
-            scope:floorId==="GF"?"Ground":floorId==="FF"?"First":floorId==="TYP"?"Typical 2nd–6th":zones.every((zone)=>zone.viewportId==="VP-ROOF")?"Upper roof":"Terrace",
+            key: `floor:${family.id}:${floorId}`,
+            parent: "Floor finishes",
+            familyId: family.id,
+            familyLabel: `${family.mark} · ${family.description}`,
+            scope: storey?.name || floorName(floorId),
             floorId,
-            calc:`${base.toFixed(2)} m²${factor>1?` × ${factor}`:""}`,
-            qty:base*factor,
-            unit:"m²",
-            source:family.source,
-            extra:`${family.material}${family.screed?` · ${family.screed}`:""}`,
+            calc: `${base.toFixed(2)} m²${factor > 1 ? ` × ${factor}` : ""}`,
+            qty: base * factor,
+            unit: "m²",
+            source: family.source,
+            extra: `${family.material}${family.screed ? ` · ${family.screed}` : ""}`,
           });
         }
       }
-      for (const item of MATTEGODA_FLOOR_AREAS) {
-        const floorId = item.ref === "FA-01" ? "GF" : item.ref === "FA-02" || item.ref === "FA-03" ? "FF" : item.ref === "FA-04" || item.ref === "FA-05" ? "TYP" : "RF";
-        const measured = st.floorZones
-          .filter((zone) => zone.floorId === floorId)
-          .reduce((total, zone) => total + zoneNetAreaM2(zone), 0) * floorFactor(floorId);
-        rows.push({
-          key: item.key,
-          parent: "Area controls",
-          familyId: item.ref,
-          familyLabel: item.finishRef,
-          scope: item.scope,
-          floorId,
-          calc: item.inputUnit === "ft²" ? `${item.input.toFixed(0)} ft² × ${item.repetition}` : `${item.input.toFixed(2)} m²`,
-          qty: measured,
-          importedQty: item.totalM2,
-          importedStatus: item.status,
-          unit: "m²",
-          source: "Mattegoda Preliminary Partial BOQ · Floor Areas",
-          note: item.note,
-        });
+
+      // Imported Mattegoda control rows belong only to the original supplied demo.
+      // Real projects are driven entirely by their persisted Floor entities.
+      const legacyDemoFloorIds = new Set(["GF", "FF", "TYP", "RF"]);
+      const isLegacyFloorDemo =
+        st.storeys.length > 0 && st.storeys.every((storey) => legacyDemoFloorIds.has(storey.id));
+      if (isLegacyFloorDemo) {
+        for (const item of MATTEGODA_FLOOR_AREAS) {
+          const floorId = item.ref === "FA-01" ? "GF" : item.ref === "FA-02" || item.ref === "FA-03" ? "FF" : item.ref === "FA-04" || item.ref === "FA-05" ? "TYP" : "RF";
+          const measured = st.floorZones
+            .filter((zone) => zone.floorId === floorId)
+            .reduce((total, zone) => total + zoneNetAreaM2(zone), 0) * floorFactor(floorId);
+          rows.push({
+            key: item.key,
+            parent: "Area controls",
+            familyId: item.ref,
+            familyLabel: item.finishRef,
+            scope: item.scope,
+            floorId,
+            calc: item.inputUnit === "ft²" ? `${item.input.toFixed(0)} ft² × ${item.repetition}` : `${item.input.toFixed(2)} m²`,
+            qty: measured,
+            importedQty: item.totalM2,
+            importedStatus: item.status,
+            unit: "m²",
+            source: "Mattegoda Preliminary Partial BOQ · Floor Areas",
+            note: item.note,
+          });
+        }
       }
     } else if (element === "walls") {
       for (const item of MATTEGODA_MASONRY) {
@@ -3198,6 +3228,7 @@ function SceneView({
   element: string;
 }) {
   const router = useRouter();
+  const st = useDemoStore();
   const [selectedStorey, setSelectedStorey] = useState<string>(
     element === "roof" ? "roof" : "TYP",
   );
@@ -3208,7 +3239,17 @@ function SceneView({
   const [colour, setColour] = useState<ColourMode>("type");
   const [rotation, setRotation] = useState(45);
   const [zoom, setZoom] = useState(1);
-  const st = useDemoStore();
+  const realTakeoffStoreys = usesRealTakeoffStoreys(element, st.storeys);
+  const realStoreyIds = st.storeys.map((storey) => storey.id);
+  const roofStorey = realTakeoffStoreys
+    ? st.storeys.find((storey) => /roof|terrace/i.test(storey.name))?.id || st.storeys.at(-1)?.id || "all"
+    : "roof";
+  useEffect(() => {
+    if (!realTakeoffStoreys) return;
+    if (selectedStorey !== "all" && !realStoreyIds.includes(selectedStorey)) {
+      setSelectedStorey(realStoreyIds[0] || "all");
+    }
+  }, [realTakeoffStoreys, realStoreyIds.join("|"), selectedStorey]);
   const selected = st.selectedEntityId;
   const meta = selected ? sceneMeta(element, selected) : null;
   function cycle(key: string) {
@@ -3226,7 +3267,7 @@ function SceneView({
       <main className="relative overflow-hidden bg-slate-900">
         <div className="absolute left-4 top-4 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-slate-950/75 p-2 backdrop-blur">
           <button
-            onClick={() => setSelectedStorey(stepStorey(selectedStorey, -1))}
+            onClick={() => setSelectedStorey(stepStorey(selectedStorey, -1, realTakeoffStoreys ? realStoreyIds : undefined))}
             className="rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white"
           >
             ‹
@@ -3236,14 +3277,22 @@ function SceneView({
             onChange={(e) => setSelectedStorey(e.target.value)}
             className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs font-semibold text-white"
           >
-            <option value="GF">Ground</option>
-            <option value="FF">First</option>
-            <option value="TYP">Typical 2nd–6th</option>
+            {realTakeoffStoreys ? (
+              st.storeys.map((storey) => (
+                <option key={storey.id} value={storey.id}>{storey.name}</option>
+              ))
+            ) : (
+              <>
+                <option value="GF">Ground</option>
+                <option value="FF">First</option>
+                <option value="TYP">Typical 2nd–6th</option>
+                <option value="roof">Roof</option>
+              </>
+            )}
             <option value="all">All</option>
-            <option value="roof">Roof</option>
           </select>
           <button
-            onClick={() => setSelectedStorey(stepStorey(selectedStorey, 1))}
+            onClick={() => setSelectedStorey(stepStorey(selectedStorey, 1, realTakeoffStoreys ? realStoreyIds : undefined))}
             className="rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white"
           >
             ›
@@ -3259,9 +3308,9 @@ function SceneView({
             All
           </button>
           <button
-            onClick={() => setSelectedStorey("roof")}
+            onClick={() => setSelectedStorey(roofStorey)}
             className={
-              selectedStorey === "roof"
+              selectedStorey === roofStorey
                 ? "rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white"
                 : "rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white"
             }
@@ -3408,15 +3457,17 @@ function SceneView({
                 value={
                   selectedStorey === "all"
                     ? "All"
-                    : selectedStorey === "TYP"
-                      ? "Typical 2nd–6th"
-                      : selectedStorey === "roof"
-                        ? "Roof"
-                        : selectedStorey === "GF"
-                          ? "Ground"
-                          : selectedStorey === "FF"
-                            ? "First"
-                            : "Storey"
+                    : realTakeoffStoreys
+                      ? st.storeys.find((storey) => storey.id === selectedStorey)?.name || "Storey"
+                      : selectedStorey === "TYP"
+                        ? "Typical 2nd–6th"
+                        : selectedStorey === "roof"
+                          ? "Roof"
+                          : selectedStorey === "GF"
+                            ? "Ground"
+                            : selectedStorey === "FF"
+                              ? "First"
+                              : "Storey"
                 }
               />
               <InfoRow label="Colour" value={colour} />
@@ -3431,9 +3482,14 @@ function SceneView({
     </ResizableTwoPane>
   );
 }
-function stepStorey(current: string, direction: -1 | 1) {
-  const order = ["GF", "FF", "TYP", "roof"];
-  const i = order.includes(current) ? order.indexOf(current) : 1;
+function usesRealTakeoffStoreys(element: string, storeys: Array<{ id: string }>) {
+  if (element !== "floor" && element !== "ceiling") return false;
+  const legacy = new Set(["GF", "FF", "TYP", "RF"]);
+  return storeys.some((storey) => !legacy.has(storey.id));
+}
+function stepStorey(current: string, direction: -1 | 1, realOrder?: string[]) {
+  const order = realOrder?.length ? realOrder : ["GF", "FF", "TYP", "roof"];
+  const i = order.includes(current) ? order.indexOf(current) : direction > 0 ? -1 : order.length;
   return order[Math.max(0, Math.min(order.length - 1, i + direction))];
 }
 function IsometricScene({
@@ -3456,14 +3512,27 @@ function IsometricScene({
   const st = useDemoStore();
   const setSelected = st.setSelectedEntity;
   const selected = st.selectedEntityId;
-  const floorIds =
-    storey === "all"
+  const realTakeoffStoreys = usesRealTakeoffStoreys(element, st.storeys);
+  const orderedRealStoreys = [...st.storeys].sort((a, b) => a.levelIndex - b.levelIndex);
+  const floorIds = realTakeoffStoreys
+    ? storey === "all"
+      ? orderedRealStoreys.map((item) => item.id)
+      : [storey]
+    : storey === "all"
       ? ["GF", "FF", "TYP", "RF"]
       : storey === "roof"
         ? ["RF"]
         : [storey];
+  const realBase = new Map<string, number>();
+  let accumulatedHeight = 0;
+  for (const item of orderedRealStoreys) {
+    realBase.set(item.id, accumulatedHeight);
+    accumulatedHeight += item.heightM > 0 ? item.heightM : 3.35;
+  }
   const baseFor = (fid: string) =>
-    fid === "GF" ? 0 : fid === "FF" ? 4.0 : fid === "TYP" ? 7.6 : 11.2;
+    realTakeoffStoreys
+      ? realBase.get(fid) || 0
+      : fid === "GF" ? 0 : fid === "FF" ? 4.0 : fid === "TYP" ? 7.6 : 11.2;
   const theta = (rotation * Math.PI) / 180;
   const project = (p: Point, y: number) => {
     const x = (p.x - 900) * 0.32,
@@ -3932,6 +4001,17 @@ function familyIdsFor(element: string) {
   return familiesFor(element).map((x) => x.id);
 }
 function floorForViewport(viewport: string) {
+  const st = useDemoStore.getState();
+  const vp = st.viewports.find((item) => item.id === viewport);
+  if (vp) {
+    const needle = vp.name.toLowerCase();
+    const realStorey = st.storeys.find((storey) => {
+      const name = storey.name.toLowerCase();
+      return name === needle || needle.includes(name) || name.includes(needle);
+    });
+    if (realStorey) return realStorey.id;
+    if (st.storeys.length === 1 && !["GF", "FF", "TYP", "RF"].includes(st.storeys[0].id)) return st.storeys[0].id;
+  }
   return viewport === "VP-TYP"
     ? "TYP"
     : viewport === "VP-TERRACE" || viewport === "VP-ROOF"
@@ -3949,6 +4029,12 @@ function boxPoints(a: Point, b: Point) {
   ];
 }
 function targetViewport(row: WorkbookRow) {
+  const st = useDemoStore.getState();
+  if (!["GF", "FF", "TYP", "RF"].includes(row.floorId)) {
+    const storey = st.storeys.find((item) => item.id === row.floorId);
+    const byName = storey ? st.viewports.find((vp) => vp.name.toLowerCase().includes(storey.name.toLowerCase()) || storey.name.toLowerCase().includes(vp.name.toLowerCase())) : undefined;
+    return byName?.id || st.viewports[0]?.id || "";
+  }
   if (row.scope === "Upper roof") return "VP-ROOF";
   if (row.scope === "Terrace") return "VP-TERRACE";
   if (row.floorId === "TYP") return "VP-TYP";

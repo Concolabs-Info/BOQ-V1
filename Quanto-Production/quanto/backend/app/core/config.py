@@ -4,12 +4,13 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = BACKEND_DIR.parent
 
 
 class Settings(BaseSettings):
     # Always load the backend environment file, regardless of the directory
     # from which uvicorn was started.
-    model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(PROJECT_ROOT / ".env", BACKEND_DIR / ".env"), extra="ignore")
 
     database_url: str = "postgresql://quanto:quanto@localhost:5432/quanto"
     api_host: str = "0.0.0.0"

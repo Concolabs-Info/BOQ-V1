@@ -16,7 +16,8 @@ import type { Point } from "@/features/demo/types";
 export const DRAWING_WIDTH = 1737;
 export const DRAWING_HEIGHT = 2456;
 
-export function drawingSize(sheet?: { page: number }) {
+export function drawingSize(sheet?: { page: number; width?: number; height?: number }) {
+  if (sheet?.width && sheet?.height) return { width: sheet.width, height: sheet.height };
   if (sheet && sheet.page <= 12) {
     return { width: 935, height: 1210 };
   }

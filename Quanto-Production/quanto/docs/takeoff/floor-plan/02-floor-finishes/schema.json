@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "quanto.floor-finish-evidence-v2",
+  "title": "FloorFinishEvidenceV2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_kind",
+    "finish_definitions",
+    "assignment_rules",
+    "visual_legend_entries",
+    "floor_work_facts",
+    "review_items"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "floor-finish-evidence-v2"
+    },
+    "source_kind": {
+      "enum": [
+        "finish_schedule",
+        "room_finish_schedule",
+        "legend",
+        "colour_legend",
+        "hatch_legend",
+        "specification",
+        "keynote_table",
+        "general_note",
+        "detail",
+        "other"
+      ]
+    },
+    "finish_definitions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/definition"
+      }
+    },
+    "assignment_rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/assignment"
+      }
+    },
+    "visual_legend_entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/legend"
+      }
+    },
+    "floor_work_facts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/workFact"
+      }
+    },
+    "review_items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/review"
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_ref",
+        "raw_text",
+        "bbox_or_region_ref"
+      ],
+      "properties": {
+        "source_ref": {
+          "type": "string"
+        },
+        "raw_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bbox_or_region_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "description",
+        "material",
+        "overall_thickness",
+        "module_size",
+        "background",
+        "bedding_backing",
+        "internal_external",
+        "falls",
+        "specification_refs",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "mark": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "material": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "overall_thickness": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "module_size": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "background": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bedding_backing": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "internal_external": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "falls": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "specification_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope_type",
+        "scope_values",
+        "finish_mark",
+        "finish_description",
+        "exceptions",
+        "authority_hint",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "scope_type": {
+          "enum": [
+            "exact_room",
+            "room_type",
+            "unit",
+            "level",
+            "level_range",
+            "named_zone",
+            "internal_external",
+            "all_unless_noted",
+            "other"
+          ]
+        },
+        "scope_values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "finish_mark": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finish_description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "authority_hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "legend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "visual_type",
+        "signature_ref",
+        "raw_label",
+        "finish_mark",
+        "finish_description",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "visual_type": {
+          "enum": [
+            "colour",
+            "hatch",
+            "pattern",
+            "symbol"
+          ]
+        },
+        "signature_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finish_mark": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finish_description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "workFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "work_type",
+        "scope_type",
+        "scope_values",
+        "facts",
+        "exceptions",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "work_type": {
+          "enum": [
+            "screed",
+            "bed_topping",
+            "skirting",
+            "waterproofing",
+            "underlay",
+            "insulation",
+            "membrane",
+            "coating_surface_treatment",
+            "other"
+          ]
+        },
+        "scope_type": {
+          "type": "string"
+        },
+        "scope_values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "facts": {
+          "type": "object"
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue_type",
+        "reason",
+        "source"
+      ],
+      "properties": {
+        "issue_type": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,502 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanto.local/schemas/ceiling-geometry-detection-v1.json",
+  "title": "Quanto Ceiling Geometry Detection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source",
+    "drawing",
+    "ceiling_zones",
+    "exclusion_regions",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ceiling-geometry-v1"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width_px",
+        "height_px",
+        "origin"
+      ],
+      "properties": {
+        "width_px": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height_px": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "origin": {
+          "const": "top_left"
+        },
+        "page_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "viewport_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "drawing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "drawing_type",
+        "floor_level_id"
+      ],
+      "properties": {
+        "drawing_type": {
+          "enum": [
+            "rcp",
+            "ceiling_plan",
+            "floor_plan_targeted",
+            "section_targeted",
+            "detail_targeted",
+            "other"
+          ]
+        },
+        "floor_level_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "floor_name_raw": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "ceiling_zones": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CeilingZone"
+      }
+    },
+    "exclusion_regions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ExclusionRegion"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Warning"
+      }
+    }
+  },
+  "$defs": {
+    "Point": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "Polygon": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "$ref": "#/$defs/Point"
+      }
+    },
+    "BBox": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "Evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "description",
+        "confidence"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "text",
+            "visual_boundary",
+            "room_overlap",
+            "colour",
+            "hatch",
+            "slope_arrow",
+            "level_note",
+            "section_ref",
+            "pre_section_observation",
+            "detail_ref",
+            "vector_hint",
+            "user_confirmed",
+            "other"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bbox_px": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BBox"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "LevelEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ceiling_level_raw": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ceiling_level_mm": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "low_level_raw": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "low_level_mm": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "high_level_raw": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "high_level_mm": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "slope_direction": {
+          "enum": [
+            "north",
+            "south",
+            "east",
+            "west",
+            "ne",
+            "nw",
+            "se",
+            "sw",
+            "vector",
+            "unknown",
+            null
+          ]
+        },
+        "slope_vector_px": {
+          "anyOf": [
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "$ref": "#/$defs/Point"
+                },
+                {
+                  "$ref": "#/$defs/Point"
+                }
+              ],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "FinishEvidenceCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "value",
+        "confidence"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "code",
+            "direct_text",
+            "colour",
+            "hatch",
+            "schedule_ref",
+            "detail_ref",
+            "other"
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "bbox_px": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BBox"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "CeilingZone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "zone_id",
+        "polygon_px",
+        "geometry_origin",
+        "condition",
+        "linked_floor_space_ids",
+        "confidence",
+        "evidence",
+        "finish_evidence_candidates"
+      ],
+      "properties": {
+        "zone_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "polygon_px": {
+          "$ref": "#/$defs/Polygon"
+        },
+        "geometry_origin": {
+          "enum": [
+            "rcp_detected",
+            "reused_floor_space",
+            "targeted_detection",
+            "manual_candidate"
+          ]
+        },
+        "condition": {
+          "enum": [
+            "flat",
+            "sloped",
+            "raked",
+            "vaulted",
+            "multi_plane",
+            "stepped",
+            "dropped",
+            "partial_suspended",
+            "ceiling_island",
+            "exposed_soffit",
+            "external_soffit",
+            "stair_soffit",
+            "double_height",
+            "unknown_special"
+          ]
+        },
+        "environment": {
+          "enum": [
+            "internal",
+            "external",
+            "semi_external",
+            "unknown"
+          ]
+        },
+        "linked_floor_space_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "raw_zone_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level_evidence": {
+          "$ref": "#/$defs/LevelEvidence"
+        },
+        "finish_evidence_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FinishEvidenceCandidate"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "needs_review": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ExclusionRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "region_id",
+        "polygon_px",
+        "reason",
+        "confidence",
+        "evidence"
+      ],
+      "properties": {
+        "region_id": {
+          "type": "string"
+        },
+        "polygon_px": {
+          "$ref": "#/$defs/Polygon"
+        },
+        "reason": {
+          "enum": [
+            "open_to_sky",
+            "open_to_below",
+            "void",
+            "shaft_opening",
+            "no_overhead_structure",
+            "no_ceiling",
+            "other"
+          ]
+        },
+        "linked_floor_space_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          }
+        }
+      }
+    },
+    "Warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "severity"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "review",
+            "blocking"
+          ]
+        },
+        "zone_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

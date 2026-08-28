@@ -41,7 +41,10 @@ def _gemini_json_schema(schema: type[BaseModel]) -> dict:
 
 
 class ModelClient:
-    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str) -> T:
+    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+        raise NotImplementedError
+
+    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
         raise NotImplementedError
 
 
@@ -57,7 +60,7 @@ class OpenAIModelClient(ModelClient):
         if not self.model:
             raise RuntimeError("OPENAI_MODEL is required when AI_PROVIDER=openai")
 
-    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str) -> T:
+    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
         mime = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
         settings = get_settings()
@@ -69,7 +72,7 @@ class OpenAIModelClient(ModelClient):
         for attempt in range(settings.model_retries + 1):
             try:
                 response = self.client.responses.parse(
-                    model=self.model,
+                    model=model or self.model,
                     input=[
                         {"role": "system", "content": system},
                         {
@@ -103,23 +106,67 @@ class OpenAIModelClient(ModelClient):
             f"Model output failed schema validation after {settings.model_retries + 1} attempts"
         ) from last_error
 
+    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+        settings = get_settings()
+        last_error: Exception | None = None
+        working_prompt = prompt
+        for attempt in range(settings.model_retries + 1):
+            try:
+                response = self.client.responses.parse(
+                    model=model or self.model,
+                    input=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": working_prompt},
+                    ],
+                    text_format=schema,
+                )
+                if response.output_parsed is None:
+                    raise RuntimeError("Model returned no parsed structured output")
+                return response.output_parsed
+            except Exception as exc:
+                last_error = exc
+                if attempt >= settings.model_retries:
+                    break
+                working_prompt = f"{prompt}\n\nRepair the structured response to match the required schema exactly. Previous error: {str(exc)[:500]}"
+        raise RuntimeError(f"Model output failed schema validation after {settings.model_retries + 1} attempts") from last_error
+
+
+
+
+def _gemini_types():
+    """Import Gemini request types lazily; tests can exercise retry logic without the optional SDK."""
+    try:
+        from google.genai import types
+        return types
+    except (ModuleNotFoundError, ImportError):  # dependency-light unit tests only
+        class _Part:
+            @staticmethod
+            def from_bytes(*, data: bytes, mime_type: str):
+                return {"data": data, "mime_type": mime_type}
+        class _GenerateContentConfig:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+        class _Types:
+            Part = _Part
+            GenerateContentConfig = _GenerateContentConfig
+        return _Types
+
 
 class GeminiModelClient(ModelClient):
     """Gemini vision adapter used by the production Pre pipeline."""
 
     def __init__(self) -> None:
-        from google import genai
-
         settings = get_settings()
         if not settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY is required when AI_PROVIDER=gemini")
         if not settings.gemini_model:
             raise RuntimeError("GEMINI_MODEL is required when AI_PROVIDER=gemini")
+        from google import genai
         self.client = genai.Client(api_key=settings.gemini_api_key)
         self.model = settings.gemini_model
 
-    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str) -> T:
-        from google.genai import types
+    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+        types = _gemini_types()
 
         mime = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
         image = types.Part.from_bytes(data=image_path.read_bytes(), mime_type=mime)
@@ -130,7 +177,7 @@ class GeminiModelClient(ModelClient):
         for attempt in range(settings.model_retries + 1):
             try:
                 response = self.client.models.generate_content(
-                    model=self.model,
+                    model=model or self.model,
                     contents=[working_prompt, image],
                     config=types.GenerateContentConfig(
                         system_instruction=system,
@@ -161,11 +208,29 @@ class GeminiModelClient(ModelClient):
             f"Model output failed schema validation after {settings.model_retries + 1} attempts"
         ) from last_error
 
+    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+        types = _gemini_types()
+        response = self.client.models.generate_content(
+            model=model or self.model,
+            contents=[prompt],
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                response_mime_type="application/json",
+                response_json_schema=_gemini_json_schema(schema),
+            ),
+        )
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, schema):
+            return parsed
+        if parsed is not None:
+            return schema.model_validate(parsed)
+        return schema.model_validate_json(response.text)
+
 
 class LocalReviewModelClient(ModelClient):
     """Conservative fallback for scale/height when no external vision provider is configured."""
 
-    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str) -> T:
+    def parse_image(self, image_path: Path, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
         if schema is TriageOutput:
             return TriageOutput(
                 sheet_disciplines=[ViewportDiscipline.UNKNOWN],
@@ -200,7 +265,10 @@ class LocalReviewModelClient(ModelClient):
             return HeightReading(bands=[])  # type: ignore[return-value]
         if schema is SpecReading:
             return SpecReading(items=[])  # type: ignore[return-value]
-        raise TypeError(f"Mock provider has no fixture for {schema.__name__}")
+        raise TypeError(f"Local provider cannot automatically extract {schema.__name__}; set AI_PROVIDER=openai for Floor/Ceiling analysis")
+
+    def parse_text(self, prompt: str, schema: type[T], *, system: str, model: str | None = None) -> T:
+        raise TypeError(f"Local provider cannot automatically extract {schema.__name__}; set AI_PROVIDER=openai")
 
 
 def get_model_client() -> ModelClient:

@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanto.local/schemas/ceiling-finish-evidence-v1.json",
+  "title": "Quanto Ceiling Finish Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "finish_definitions",
+    "assignment_rules",
+    "legend_mappings",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ceiling-finish-evidence-v1"
+    },
+    "finish_definitions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/FinishDefinition"
+      }
+    },
+    "assignment_rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AssignmentRule"
+      }
+    },
+    "legend_mappings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LegendMapping"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Warning"
+      }
+    }
+  },
+  "$defs": {
+    "Evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_kind",
+        "raw_text",
+        "confidence"
+      ],
+      "properties": {
+        "source_kind": {
+          "enum": [
+            "ceiling_schedule",
+            "room_finish_schedule",
+            "finish_schedule",
+            "legend",
+            "specification",
+            "general_note",
+            "drawing_note",
+            "detail",
+            "user"
+          ]
+        },
+        "source_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_text": {
+          "type": "string"
+        },
+        "page_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bbox_px": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "FinishDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "definition_id",
+        "code",
+        "system_name",
+        "evidence",
+        "confidence"
+      ],
+      "properties": {
+        "definition_id": {
+          "type": "string"
+        },
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "system_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "material": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "module_or_size": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thickness": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "suspension_or_grid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "coating_or_paint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "properties_raw": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "detail_or_spec_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "AssignmentRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "scope_kind",
+        "finish_code_or_definition_id",
+        "evidence",
+        "confidence"
+      ],
+      "properties": {
+        "rule_id": {
+          "type": "string"
+        },
+        "scope_kind": {
+          "enum": [
+            "room_id",
+            "room_name",
+            "room_type",
+            "ceiling_zone",
+            "floor_level",
+            "project_default",
+            "other"
+          ]
+        },
+        "scope_value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finish_code_or_definition_id": {
+          "type": "string"
+        },
+        "priority_hint": {
+          "enum": [
+            "explicit",
+            "specific",
+            "general",
+            "default",
+            "unknown"
+          ]
+        },
+        "exception_to_rule_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "LegendMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mapping_id",
+        "visual_kind",
+        "visual_value",
+        "finish_code_or_definition_id",
+        "evidence",
+        "confidence"
+      ],
+      "properties": {
+        "mapping_id": {
+          "type": "string"
+        },
+        "visual_kind": {
+          "enum": [
+            "colour",
+            "hatch",
+            "pattern",
+            "symbol"
+          ]
+        },
+        "visual_value": {
+          "type": "string"
+        },
+        "finish_code_or_definition_id": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "Warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "severity"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "review",
+            "blocking"
+          ]
+        }
+      }
+    }
+  }
+}

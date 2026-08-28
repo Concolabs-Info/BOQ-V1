@@ -13,6 +13,7 @@ services:
     volumes:
       - quanto_postgres:/var/lib/postgresql/data
       - ./database/schema/001_pre.sql:/docker-entrypoint-initdb.d/001_pre.sql:ro
+      - ./database/schema/002_floor_ceiling.sql:/docker-entrypoint-initdb.d/002_floor_ceiling.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quanto} -d ${POSTGRES_DB:-quanto}"]
       interval: 5s
@@ -36,7 +37,7 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-latest}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-terra}
       MODEL_RETRIES: ${MODEL_RETRIES:-2}
       MODEL_CONCURRENCY: ${MODEL_CONCURRENCY:-4}
     ports:
