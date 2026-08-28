@@ -48,6 +48,7 @@ import {
   requestGuardedAction,
 } from "./editing/editSessionStore";
 import { useRealStructuralScopeTakeoff } from "@/features/takeoff/shared/useRealStructuralScopeTakeoff";
+import { BeamTakeoff } from "@/features/beams/BeamTakeoff";
 
 const elementLabel: Record<StructuralElement, string> = {
   columns: "Columns",
@@ -81,20 +82,15 @@ function isElementDrawing(element: StructuralElement, drawing: { id: string; tak
   return drawing.takeoffElement === element || viewports[element].includes(drawing.id);
 }
 
-export function StructuralTakeoff({
-  projectId,
-  element,
-  view,
-}: {
-  projectId: string;
-  element: StructuralElement;
-  view: string;
-}) {
+export function StructuralTakeoff({ projectId, element, view }: { projectId: string; element: StructuralElement; view: string }) {
+  if (element === "beams") return <BeamTakeoff projectId={projectId} view={view} />;
+  return <ScopedStructuralTakeoff projectId={projectId} element={element} view={view} />;
+}
+
+function ScopedStructuralTakeoff({ projectId, element, view }: { projectId: string; element: Exclude<StructuralElement, "beams">; view: string }) {
   useRealStructuralScopeTakeoff(projectId, element);
-  if (view === "workbook")
-    return <StructuralWorkbook projectId={projectId} element={element} />;
-  if (view === "3d")
-    return <Structural3D projectId={projectId} element={element} />;
+  if (view === "workbook") return <StructuralWorkbook projectId={projectId} element={element} />;
+  if (view === "3d") return <Structural3D projectId={projectId} element={element} />;
   return <StructuralDimension element={element} />;
 }
 

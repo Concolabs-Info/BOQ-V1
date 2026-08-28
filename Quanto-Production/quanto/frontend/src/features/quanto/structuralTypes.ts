@@ -48,6 +48,23 @@ export type BeamRun = {
   end: Point;
   dropMm: number;
   status: DemoStatus;
+  // Production Beam-engine fields. They are optional so Columns/Slab and the
+  // legacy structural demo data remain byte-for-byte compatible in behavior.
+  mark?: string;
+  floorLabel?: string;
+  grossLengthM?: number | null;
+  netLengthM?: number | null;
+  engineVolumeM3?: number | null;
+  mmPerPoint?: number | null;
+  pageIndex?: number;
+  sourcePageNumber?: number | null;
+  sourceDocument?: string | null;
+  dimensionSource?: string | null;
+  dimensionMethod?: string | null;
+  detectionMethod?: string | null;
+  visionCorroborated?: boolean | null;
+  deductions?: Array<Record<string, unknown>>;
+  reviewMessages?: string[];
 };
 
 export type SlabFamily = {

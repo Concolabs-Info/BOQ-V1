@@ -66,6 +66,7 @@ type StructuralState = {
   columns: ColumnInstance[];
   beamFamilies: BeamFamily[];
   beams: BeamRun[];
+  beamDataSource: "demo" | "production";
   slabFamilies: SlabFamily[];
   slabPlates: SlabPlate[];
   selectedId: string | null;
@@ -79,6 +80,7 @@ type StructuralState = {
   updateBeam: (id: string, patch: Partial<BeamRun>) => void;
   addBeam: (item: BeamRun) => void;
   deleteBeam: (id: string) => void;
+  replaceBeamData: (families: BeamFamily[], beams: BeamRun[]) => void;
   updateSlab: (id: string, patch: Partial<SlabPlate>) => void;
   addSlab: (item: SlabPlate) => void;
   deleteSlab: (id: string) => void;
@@ -145,6 +147,7 @@ export const useStructuralStore = create<StructuralState>()(
     (set, get) => ({
       ...seed(),
       selectedId: null,
+      beamDataSource: "demo",
       workbookOverrides: {},
       workbookConfirmed: {},
       geometryUndo: [],
@@ -282,6 +285,19 @@ export const useStructuralStore = create<StructuralState>()(
           selectedId: s.selectedId === id ? null : s.selectedId,
         }));
       },
+      replaceBeamData: (families, beams) =>
+        set((s) => ({
+          beamFamilies: clone(families),
+          beams: clone(beams),
+          beamDataSource: "production",
+          selectedId: beams.some((beam) => beam.id === s.selectedId) ? s.selectedId : null,
+          workbookOverrides: Object.fromEntries(
+            Object.entries(s.workbookOverrides).filter(([key]) => !key.startsWith("beams:")),
+          ),
+          workbookConfirmed: Object.fromEntries(
+            Object.entries(s.workbookConfirmed).filter(([key]) => !key.startsWith("beams:")),
+          ),
+        })),
       updateSlab: (id, patch) => {
         const original = get().slabPlates.find((x) => x.id === id);
         if (
@@ -496,6 +512,7 @@ export const useStructuralStore = create<StructuralState>()(
         set({
           ...seed(),
           selectedId: null,
+          beamDataSource: "demo",
           workbookOverrides: {},
           workbookConfirmed: {},
           geometryUndo: [],
@@ -503,11 +520,12 @@ export const useStructuralStore = create<StructuralState>()(
     }),
     {
       name: "quanto-structural-demo-v1",
-      version: 10,
+      version: 11,
       migrate: (persisted) => {
         const state = persisted as Partial<StructuralState>;
         return {
           ...state,
+          beamDataSource: state.beamDataSource || "demo",
           columns: (state.columns || []).filter((column) => !legacyColumnIds.has(column.id)),
           beams: (state.beams || []).filter((beam) => !legacyBeamIds.has(beam.id)),
           slabPlates: mergeDetectedSectionSlabs(
@@ -535,13 +553,17 @@ export const useStructuralStore = create<StructuralState>()(
             ...current.columnFamilies,
             ...(state.columnFamilies || []).filter((item) => !legacyColumnFamilies.has(item.id) && !current.columnFamilies.some((builtIn) => builtIn.id === item.id)),
           ],
-          beamFamilies: [
-            ...current.beamFamilies,
-            ...(state.beamFamilies || []).filter((item) => !legacyBeamFamilies.has(item.id) && !current.beamFamilies.some((builtIn) => builtIn.id === item.id)),
-          ],
+          beamFamilies: state.beamDataSource === "production"
+            ? clone(state.beamFamilies || [])
+            : [
+                ...current.beamFamilies,
+                ...(state.beamFamilies || []).filter((item) => !legacyBeamFamilies.has(item.id) && !current.beamFamilies.some((builtIn) => builtIn.id === item.id)),
+              ],
           slabFamilies: mergeSeeded((state.slabFamilies || []).filter((item) => !legacySlabFamilies.has(item.id)), current.slabFamilies, ["mark","description","thicknessMm","falls","source"]),
           columns: mergeSeeded((state.columns || []).filter((column) => !legacyColumnIds.has(column.id)), current.columns, ["familyId","floorId","viewportId","bbox","heightM","status"]),
-          beams: mergeSeeded((state.beams || []).filter((beam) => !legacyBeamIds.has(beam.id)), current.beams, ["familyId","floorId","viewportId","start","end","kind","dropMm","status"]),
+          beams: state.beamDataSource === "production"
+            ? clone(state.beams || [])
+            : mergeSeeded((state.beams || []).filter((beam) => !legacyBeamIds.has(beam.id)), current.beams, ["familyId","floorId","viewportId","start","end","kind","dropMm","status"]),
           slabPlates: mergeDetectedSectionSlabs(
             mergeSeeded(
               (state.slabPlates || []).filter((plate) => !legacySlabIds.has(plate.id)),

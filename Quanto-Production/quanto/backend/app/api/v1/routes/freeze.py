@@ -18,7 +18,16 @@ def get_readiness(project_id: UUID):
 @router.post("/projects/{project_id}/pre/freeze")
 def freeze_pre(project_id: UUID):
     try:
-        return freeze(project_id)
+        frame = freeze(project_id)
+        # Beam processing is a downstream consumer of the frozen Pre frame.
+        # Kick it off immediately so the Beam canvas is normally ready before
+        # the user opens Takeoff > Beams. Failure here must never alter Pre.
+        try:
+            from ....modules.takeoff.beams import ensure_analysis_started
+            ensure_analysis_started(project_id)
+        except Exception:  # Beam status will surface the error in the Beam page.
+            pass
+        return frame
     except RuntimeError as exc:
         detail = exc.args[0] if exc.args else "Pre is not ready"
         raise HTTPException(409, detail=detail) from exc
