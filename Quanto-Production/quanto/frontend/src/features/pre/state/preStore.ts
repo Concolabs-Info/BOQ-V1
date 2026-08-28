@@ -52,7 +52,7 @@ type State = {
   addSpecification: (item: SpecificationItem) => void;
   suggestMissingScales: () => Promise<void>;
   suggestHeightsIfNeeded: () => Promise<void>;
-  extractSpecificationsIfNeeded: () => Promise<void>;
+  extractSpecificationsIfNeeded: (force?: boolean) => Promise<void>;
   freezeProjectFrame: () => Promise<void>;
 };
 
@@ -133,9 +133,11 @@ function mapState(state: PreState, stage: PreStage) {
     const checks = fit?.checks as any;
     const fx = Number(fit?.factor_x || 0), fy = Number(fit?.factor_y || 0), printed = Number(checks?.printed?.factor || 0);
     let factor = Number(checks?.confirmed_factor || 0);
+    // A valid printed scale remains usable evidence even when X/Y checks need
+    // a human choice; the disagreement must not turn a real 1:N into zero.
+    if (!factor && printed) factor = printed;
     if (!factor && checks?.recommendation === "PRINTED_AGREES" && printed) factor = printed;
     if (!factor && checks?.recommendation === "XY_DERIVED" && fx && fy) factor = (fx + fy) / 2;
-    if (!factor && printed && !fx && !fy) factor = printed;
     const base: ExtendedViewport = {
       id: server.id,
       name: server.name,
@@ -158,15 +160,25 @@ function mapState(state: PreState, stage: PreStage) {
   const heightSource = state.viewports.find((v) => v.view_kind === "section" && v.scale_confirmed) || state.viewports.find((v) => v.view_kind === "elevation" && v.scale_confirmed);
   const sourceUi = heightSource ? viewports.find((v) => v.id === heightSource.id) : viewports.find((v) => v.category === "section" || v.category === "elevation") || viewports[0];
   const storeys: UiStorey[] = state.storeys.map((s) => ({ id: s.id, name: s.name, levelIndex: s.level_index, factor: s.typical_group ? 1 : 1, heightM: (s.height_mm || 0)/1000, status: status(state.confirmations.storey_stack, s.status) }));
-  const heights: HeightRecord[] = state.storeys.map((s, index) => {
+  const heights: HeightRecord[] = state.storeys.map((s) => {
     const source = viewports.find((v) => v.id === s.height_source_viewport_id) || sourceUi;
     const box = source?.bbox || [0,0,1000,1000];
     const cropH = Math.max(1, box[3]-box[1]);
-    const yTop = s.height_y_top != null ? box[1] + (s.height_y_top/1000)*cropH : box[1] + cropH*(0.12 + index*Math.min(.7/Math.max(1,state.storeys.length),.12));
-    const yBottom = s.height_y_bottom != null ? box[1] + (s.height_y_bottom/1000)*cropH : Math.min(box[3], yTop + cropH*Math.min(.7/Math.max(1,state.storeys.length),.12));
-    return { id: s.id, name: s.name, storeyId: s.id, viewportId: source?.id || "", yTop, yBottom, status: status(state.confirmations.height_stack, s.status) };
+    const detected = s.height_mm != null && s.height_y_top != null && s.height_y_bottom != null;
+    const yTop = detected ? box[1] + (s.height_y_top!/1000)*cropH : box[1];
+    const yBottom = detected ? box[1] + (s.height_y_bottom!/1000)*cropH : box[1];
+    return { id: s.id, name: s.name, storeyId: s.id, viewportId: source?.id || "", yTop, yBottom, heightM:s.height_mm ? s.height_mm/1000 : undefined, basis:s.height_basis || undefined, detected, status: status(state.confirmations.height_stack, s.status) };
   });
-  const specifications: SpecificationItem[] = state.spec_items.map((s) => ({ id:s.id, name:s.name, category:s.kind, viewportId:s.viewport_id || "", found:s.found, status:status(Boolean(s.confirmed),s.status), rawText:s.raw_text, columns:s.table_json?.columns, rows:s.table_json?.rows }));
+  const specifications: SpecificationItem[] = state.spec_items.map((s) => {
+    const sheetServer=(state.sheets as any[]).find((candidate)=>candidate.page_id===s.page_id);
+    const sheet=sheetServer ? sheetMap.get(sheetServer.id) : undefined;
+    const sourceViewport=viewports.find((v)=>v.id===s.viewport_id) || viewports.find((v)=>v.sheetId===sheet?.id);
+    const norm=s.bbox_norm;
+    const bbox: [number,number,number,number] | undefined = norm && sheet
+      ? [norm[0]*Number((sheet as any).renderWidth||1000),norm[1]*Number((sheet as any).renderHeight||1000),norm[2]*Number((sheet as any).renderWidth||1000),norm[3]*Number((sheet as any).renderHeight||1000)]
+      : undefined;
+    return { id:s.id, name:s.name, category:s.kind, topic:s.topic || undefined, viewportId:sourceViewport?.id || "", sheetId:sheet?.id, page:sheet?.page, bbox, found:s.found, status:status(Boolean(s.confirmed),s.status), rawText:s.raw_text, columns:s.table_json?.columns, rows:s.table_json?.rows };
+  });
   return { sheets, viewports, storeys, heights, specifications };
 }
 
@@ -206,10 +218,18 @@ export const usePreStore = create<State>((set, get) => ({
       set((st)=>({viewports:st.viewports.map((v)=>v.id===id?{...next,status:current.status}:v),error:null}));
       const fit=current.scaleFit; const mpp=next.scaleMPerPx || 0;
       let request: Promise<unknown> | null = null;
-      if(fit && mpp>0 && !(fit.checks as any)?.anisotropy_refused) {
+      const manualAxis=next.calibration?.manualAxis;
+      const manualCheck=manualAxis ? next.calibration?.[manualAxis] : null;
+      if(manualAxis && manualCheck && manualCheck.knownDistanceM>0) {
+        const line=manualCheck.line; const p1=cropNormPoint(next,line[0],line[1]), p2=cropNormPoint(next,line[2],line[3]);
+        request=preApi.setScale(id,{mode:"manual",p1,p2,real_distance:String(manualCheck.knownDistanceM*1000),unit:"mm"});
+      } else if(fit && mpp>0) {
         const checks=(fit.checks || {}) as any;
-        const axis = checks?.recommendation === "PRINTED_AGREES" || (checks?.printed?.factor && !fit.factor_x && !fit.factor_y) ? "printed" : "manual";
-        request=preApi.setScale(id,{mode:"suggested",scale_fit_id:fit.id,chosen_factor:mppToScaleFactor(mpp),axis});
+        const chosenFactor=mppToScaleFactor(mpp);
+        const printedFactor=Number(checks?.printed?.factor || 0);
+        const choosesPrinted=printedFactor>0 && Math.abs(chosenFactor-printedFactor)/printedFactor<0.001;
+        const axis = choosesPrinted ? "printed" : "manual";
+        if(!checks?.anisotropy_refused || choosesPrinted) request=preApi.setScale(id,{mode:"suggested",scale_fit_id:fit.id,chosen_factor:chosenFactor,axis});
       } else if(next.calibration?.x && next.calibration.x.knownDistanceM>0 && mpp>0) {
         const line=next.calibration.x.line; const p1=cropNormPoint(next,line[0],line[1]), p2=cropNormPoint(next,line[2],line[3]);
         request=preApi.setScale(id,{mode:"manual",p1,p2,real_distance:String(next.calibration.x.knownDistanceM*1000),unit:"mm"});
@@ -252,6 +272,12 @@ export const usePreStore = create<State>((set, get) => ({
     set((st)=>({heights:st.heights.map((h)=>h.id===id?next:h)}));
     if(patch.status === "confirmed") {
       const v=get().viewports.find((x)=>x.id===next.viewportId); if(!v)return;
+      if(next.heightM && next.heightM>0) {
+        fire(preApi.setHeight(id,{height_mm:Math.round(next.heightM*1000),basis:next.basis || "user_confirmed"}).then(async()=>{
+          const all=get().heights.every((h)=>h.id===id || h.status==="confirmed"); const pid=get().projectId; if(all&&pid) await preApi.confirm("height_stack",pid);
+        }));
+        return;
+      }
       const yTop=Math.max(0,Math.min(1000,Math.round((next.yTop-v.bbox[1])/Math.max(1,v.bbox[3]-v.bbox[1])*1000)));
       const yBottom=Math.max(yTop+1,Math.min(1000,Math.round((next.yBottom-v.bbox[1])/Math.max(1,v.bbox[3]-v.bbox[1])*1000)));
       fire(preApi.setHeight(id,{source_viewport_id:next.viewportId,y_top:yTop,y_bottom:yBottom,basis:"user_adjusted_line"}).then(async()=>{
@@ -278,13 +304,13 @@ export const usePreStore = create<State>((set, get) => ({
     const alreadyMeasured=get().raw?.storeys.every((s)=>Boolean(s.height_mm));
     if(alreadyMeasured)return;
     try{
-      const candidates=await preApi.heightCandidates(pid);const primary=candidates.find((c)=>c.scale_confirmed);if(!primary)return;
+      const candidates=await preApi.heightCandidates(pid);const primary=candidates.find((c)=>c.scale_confirmed) || candidates[0];if(!primary)return;
       await preApi.suggestHeights(pid,{primary_viewport_id:primary.id});
       get().hydrate(pid,await preApi.pre(pid));
     }catch(error){console.error(error);}
   },
-  extractSpecificationsIfNeeded: async()=>{
-    const pid=get().projectId;if(!pid||get().specifications.length||get().frozen||activeSpecExtractions.has(pid))return;
+  extractSpecificationsIfNeeded: async(force=false)=>{
+    const pid=get().projectId;if(!pid||(!force&&get().specifications.length)||get().frozen||activeSpecExtractions.has(pid))return;
     activeSpecExtractions.add(pid);
     try{
       await preApi.extractSpecs(pid);

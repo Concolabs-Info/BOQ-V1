@@ -42,8 +42,10 @@ def set_height(storey_id: UUID, body: HeightSet):
     evidence = dict(current.get("height_evidence") or {})
     if body.height_mm is not None:
         height_mm = body.height_mm
-        y_top = None
-        y_bottom = None
+        # Keep existing AI evidence/position when a user confirms or corrects
+        # the numeric value. A purely manual value naturally keeps these null.
+        y_top = current.get("height_y_top")
+        y_bottom = current.get("height_y_bottom")
         source_viewport_id = current.get("height_source_viewport_id")
         basis = body.basis
         evidence["user_adjustment"] = {"height_mm": height_mm, "mode": "typed"}

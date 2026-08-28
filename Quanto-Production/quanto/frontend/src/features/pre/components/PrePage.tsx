@@ -55,7 +55,9 @@ const viewportGroupLabels: Record<(typeof viewportGroups)[number], string> = {
 };
 
 type ScaleEvidenceKind = "printed" | "x" | "y";
-const SCALE_PX_PER_METRE = 110.06 * 39.3700787402;
+// Working PDF renders are generated at 150 DPI. Convert metres-per-render-pixel
+// back to the conventional 1:N drawing ratio using that real render density.
+const SCALE_PX_PER_METRE = 150 * 1000 / 25.4;
 function distanceToMetres(value: string, unit: ScaleDistanceUnit): number {
   if (unit === "ft-in") {
     const match = value
@@ -1028,11 +1030,27 @@ function ScaleScreen({ projectId }: { projectId: string }) {
   const sheets = usePreStore((s) => s.sheets);
   const includedSheetIds = useMemo(() => new Set(sheets.filter((sheet) => sheet.included).map((sheet) => sheet.id)), [sheets]);
   const viewports = useMemo(
-    () => allViewports.filter((v) => {
-      return includedSheetIds.has(v.sheetId)
-        && Boolean(v.calibration)
-        && viewportRequiresScale(v);
-    }),
+    () => allViewports
+      .filter((v) => includedSheetIds.has(v.sheetId) && Boolean(v.calibration) && viewportRequiresScale(v))
+      .sort((a, b) => {
+        const kindRank = (viewport: typeof a) => {
+          const kind = viewport.server?.view_kind || viewport.category;
+          return kind === "plan" ? 0 : kind === "elevation" ? 1 : 2;
+        };
+        const planRank = (name: string) => {
+          const value = name.toLowerCase();
+          if (/basement|lower ground/.test(value)) return 0;
+          if (/ground/.test(value)) return 10;
+          if (/first|1st/.test(value)) return 20;
+          if (/second|2nd/.test(value)) return 30;
+          if (/third|3rd/.test(value)) return 40;
+          if (/typical/.test(value)) return 50;
+          if (/terrace/.test(value)) return 80;
+          if (/roof/.test(value)) return 90;
+          return 60;
+        };
+        return kindRank(a) - kindRank(b) || planRank(a.name) - planRank(b.name) || a.name.localeCompare(b.name);
+      }),
     [allViewports, includedSheetIds],
   );
   const selectedId = usePreStore((s) => s.selectedViewportId);
@@ -1054,6 +1072,7 @@ function ScaleScreen({ projectId }: { projectId: string }) {
     "select" | "hand" | "add" | "measure" | "calibrate-x" | "calibrate-y"
   >("select");
   const [draft, setDraft] = useState<Point[]>([]);
+  const [manualLineAxis, setManualLineAxis] = useState<"x" | "y" | null>(null);
   const [xCheck, setXCheck] = useState("0.00");
   const [yCheck, setYCheck] = useState("0.00");
   const [xUnit, setXUnit] = useState<ScaleDistanceUnit>("m");
@@ -1082,12 +1101,14 @@ function ScaleScreen({ projectId }: { projectId: string }) {
     setXUnit(nextXUnit);
     setYUnit(nextYUnit);
     setXCheck(
-      v.calibration.x.value ||
-        metresToDistance(v.calibration.x.knownDistanceM, nextXUnit),
+      v.calibration.x.knownDistanceM > 0
+        ? v.calibration.x.value || metresToDistance(v.calibration.x.knownDistanceM, nextXUnit)
+        : "",
     );
     setYCheck(
-      v.calibration.y.value ||
-        metresToDistance(v.calibration.y.knownDistanceM, nextYUnit),
+      v.calibration.y.knownDistanceM > 0
+        ? v.calibration.y.value || metresToDistance(v.calibration.y.knownDistanceM, nextYUnit)
+        : "",
     );
     measurement.clearDraft();
   }, [v?.id]);
@@ -1117,6 +1138,8 @@ function ScaleScreen({ projectId }: { projectId: string }) {
   const measuredLength = measurement.selectedLengthM;
   const xMetres = distanceToMetres(xCheck, xUnit),
     yMetres = distanceToMetres(yCheck, yUnit);
+  const hasXEvidence = xMetres > 0;
+  const hasYEvidence = yMetres > 0;
   const xPixels = Math.max(
     1,
     Math.hypot(xLine[2] - xLine[0], xLine[3] - xLine[1]),
@@ -1125,9 +1148,20 @@ function ScaleScreen({ projectId }: { projectId: string }) {
     1,
     Math.hypot(yLine[2] - yLine[0], yLine[3] - yLine[1]),
   );
-  const calculatedMpp = (xMetres / xPixels + yMetres / yPixels) / 2;
-  const calculatedScale =
-    calculatedMpp > 0 ? calculatedMpp * SCALE_PX_PER_METRE : 0;
+  const calculatedMpp = hasXEvidence && hasYEvidence
+    ? (xMetres / xPixels + yMetres / yPixels) / 2
+    : 0;
+  const hasPrintedScale = printedEvidenceKind === "printed" && scale > 0;
+  const calculatedScale = hasPrintedScale
+    ? scale * SCALE_PX_PER_METRE
+    : calculatedMpp > 0
+      ? calculatedMpp * SCALE_PX_PER_METRE
+      : scale > 0
+        ? scale * SCALE_PX_PER_METRE
+        : 0;
+  const scaleBasis = hasPrintedScale
+    ? hasXEvidence && hasYEvidence ? "detected printed scale, verified by X/Y" : "detected printed scale"
+    : calculatedMpp > 0 ? "validated X/Y dimensions" : scale > 0 ? "saved scale evidence" : null;
   const pendingScales = viewports.filter((viewport) => viewport.status !== "confirmed");
   function continueAfterScale() {
     if (pendingScales.length) setShowContinuePrompt(true);
@@ -1172,6 +1206,7 @@ function ScaleScreen({ projectId }: { projectId: string }) {
     yValue?: string;
     xUnit?: ScaleDistanceUnit;
     yUnit?: ScaleDistanceUnit;
+    manualAxis?: "x" | "y";
   }) {
     if (!calibration) return;
     const nextXLine = next.xLine || xLine,
@@ -1192,6 +1227,7 @@ function ScaleScreen({ projectId }: { projectId: string }) {
     );
     const nextCalibration = {
       ...calibration,
+      ...(next.manualAxis ? { manualAxis: next.manualAxis } : {}),
       x: {
         ...calibration.x,
         line: nextXLine,
@@ -1207,11 +1243,35 @@ function ScaleScreen({ projectId }: { projectId: string }) {
         unit: nextYUnit,
       },
     };
+    const nextMpp = xm > 0 && ym > 0 ? (xm / xp + ym / yp) / 2 : xm > 0 ? xm / xp : ym > 0 ? ym / yp : 0;
     update(v.id, {
       calibration: nextCalibration,
-      ...(xm > 0 && ym > 0 ? { scaleMPerPx: (xm / xp + ym / yp) / 2 } : {}),
+      ...(nextMpp > 0 ? { scaleMPerPx: nextMpp } : {}),
       status: "ready",
     });
+  }
+  function startCalibrationDrag(point: Point) {
+    if (mode !== "calibrate-x" && mode !== "calibrate-y") return;
+    setDraft([point, point]);
+  }
+  function moveCalibrationDrag(point: Point) {
+    if ((mode !== "calibrate-x" && mode !== "calibrate-y") || !draft.length) return;
+    const first = draft[0];
+    setDraft([first, mode === "calibrate-x" ? { x: point.x, y: first.y } : { x: first.x, y: point.y }]);
+  }
+  function finishCalibrationDrag(point: Point) {
+    if ((mode !== "calibrate-x" && mode !== "calibrate-y") || !draft.length) return;
+    const first = draft[0];
+    const axis = mode === "calibrate-x" ? "x" : "y";
+    const end = axis === "x" ? { x: point.x, y: first.y } : { x: first.x, y: point.y };
+    if (Math.hypot(end.x-first.x,end.y-first.y) < 10) { setDraft([]); return; }
+    const line: [number,number,number,number] = [first.x,first.y,end.x,end.y];
+    if(axis === "x") setXLine(line); else setYLine(line);
+    saveCalibration(axis === "x" ? {xLine:line,manualAxis:"x"} : {yLine:line,manualAxis:"y"});
+    setManualLineAxis(axis);
+    setActiveAxis(axis);
+    setDraft([]);
+    setMode("select");
   }
   function clickScale(point: Point) {
     if (notToScale || printedScaleOnly) return;
@@ -1253,6 +1313,7 @@ function ScaleScreen({ projectId }: { projectId: string }) {
   function startMode(next: typeof mode) {
     setMode(next);
     setDraft([]);
+    if(next === "calibrate-x" || next === "calibrate-y") setManualLineAxis(null);
     if (next !== "measure") measurement.clearDraft();
     setFocusedEvidence(null);
     setEvidencePopup(null);
@@ -1297,9 +1358,13 @@ function ScaleScreen({ projectId }: { projectId: string }) {
       {drawingMode ? (
         <>
           <span className="ml-2 text-xs font-medium text-blue-700">
-            {(mode === "measure" ? measurement.start : draft.length)
-              ? `Click the end of the ${instruction}`
-              : `Click the start of the ${instruction}`}
+            {mode === "calibrate-x"
+              ? "Drag horizontally across a known dimension, then release"
+              : mode === "calibrate-y"
+                ? "Drag vertically across a known dimension, then release"
+                : (mode === "measure" ? measurement.start : draft.length)
+                  ? `Click the end of the ${instruction}`
+                  : `Click the start of the ${instruction}`}
           </span>
           <button
             onClick={() => startMode("select")}
@@ -1335,6 +1400,9 @@ function ScaleScreen({ projectId }: { projectId: string }) {
           viewportId={v.id}
           tool={mode === "hand" ? "pan" : drawingMode ? "draw" : "select"}
           onCanvasClick={clickScale}
+          onCanvasDragStart={startCalibrationDrag}
+          onCanvasDragMove={moveCalibrationDrag}
+          onCanvasDragEnd={finishCalibrationDrag}
           onCanvasMove={(point) => {
             if (mode === "measure") measurement.canvasMove(point);
           }}
@@ -1352,25 +1420,13 @@ function ScaleScreen({ projectId }: { projectId: string }) {
               height={drawing.height}
             />
           ) : null}
-          {!notToScale && !printedScaleOnly && activeAxis === null ? (
+          {!notToScale && !printedScaleOnly && activeAxis === null && (hasXEvidence || hasYEvidence) ? (
             <>
-              <CalibrationLine
-                line={xLine}
-                setLine={(line) => { setXLine(line); saveCalibration({ xLine: line }); }}
-                label={knownDistanceLabel(xCheck, xUnit)}
-                axis="x"
-                color="#7c3aed"
-              />
-              <CalibrationLine
-                line={yLine}
-                setLine={(line) => { setYLine(line); saveCalibration({ yLine: line }); }}
-                label={knownDistanceLabel(yCheck, yUnit)}
-                axis="y"
-                color="#0891b2"
-              />
+              {hasXEvidence ? <CalibrationLine line={xLine} setLine={(line) => { setXLine(line); saveCalibration({ xLine: line }); }} label={knownDistanceLabel(xCheck, xUnit)} axis="x" color="#7c3aed" /> : null}
+              {hasYEvidence ? <CalibrationLine line={yLine} setLine={(line) => { setYLine(line); saveCalibration({ yLine: line }); }} label={knownDistanceLabel(yCheck, yUnit)} axis="y" color="#0891b2" /> : null}
             </>
           ) : null}
-          {!notToScale && !printedScaleOnly && activeAxis === "x" ? (
+          {!notToScale && !printedScaleOnly && activeAxis === "x" && (hasXEvidence || manualLineAxis === "x") ? (
             <CalibrationLine
               line={xLine}
               setLine={(line) => {
@@ -1382,7 +1438,7 @@ function ScaleScreen({ projectId }: { projectId: string }) {
               color="#7c3aed"
             />
           ) : null}
-          {!notToScale && !printedScaleOnly && activeAxis === "y" ? (
+          {!notToScale && !printedScaleOnly && activeAxis === "y" && (hasYEvidence || manualLineAxis === "y") ? (
             <CalibrationLine
               line={yLine}
               setLine={(line) => {
@@ -1404,16 +1460,13 @@ function ScaleScreen({ projectId }: { projectId: string }) {
             color="#059669"
           />
           {drawingMode && mode !== "measure" && draft.length ? (
-            <circle
-              cx={draft[0].x}
-              cy={draft[0].y}
-              r={9}
-              fill="#2563eb"
-              stroke="white"
-              strokeWidth={3}
-              vectorEffect="non-scaling-stroke"
-              pointerEvents="none"
-            />
+            draft.length > 1 && (mode === "calibrate-x" || mode === "calibrate-y") ? (
+              <g pointerEvents="none">
+                <line x1={draft[0].x} y1={draft[0].y} x2={draft[1].x} y2={draft[1].y} stroke={mode === "calibrate-x" ? "#7c3aed" : "#0891b2"} strokeWidth={5} vectorEffect="non-scaling-stroke" />
+                <circle cx={draft[0].x} cy={draft[0].y} r={7} fill="white" stroke={mode === "calibrate-x" ? "#7c3aed" : "#0891b2"} strokeWidth={3} vectorEffect="non-scaling-stroke" />
+                <circle cx={draft[1].x} cy={draft[1].y} r={7} fill="white" stroke={mode === "calibrate-x" ? "#7c3aed" : "#0891b2"} strokeWidth={3} vectorEffect="non-scaling-stroke" />
+              </g>
+            ) : <circle cx={draft[0].x} cy={draft[0].y} r={9} fill="#2563eb" stroke="white" strokeWidth={3} vectorEffect="non-scaling-stroke" pointerEvents="none" />
           ) : null}
         </DemoDrawing>
       }
@@ -1494,19 +1547,24 @@ function ScaleScreen({ projectId }: { projectId: string }) {
                     {calibration?.printedScaleLabel}
                   </span>
                 </div>
-                {!notToScale && !printedScaleOnly ? (
+                {!notToScale && !printedScaleOnly && calculatedScale > 0 ? (
                   <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3">
                     <span className="flex items-center justify-between gap-3 text-sm">
                       <span className="font-medium text-slate-700">
-                        Calculated drawing scale
+                        Usable drawing scale
                       </span>
                       <strong className="text-blue-700">
                         1 : {calculatedScale.toFixed(1)}
                       </strong>
                     </span>
                     <span className="mt-1 block text-[11px] text-slate-500">
-                      Calculated once from the known X and Y distances below.
+                      From {scaleBasis}.
                     </span>
+                  </div>
+                ) : null}
+                {!notToScale && !printedScaleOnly && calculatedScale <= 0 ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                    No reliable scale was detected. Calibrate one known dimension before confirming.
                   </div>
                 ) : null}
                 {!notToScale && !printedScaleOnly ? (
@@ -1818,9 +1876,6 @@ function HeightScreen({ projectId }: { projectId: string }) {
   const [selected, setSelected] = useState("H-GF-FF");
   const [showContinuePrompt, setShowContinuePrompt] = useState(false);
   const h = heights.find((x) => x.id === selected) || heights[0];
-  const scale = usePreStore(
-    (s) => s.viewports.find((v) => v.id === h?.viewportId)?.scaleMPerPx || 0.021,
-  );
   if (!h) {
     return (
       <div className="flex min-h-[660px] items-center justify-center rounded-3xl border border-slate-200 bg-white">
@@ -1861,12 +1916,12 @@ function HeightScreen({ projectId }: { projectId: string }) {
       }
       center={
         <DemoDrawing viewportId={h.viewportId}>
-          <HeightLines
+          {h.detected ? <HeightLines
             h={h}
             onTop={setTop}
             onBottom={setBottom}
-            label={`${(Math.abs(h.yBottom - h.yTop) * scale).toFixed(2)} m`}
-          />
+            label={h.heightM ? `${h.heightM.toFixed(2)} m` : "Height not detected"}
+          /> : null}
         </DemoDrawing>
       }
       right={
@@ -1893,11 +1948,26 @@ function HeightScreen({ projectId }: { projectId: string }) {
               {h.name}
             </p>
             <p className="mt-2 text-3xl font-semibold">
-              {(Math.abs(h.yBottom - h.yTop) * scale).toFixed(2)} m
+              {h.heightM ? `${h.heightM.toFixed(2)} m` : "Not detected"}
             </p>
             <p className="mt-1 text-sm text-slate-500">
-              Floor-to-floor height read from the front-elevation scale.
+              {h.basis === "printed_dimension" ? "Read directly from the printed floor-to-floor dimension."
+                : h.basis === "printed_and_measured" ? "Printed dimension verified against the confirmed drawing scale."
+                : h.basis === "measured" ? "Measured from floor lines using the confirmed drawing scale."
+                : "No reliable printed height or scaled measurement was found. Enter the actual height below."}
             </p>
+            <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Actual floor-to-floor height (metres)
+              <input
+                className="input mt-2 w-full"
+                type="number"
+                min="0.1"
+                step="0.001"
+                value={h.heightM ?? ""}
+                placeholder="For example, 3.350"
+                onChange={(event) => updateHeight(h.id, { heightM:event.target.value ? Number(event.target.value) : undefined, basis:"user_entered", detected:false, status:"ready" })}
+              />
+            </label>
             <PendingItemsList
               title="Heights requiring confirmation"
               items={pendingHeights.map((item) => ({ id: item.id, name: item.name, status: item.status }))}
@@ -1939,6 +2009,8 @@ function SpecificationsScreen({ projectId }: { projectId: string }) {
   const [sourceName, setSourceName] = useState("New schedule");
   const [sourceSheetId, setSourceSheetId] = useState("");
   const [draft, setDraft] = useState<Point[]>([]);
+  const [specTab, setSpecTab] = useState<"pdf" | "ocr">("pdf");
+  const [reextracting, setReextracting] = useState(false);
   useEffect(() => {
     if (!selected && specs[0]) setSelected(specs[0].id);
   }, [selected, specs]);
@@ -2131,6 +2203,7 @@ function SpecificationsScreen({ projectId }: { projectId: string }) {
               key={x.id}
               onClick={() => {
                 setSelected(x.id);
+                setSpecTab(x.found ? "pdf" : "ocr");
                 setMode("select");
                 setDraft([]);
               }}
@@ -2152,17 +2225,23 @@ function SpecificationsScreen({ projectId }: { projectId: string }) {
         </SimpleList>
       }
       center={
-        drawingViewport ? (
+        <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 px-3">
+            <button className={specTab === "pdf" ? plansActiveTool : plansToolClass} disabled={!item.found || !drawingViewport} onClick={() => setSpecTab("pdf")}>PDF</button>
+            <button className={specTab === "ocr" ? plansActiveTool : plansToolClass} onClick={() => setSpecTab("ocr")}>OCR</button>
+            <span className="ml-2 truncate text-xs text-slate-500">{item.found ? `Page ${item.page || "—"} · ${item.name}` : `${item.name} · source not found`}</span>
+            <button disabled={reextracting} onClick={async()=>{setReextracting(true);try{await extractSpecificationsIfNeeded(true);setSelected("");}finally{setReextracting(false);}}} className="ml-auto rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 disabled:text-slate-300">{reextracting ? "Extracting…" : "Re-extract"}</button>
+          </div>
+          <div className="min-h-0 flex-1">
+          {specTab === "pdf" && drawingViewport ? (
           <DemoDrawing
             viewportId={drawingViewport.id}
             tool={mode === "hand" ? "pan" : mode === "add" ? "draw" : "select"}
             onCanvasClick={sourceClick}
             toolbar={toolbar}
-            showFocus={mode !== "add"}
+            showFocus={mode === "select" && Boolean(item.bbox)}
+            focusBox={mode === "select" ? item.bbox : undefined}
           >
-            {mode === "select" && item.found ? (
-              <ViewportEditorOverlay viewportId={item.viewportId} />
-            ) : null}
             {mode === "add" && draft.length ? (
               <circle
                 cx={draft[0].x}
@@ -2176,11 +2255,17 @@ function SpecificationsScreen({ projectId }: { projectId: string }) {
               />
             ) : null}
           </DemoDrawing>
-        ) : (
-          <div className="flex h-full min-h-0 items-center justify-center text-sm text-slate-500">
-            Drawing source is not available.
+          ) : specTab === "ocr" ? (
+            <div className="h-full overflow-auto bg-slate-50 p-6">
+              <div className="mx-auto max-w-5xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600">OCR transcription</p><h3 className="mt-1 text-lg font-semibold text-slate-900">{item.name}</h3></div><span className={item.found ? "rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700" : "rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700"}>{item.found ? "Source found" : "Not found"}</span></div>
+                {item.rawText ? <pre className="mt-5 whitespace-pre-wrap rounded-xl bg-slate-50 p-4 font-sans text-sm leading-6 text-slate-700">{item.rawText}</pre> : <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">No source was found for this expected category.</p>}
+                {item.columns?.length ? <div className="mt-6 overflow-x-auto rounded-xl border border-slate-200"><table className="min-w-full border-collapse text-xs"><thead><tr className="bg-slate-100">{item.columns.map((column,index)=><th key={index} className="border-b border-r border-slate-200 p-2 text-left last:border-r-0">{column || `Column ${index+1}`}</th>)}</tr></thead><tbody>{(item.rows||[]).map((row,rowIndex)=><tr key={rowIndex}>{item.columns!.map((_,columnIndex)=><td key={columnIndex} className="border-b border-r border-slate-100 p-2 align-top last:border-r-0">{row[columnIndex] || ""}</td>)}</tr>)}</tbody></table></div> : null}
+              </div>
+            </div>
+          ) : <div className="flex h-full items-center justify-center text-sm text-slate-500">Drawing source is not available. Open OCR to review the category.</div>}
           </div>
-        )
+        </div>
       }
       right={
         <PreDetailsPanel>
@@ -2238,7 +2323,7 @@ function SpecificationEditor({
   }
   function confirmAllSpecificationsAndContinue() {
     if (dirty) return;
-    pendingSpecifications.filter((specification) => specification.found).forEach((specification) => update(specification.id, { status: "confirmed" }));
+    pendingSpecifications.forEach((specification) => update(specification.id, { status: "confirmed" }));
     setShowContinuePrompt(false);
     router.push(appRoutes.pre(projectId, "start-takeoff"));
   }
@@ -2423,7 +2508,7 @@ function SpecificationEditor({
             Save changes
           </button>
           <button
-            disabled={!item.found || dirty}
+            disabled={dirty}
             onClick={() => save("confirmed")}
             className="h-10 rounded-xl bg-blue-600 text-sm font-semibold text-white disabled:bg-slate-300"
           >
@@ -2443,7 +2528,7 @@ function SpecificationEditor({
         <PreContinueDialog
           pending={[
             ...(dirty ? [{ id: `${item.id}-unsaved`, name: `${item.name} — unsaved changes`, invalid: true }] : []),
-            ...pendingSpecifications.map((specification) => ({ id: specification.id, name: specification.name, invalid: !specification.found })),
+            ...pendingSpecifications.map((specification) => ({ id: specification.id, name: specification.name })),
           ]}
           itemNoun="specification items"
           nextStep="Start takeoff"
@@ -2477,7 +2562,7 @@ function StartScreen({ projectId }: { projectId: string }) {
   const pending = [
     ...pendingPlans.map((item) => ({ id: `plan-${item.id}`, name: `Plans · ${item.name}`, invalid: !item.name.trim() })),
     ...pendingHeights.map((item) => ({ id: `height-${item.id}`, name: `Height · ${item.name}` })),
-    ...pendingSpecifications.map((item) => ({ id: `spec-${item.id}`, name: `Specifications · ${item.name}`, invalid: !item.found })),
+    ...pendingSpecifications.map((item) => ({ id: `spec-${item.id}`, name: `Specifications · ${item.name}` })),
   ];
   async function beginTakeoff() {
     if (pending.length || raw?.readiness.ready === false) { setShowContinuePrompt(true); return; }

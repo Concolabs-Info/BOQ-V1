@@ -14,6 +14,7 @@ from ...services.ai.model_client import get_model_client
 from .prompts import HEIGHT_PROMPT, SYSTEM
 from .scale import parse_length_mm
 from .confirmations import is_confirmed
+from .levels import is_storey_label, rebuild_storey_stack
 
 
 def _round_10mm(value: Decimal) -> int:
@@ -46,6 +47,7 @@ def eligible_sources(project_id: UUID | str) -> list[dict]:
     result = []
     for row in rows:
         scale = confirmed_scale(row["id"])
+        item = {**row, "scale_confirmed": False, "scale_factor": None, "crop_span_mm": None}
         if scale and is_confirmed("scale", scale["id"]):
             checks = scale.get("checks") or {}
             factor_value = checks.get("confirmed_factor") or scale.get("factor_y") or scale.get("factor_x")
@@ -55,12 +57,14 @@ def eligible_sources(project_id: UUID | str) -> list[dict]:
                 top = norm_crop_point_to_page_pt(ctx, 500, 0)
                 bottom = norm_crop_point_to_page_pt(ctx, 500, 1000)
                 crop_span_mm = distance_pt(top, bottom) * 25.4 / 72 * float(factor_value)
-            result.append({
-                **row,
+            item.update({
                 "scale_confirmed": True,
                 "scale_factor": float(factor_value) if factor_value is not None else None,
                 "crop_span_mm": crop_span_mm,
             })
+        # Printed dimensions can be read without a drawing scale.  A confirmed
+        # scale is only needed for the measurement fallback/verification.
+        result.append(item)
     return result
 
 
@@ -77,9 +81,8 @@ def _factor_y(scale: dict) -> Decimal:
 
 def _measure_reading(viewport_id: UUID | str, storeys: list[dict]) -> tuple[list[dict], dict]:
     scale = confirmed_scale(viewport_id)
-    if not scale or not is_confirmed("scale", scale["id"]):
-        raise ValueError("Height source needs a current explicitly confirmed scale")
-    factor = _factor_y(scale)
+    scale = scale if scale and is_confirmed("scale", scale["id"]) else None
+    factor = _factor_y(scale) if scale else None
     crop_path, ctx = ensure_viewport_crop(viewport_id)
     vp = fetch_one("SELECT name, view_kind FROM viewport WHERE id=%s", (str(viewport_id),))
     stack_text = "\n".join(f"{i+1}. {s['name']}" for i, s in enumerate(storeys)) or "(no storeys)"
@@ -90,23 +93,26 @@ def _measure_reading(viewport_id: UUID | str, storeys: list[dict]) -> tuple[list
         top = norm_crop_point_to_page_pt(ctx, 500, band["y_top"])
         bottom = norm_crop_point_to_page_pt(ctx, 500, band["y_bottom"])
         paper_pt = Decimal(str(abs(bottom[1] - top[1])))
-        measured_mm = paper_pt * Decimal("25.4") / Decimal(72) * factor
+        measured_mm = paper_pt * Decimal("25.4") / Decimal(72) * factor if factor is not None else None
         printed_mm = parse_length_mm(band["height_text"])
-        measured_rounded = _round_10mm(measured_mm)
+        measured_rounded = _round_10mm(measured_mm) if measured_mm is not None else None
         printed_rounded = _round_10mm(printed_mm) if printed_mm is not None else None
         agreement = None
-        if printed_mm and printed_mm > 0:
+        if printed_mm and printed_mm > 0 and measured_mm is not None:
             agreement = float(abs(measured_mm - printed_mm) / printed_mm)
-        basis = "printed_and_measured" if printed_mm is not None and agreement is not None and agreement <= 0.01 else "measured"
+        if printed_mm is not None:
+            basis = "printed_and_measured" if agreement is not None and agreement <= 0.02 else "printed_dimension"
+        else:
+            basis = "measured" if measured_mm is not None else "unresolved"
         measured.append({
             **band,
             "measured_mm": measured_rounded,
             "printed_mm": printed_rounded,
             "agreement": agreement,
             "basis": basis,
-            "flagged": agreement is not None and agreement > 0.01,
+            "flagged": agreement is not None and agreement > 0.02,
         })
-    return measured, {"viewport_id": str(viewport_id), "scale_fit_id": str(scale["id"]), "factor": float(factor)}
+    return measured, {"viewport_id": str(viewport_id), "scale_fit_id": str(scale["id"]) if scale else None, "factor": float(factor) if factor is not None else None}
 
 
 
@@ -162,6 +168,10 @@ def suggest_heights(project_id: UUID | str, primary_viewport_id: UUID, supportin
     if supporting_viewport_id and str(supporting_viewport_id) not in eligible:
         raise ValueError("Supporting height source is not an eligible confirmed section/elevation for this project")
     storeys = fetch_all("SELECT * FROM storey WHERE project_id=%s ORDER BY level_index", (str(project_id),))
+    # Early, unconfirmed projects created by older detection could contain
+    # datums/ranges as storeys. Repair that proposal before height matching.
+    if storeys and not any(s.get("status") == "confirmed" for s in storeys) and any(not is_storey_label(s["name"]) for s in storeys):
+        storeys = rebuild_storey_stack(project_id, preserve_existing=False)
     if not storeys:
         raise ValueError("Storey stack is empty")
     primary, primary_meta = _measure_reading(primary_viewport_id, storeys)
@@ -181,13 +191,18 @@ def suggest_heights(project_id: UUID | str, primary_viewport_id: UUID, supportin
             if not band:
                 unresolved.append(sid)
                 continue
-            height_mm = band["printed_mm"] if band["basis"] == "printed_and_measured" and band["printed_mm"] else band["measured_mm"]
+            # Printed floor-to-floor dimensions are primary evidence. A scale
+            # measurement is a fallback and an independent check only.
+            height_mm = band["printed_mm"] or band["measured_mm"]
+            if not height_mm:
+                unresolved.append(sid)
+                continue
             support = supporting_match.get(sid)
             support_delta = None
             support_flag = False
             if support:
-                support_height = support["printed_mm"] if support["basis"] == "printed_and_measured" and support["printed_mm"] else support["measured_mm"]
-                if height_mm:
+                support_height = support["printed_mm"] or support["measured_mm"]
+                if height_mm and support_height:
                     support_delta = abs(support_height - height_mm) / height_mm
                     support_flag = support_delta > 0.01
             evidence = {

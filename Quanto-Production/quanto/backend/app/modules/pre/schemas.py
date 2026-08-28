@@ -134,6 +134,8 @@ class KnownDimensionLine(StrictModel):
 class ScaleReading(StrictModel):
     x_line: KnownDimensionLine | None
     y_line: KnownDimensionLine | None
+    x_candidates: list[KnownDimensionLine] = Field(default_factory=list)
+    y_candidates: list[KnownDimensionLine] = Field(default_factory=list)
 
 
 class StoreyBand(StrictModel):

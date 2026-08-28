@@ -82,7 +82,7 @@ export function PreDrawing({
   const sheet = store.sheets.find(
     (item) => item.id === viewport?.sheetId,
   );
-  const box = viewport?.bbox;
+  const box = focusBox || viewport?.bbox;
   const size = drawingSize(sheet);
 
   const [view, setView] = useState<{ zoom: number; pan: Point }>({

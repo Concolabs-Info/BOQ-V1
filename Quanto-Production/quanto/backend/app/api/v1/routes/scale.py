@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -15,13 +16,22 @@ from ..schemas import ScaleConfirm
 router = APIRouter(tags=["scale"])
 
 
+def _requires_primary_scale(viewport: dict) -> bool:
+    kind = viewport.get("view_kind")
+    if kind in {"elevation", "section"}:
+        return True
+    if kind != "plan":
+        return False
+    return not re.search(r"\b(site|location|key)\s+plan\b", viewport.get("name") or "", re.I)
+
+
 @router.post("/viewports/{viewport_id}/scale/suggest")
 def suggest(viewport_id: UUID):
-    viewport = fetch_one("SELECT view_kind FROM viewport WHERE id=%s", (str(viewport_id),))
+    viewport = fetch_one("SELECT view_kind,name FROM viewport WHERE id=%s", (str(viewport_id),))
     if not viewport:
         raise HTTPException(404, "Viewport not found")
-    if viewport["view_kind"] == "notes":
-        raise HTTPException(409, "Notes are specification evidence and do not require scale")
+    if not _requires_primary_scale(viewport):
+        raise HTTPException(409, "This viewport is not part of the primary scale workflow")
     pid = project_for_viewport(viewport_id)
     if pid:
         try: ensure_project_mutable(pid)
@@ -41,8 +51,8 @@ def set_scale(viewport_id: UUID, body: ScaleConfirm):
     viewport = fetch_one("SELECT * FROM viewport WHERE id=%s", (str(viewport_id),))
     if not viewport:
         raise HTTPException(404, "Viewport not found")
-    if viewport["view_kind"] == "notes":
-        raise HTTPException(409, "Notes are specification evidence and do not require scale")
+    if not _requires_primary_scale(viewport):
+        raise HTTPException(409, "This viewport is not part of the primary scale workflow")
 
     if body.mode == "manual":
         if not body.p1 or not body.p2 or not body.real_distance:
@@ -74,7 +84,7 @@ def set_scale(viewport_id: UUID, body: ScaleConfirm):
     if fit["crop_version"] != viewport["crop_version"]:
         raise HTTPException(409, "Scale suggestion is stale because the viewport changed")
     checks = dict(fit.get("checks") or {})
-    if checks.get("anisotropy_refused"):
+    if checks.get("anisotropy_refused") and body.axis != "printed":
         raise HTTPException(409, "X/Y scale evidence is anisotropic; calibrate or choose validated evidence explicitly")
 
     factor = Decimal(str(body.chosen_factor)) if body.chosen_factor is not None else None

@@ -1,6 +1,7 @@
 from decimal import Decimal
 
-from app.modules.pre.scale import parse_length_mm, parse_normalized_ratio, parse_scale_note, roundness_score
+from app.modules.pre.scale import parse_length_mm, parse_normalized_ratio, parse_scale_note, parse_word_scale, roundness_score
+from app.api.v1.routes.scale import _requires_primary_scale
 
 
 def test_metric_and_imperial_lengths():
@@ -30,9 +31,26 @@ def test_plain_text_only_uses_normalized_ratio():
     assert rejected["status"] == "unparseable"
 
 
+def test_written_imperial_scale_variants():
+    assert parse_word_scale("SCALE: EIGHT FEET TO AN INCH") == Decimal("96")
+    assert parse_word_scale("one inch equals eight feet") == Decimal("96")
+    assert parse_word_scale("half inch to one foot") == Decimal("24")
+    parsed = parse_scale_note({"kind": "plain_text", "text": "TWO FEET TO AN INCH", "normalized_ratio": None})
+    assert parsed["factor"] == Decimal("24")
+
+
 def test_non_numeric_scale_kinds():
     for kind in ("graphic", "as_indicated", "not_to_scale"):
         assert parse_scale_note({"kind": kind, "text": kind, "normalized_ratio": None})["status"] == "non_numeric"
+
+
+def test_primary_scale_workflow_eligibility():
+    assert _requires_primary_scale({"view_kind": "plan", "name": "First Floor Plan"})
+    assert _requires_primary_scale({"view_kind": "section", "name": "Section A-A"})
+    assert _requires_primary_scale({"view_kind": "elevation", "name": "Front Elevation"})
+    assert not _requires_primary_scale({"view_kind": "detail", "name": "Column Footing Detail"})
+    assert not _requires_primary_scale({"view_kind": "plan", "name": "Site Plan"})
+    assert not _requires_primary_scale({"view_kind": "notes", "name": "General Notes"})
 
 
 def test_roundness_score_is_supplementary():

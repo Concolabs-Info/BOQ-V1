@@ -39,13 +39,14 @@ Return only facts visible on this page. Coordinates are 0-1000 across the full p
 
 SCALE_PROMPT = r'''This image is one viewport from a construction sheet. Its printed scale was already read in an earlier stage; do not find or report a scale note.
 
-Find at most TWO known dimension lines:
-- x_line: one clear HORIZONTAL dimension line, if present.
-- y_line: one clear VERTICAL dimension line, if present.
+Find several known dimension-line candidates, ordered strongest first:
+- x_candidates: up to FIVE clear HORIZONTAL dimension lines.
+- y_candidates: up to FIVE clear VERTICAL dimension lines.
+- x_line/y_line: repeat the strongest candidate for each axis, or null.
 
 A known dimension line has a printed dimension value and arrowheads or extension lines that identify exactly what that value measures. Copy text EXACTLY as printed, including feet, inch marks and fractions. Do not convert or simplify.
 
-Set x1,y1,x2,y2 at arrowhead tips or corresponding extension-line intersections. Do not use the text bounding box. Prefer a long, clean, unambiguous line; return null for an axis when none is reliable.
+Set x1,y1,x2,y2 at arrowhead tips or corresponding extension-line intersections. Do not use the text bounding box. Prefer long, clean, unambiguous lines. Do not repeat the same dimension. Return an empty candidate list and null strongest line when an axis has no reliable evidence.
 
 Do not compute anything. Coordinates are 0-1000 across this crop, top-left origin.
 '''
@@ -55,10 +56,16 @@ HEIGHT_PROMPT = r'''This image is the user-selected {source_kind} source for a b
 Expected storeys, bottom to top:
 {storey_stack}
 
-Find every STOREY BAND — the vertical space between one floor level and the next. Working top to bottom, report:
+Find every STOREY BAND — the vertical space between two ADJACENT structural floor level lines. Working top to bottom, report:
 - y_top and y_bottom: the y of the two floor lines bounding the band.
 - label: the storey name exactly as printed, or null.
-- height_text: the floor-to-floor height exactly as printed, including feet and inch marks, or null.
+- height_text: the vertical floor-to-floor dimension exactly as printed, including feet and inch marks, or null.
+
+IMPORTANT:
+- A level datum such as +80'-6", +13'-6", RL 24.50 or FFL 3.300 is an elevation, NOT a floor-to-floor height.
+- A horizontal room/grid dimension is NOT a storey height.
+- Text such as "UPTO ROOF TERRACE" or "2ND, 3RD, 4TH..." is a range/annotation, NOT one storey band.
+- Prefer explicit vertical dimensions between adjacent slabs/level lines. Do not reuse one value for several bands unless the drawing explicitly marks them as typical.
 
 Report bands top to bottom. Include every visible band, including basement or parapet bands. The expected storeys are context only; do not invent bands.
 Do not compute or convert a height. Coordinates are 0-1000 across this crop, top-left origin.
@@ -72,6 +79,10 @@ For each block report kind, name, topic, raw_text, table and box according to th
 - carefully retain material grades, strengths, mixes, thicknesses and sizes.
 - do not summarise, paraphrase, round or convert.
 - title-block administrative fields are not specification unless the title block contains specification content.
+- Emit each physical source block exactly ONCE. Do not emit both a whole section and its child headings as overlapping duplicate items.
+- Do not report ordinary floor-level labels, room names, grid labels, drawing titles or isolated dimensions as specification items.
+- A level datum or unit area is relevant only when it is presented as a dedicated schedule/table or specification block, not when repeated around a plan/elevation.
+- Boxes must tightly contain only the reported text/table region. Never use the whole page when a smaller source region exists.
 
 Coordinates are 0-1000 across this full-page image, top-left origin.
 '''

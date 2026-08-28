@@ -26,6 +26,14 @@ UNICODE_FRACTIONS = {
     "⅛": Decimal("0.125"), "⅜": Decimal("0.375"), "⅝": Decimal("0.625"), "⅞": Decimal("0.875"),
 }
 
+WORD_NUMBERS = {
+    "a": Decimal(1), "an": Decimal(1), "one": Decimal(1), "two": Decimal(2),
+    "three": Decimal(3), "four": Decimal(4), "five": Decimal(5), "six": Decimal(6),
+    "seven": Decimal(7), "eight": Decimal(8), "nine": Decimal(9), "ten": Decimal(10),
+    "eleven": Decimal(11), "twelve": Decimal(12), "half": Decimal("0.5"),
+    "quarter": Decimal("0.25"), "eighth": Decimal("0.125"),
+}
+
 
 def _number(text: str) -> Decimal | None:
     s = text.strip().replace(" ", "")
@@ -64,6 +72,38 @@ def parse_normalized_ratio(text: str | None) -> Decimal | None:
         return None
 
 
+def _word_number(text: str) -> Decimal | None:
+    words = re.sub(r"[^a-z0-9./]+", " ", text.lower()).strip().split()
+    if not words:
+        return None
+    if len(words) == 1 and words[0] in WORD_NUMBERS:
+        return WORD_NUMBERS[words[0]]
+    if len(words) == 2 and words[0] in {"one", "a", "an"} and words[1] in {"half", "quarter", "eighth"}:
+        return WORD_NUMBERS[words[1]]
+    return _number("".join(words))
+
+
+def parse_word_scale(text: str | None) -> Decimal | None:
+    """Parse common written imperial scales into a dimensionless 1:N factor."""
+    if not text:
+        return None
+    value = re.sub(r"\bscale\b\s*:?", "", text.lower()).replace("-", " ")
+    # "eight feet to an inch" / "two feet per inch"
+    match = re.search(r"([a-z0-9./ ]+?)\s+(?:foot|feet)\s+(?:to|per)\s+(?:one|an?|1)\s+inch", value)
+    if match:
+        real_feet = _word_number(match.group(1))
+        if real_feet and real_feet > 0:
+            return real_feet * Decimal(12)
+    # "half inch to one foot" / "one inch equals eight feet"
+    match = re.search(r"([a-z0-9./ ]+?)\s+inch(?:es)?\s+(?:to|equals?|=)\s+([a-z0-9./ ]+?)\s+(?:foot|feet)", value)
+    if match:
+        drawing_inches = _word_number(match.group(1))
+        real_feet = _word_number(match.group(2))
+        if drawing_inches and real_feet and drawing_inches > 0 and real_feet > 0:
+            return real_feet * Decimal(12) / drawing_inches
+    return None
+
+
 def parse_length_mm(text: str | None) -> Decimal | None:
     if not text:
         return None
@@ -85,6 +125,20 @@ def parse_length_mm(text: str | None) -> Decimal | None:
         value = Decimal(unit_match.group(1))
         unit = unit_match.group(2).lower()
         return value * {"mm": Decimal(1), "cm": Decimal(10), "m": Decimal(1000)}[unit]
+    # OCR/model variants: "11 ft 6 in", "11 feet 6 inches", "3 300 mm".
+    words = re.sub(r"\s+", " ", s.lower().replace(",", "")).strip()
+    imperial = re.fullmatch(
+        r"([0-9.]+)\s*(?:ft|foot|feet)\s*(?:[- ]\s*([0-9./]+)\s*(?:in|inch|inches))?",
+        words,
+    )
+    if imperial:
+        feet = Decimal(imperial.group(1))
+        inches = _number(imperial.group(2) or "0")
+        return (feet * 12 + inches) * Decimal("25.4") if inches is not None else None
+    spaced_metric = re.fullmatch(r"([0-9 ]+(?:\.[0-9]+)?)\s*(mm|cm|m)", words)
+    if spaced_metric:
+        value = Decimal(spaced_metric.group(1).replace(" ", ""))
+        return value * {"mm": Decimal(1), "cm": Decimal(10), "m": Decimal(1000)}[spaced_metric.group(2)]
     # construction dimension strings without a unit are treated as millimetres.
     if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", s):
         return Decimal(s)
@@ -104,7 +158,7 @@ def parse_scale_note(note: dict | None) -> dict:
             return {"kind": kind, "factor": None, "status": "unparseable"}
         factor = parse_normalized_ratio(text)
     elif kind == ScaleKind.PLAIN_TEXT.value:
-        factor = parse_normalized_ratio(normalized)
+        factor = parse_normalized_ratio(normalized) or parse_word_scale(text)
     elif kind == ScaleKind.IMPERIAL_ARCHITECTURAL.value:
         # example: 1/8" = 1'-0"
         if normalized is not None:
@@ -193,6 +247,75 @@ def _axis_factor(snap: dict | None) -> tuple[Decimal | None, dict]:
     return factor, {**snap, "usable": True, "real_length_mm": float(real_mm), "factor": float(factor)}
 
 
+def _proposal_factor(ctx: dict, line: dict, printed: Decimal | None) -> tuple[Decimal | None, dict]:
+    proposal = [line["x1"], line["y1"], line["x2"], line["y2"]]
+    evidence = {"proposed_norm": proposal, "text": line["text"], "usable": False, "reason": "No local vector snap"}
+    if printed is None:
+        return None, evidence
+    real_mm = parse_length_mm(line["text"])
+    if real_mm is None:
+        return None, {**evidence, "reason": "Dimension text could not be parsed"}
+    p1 = norm_crop_point_to_page_pt(ctx, line["x1"], line["y1"])
+    p2 = norm_crop_point_to_page_pt(ctx, line["x2"], line["y2"])
+    paper_pt = Decimal(str(hypot(p2[0] - p1[0], p2[1] - p1[1])))
+    if paper_pt <= 0:
+        return None, {**evidence, "reason": "Proposed dimension line has zero length"}
+    paper_mm = paper_pt * Decimal("25.4") / Decimal(72)
+    factor = real_mm / paper_mm
+    deviation = abs(factor - printed) / printed
+    details = {
+        **evidence,
+        "proposed_page_points": [p1, p2],
+        "paper_length_pt": float(paper_pt),
+        "real_length_mm": float(real_mm),
+        "factor": float(factor),
+        "deviation_from_printed": float(deviation),
+        "validation": "vision_endpoints_against_printed_scale",
+    }
+    # Vision endpoints are secondary evidence. Accept them only when the
+    # independently parsed dimension and printed scale agree closely.
+    if deviation <= Decimal("0.05"):
+        return factor, {**details, "usable": True, "reason": "Agrees with printed scale within 5%"}
+    return None, {**details, "reason": "Vision endpoints do not agree with printed scale"}
+
+
+def _unique_candidates(primary: dict | None, candidates: list[dict]) -> list[dict]:
+    result: list[dict] = []
+    seen: set[tuple] = set()
+    for line in ([primary] if primary else []) + candidates:
+        key = (line["text"].strip().lower(), line["x1"], line["y1"], line["x2"], line["y2"])
+        if key not in seen:
+            seen.add(key)
+            result.append(line)
+    return result[:5]
+
+
+def _select_axis_candidate(ctx: dict, candidates: list[dict], axis: str, printed: Decimal | None) -> tuple[Decimal | None, dict]:
+    evaluated: list[tuple[Decimal | None, dict]] = []
+    for line in candidates:
+        snap = _snap_dimension_line(ctx, line, axis)
+        factor, check = _axis_factor(snap)
+        if snap is None:
+            factor, check = _proposal_factor(ctx, line, printed)
+        if factor is not None and printed is not None:
+            check["deviation_from_printed"] = float(abs(factor - printed) / printed)
+        evaluated.append((factor, check))
+    usable = [(factor, check) for factor, check in evaluated if factor is not None and check.get("usable")]
+    if usable:
+        def rank(item: tuple[Decimal | None, dict]) -> tuple[float, float]:
+            _, check = item
+            deviation = float(check.get("deviation_from_printed", 0 if printed is None else 999))
+            residual = float(check.get("snap_residual_pt", 999))
+            return deviation, residual
+        factor, selected = min(usable, key=rank)
+    elif evaluated:
+        factor, selected = evaluated[0]
+    else:
+        factor, selected = None, {"usable": False, "reason": "No dimension candidate detected"}
+    selected = {**selected, "candidates": [check for _, check in evaluated]}
+    return factor, selected
+
+
 def roundness_score(factor: Decimal | float, sample_lengths_pt: list[float], unit: str) -> Decimal:
     """Supplementary drafting-precision evidence. Never used as a confirmation gate."""
     value = Decimal(str(factor))
@@ -239,13 +362,12 @@ def suggest_scale(viewport_id: UUID | str) -> dict:
     crop_path, ctx = ensure_viewport_crop(viewport_id)
     reading = get_model_client().parse_image(Path(crop_path), SCALE_PROMPT, ScaleReading, system=SYSTEM)
     raw = reading.model_dump(mode="json")
-    sx = _snap_dimension_line(ctx, raw["x_line"], "x") if raw["x_line"] else None
-    sy = _snap_dimension_line(ctx, raw["y_line"], "y") if raw["y_line"] else None
-    factor_x, check_x = _axis_factor(sx)
-    factor_y, check_y = _axis_factor(sy)
-
     parsed = parse_scale_note(ctx.get("stated_scale") or ctx.get("title_block_scale"))
     printed = parsed["factor"]
+    x_candidates = _unique_candidates(raw["x_line"], raw.get("x_candidates") or [])
+    y_candidates = _unique_candidates(raw["y_line"], raw.get("y_candidates") or [])
+    factor_x, check_x = _select_axis_candidate(ctx, x_candidates, "x", printed)
+    factor_y, check_y = _select_axis_candidate(ctx, y_candidates, "y", printed)
     anisotropy: Decimal | None = None
     stretched = False
     if factor_x is not None and factor_y is not None:
@@ -255,14 +377,13 @@ def suggest_scale(viewport_id: UUID | str) -> dict:
     def agrees(value: Decimal | None, reference: Decimal | None) -> bool:
         return bool(value is not None and reference is not None and abs(value - reference) / reference <= TOLERANCE)
 
-    if stretched:
-        recommendation = "NEEDS_CHOICE"
-    elif printed is not None and factor_x is not None and factor_y is not None and agrees(factor_x, printed) and agrees(factor_y, printed):
+    if printed is not None and factor_x is not None and factor_y is not None and agrees(factor_x, printed) and agrees(factor_y, printed):
         recommendation = "PRINTED_AGREES"
     elif printed is None and factor_x is not None and factor_y is not None and abs(factor_x - factor_y) / factor_x <= TOLERANCE:
         recommendation = "XY_DERIVED"
     else:
         recommendation = "NEEDS_CHOICE"
+    anisotropy_refused = stretched and recommendation != "PRINTED_AGREES"
 
     if printed is not None and printed > 0:
         if factor_x is not None:
@@ -277,7 +398,7 @@ def suggest_scale(viewport_id: UUID | str) -> dict:
         "printed": {"status": parsed["status"], "factor": float(printed) if printed is not None else None, "note": ctx.get("stated_scale") or ctx.get("title_block_scale")},
         "x": check_x,
         "y": check_y,
-        "anisotropy_refused": stretched,
+        "anisotropy_refused": anisotropy_refused,
         "requires_human_calibration": factor_x is None and factor_y is None,
     }
     with transaction() as conn:
