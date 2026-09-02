@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type SVGProps } from "react";
+import { useEffect, useState, type ReactElement, type SVGProps } from "react";
 import { PlatformShell } from "@/features/platform/components/PlatformShell";
 import { getCachedDashboardSummary, getDashboardSummary, type DashboardSummary } from "@/features/platform/services/platformService";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
@@ -75,7 +75,7 @@ export function DashboardPage() {
   );
 }
 
-function DashboardCard({ title, href, action, icon: Icon, compact = false }: { title: string; href: string; action: string; icon: (props: SVGProps<SVGSVGElement>) => JSX.Element; compact?: boolean }) {
+function DashboardCard({ title, href, action, icon: Icon, compact = false }: { title: string; href: string; action: string; icon: (props: SVGProps<SVGSVGElement>) => ReactElement; compact?: boolean }) {
   return (
     <Link href={href} className={`${compact ? "min-h-[150px]" : "min-h-[220px]"} group flex flex-col items-center justify-center gap-4 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md`}>
       <span className={compact ? "h-14 w-14" : "h-24 w-24"}><Icon className="h-full w-full transition group-hover:scale-105" /></span>

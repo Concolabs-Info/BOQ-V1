@@ -5,7 +5,8 @@ import { SpecificationsStage } from "@/features/pre/specifications";
 import { StartTakeoffStage } from "@/features/pre/start-takeoff";
 import { UploadStage } from "@/features/pre/upload";
 
-export default function Page({ params }: { params: { projectId: string; step: string } }) {
+export default async function Page(props0: { params: Promise<{ projectId: string; step: string }> }) {
+  const params = await props0.params;
   const props = { projectId: params.projectId };
 
   switch (params.step) {
