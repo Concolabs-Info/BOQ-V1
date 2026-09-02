@@ -7,9 +7,14 @@ from pydantic import BaseModel, ConfigDict
 from ....database.connection import fetch_all, fetch_one
 from ....modules.takeoff.floors import (
     analyze_floor,
-    analyze_project_floors,
     floor_demo_state,
     save_floor_demo_state,
+    start_floor_analysis,
+)
+from ....services.ai.codex_account import (
+    codex_account_status,
+    logout_codex_account,
+    start_codex_account_login,
 )
 from ....modules.takeoff.common import ensure_takeoff_floors
 
@@ -39,18 +44,56 @@ def put_demo_state(project_id: UUID, body: DemoStateBody):
         raise HTTPException(409, str(exc)) from exc
 
 
-@router.post("/projects/{project_id}/takeoff/floor/analyze")
-def analyze_all(project_id: UUID, quality: str = Query(default="medium", pattern="^(easy|medium|expert|maximum)$")):
+@router.get("/projects/{project_id}/takeoff/floor/auth")
+def floor_auth_status(project_id: UUID):
+    # Project id is intentionally part of the route so the Floor workspace can
+    # keep one consistent project-scoped API surface. Codex auth itself is the
+    # local machine/session account and is never copied into project storage.
+    del project_id
+    return codex_account_status(refresh=True)
+
+
+@router.post("/projects/{project_id}/takeoff/floor/auth/login")
+def floor_auth_login(project_id: UUID):
+    del project_id
     try:
-        return analyze_project_floors(project_id, quality)
+        return start_codex_account_login()
+    except (ValueError, RuntimeError, TypeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/takeoff/floor/auth/logout")
+def floor_auth_logout(project_id: UUID):
+    del project_id
+    try:
+        return logout_codex_account()
+    except (ValueError, RuntimeError, TypeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/takeoff/floor/analyze")
+def analyze_all(
+    project_id: UUID,
+    quality: str = Query(default="medium", pattern="^(easy|medium|expert|maximum)$"),
+    force: bool = Query(default=False),
+):
+    try:
+        # Match Beams: starting detection is quick; the project worker continues
+        # in the background and demo-state exposes durable progress/results.
+        return start_floor_analysis(project_id, quality, force=force)
     except (ValueError, RuntimeError, TypeError) as exc:
         raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/projects/{project_id}/takeoff/floor/{floor_id}/analyze")
-def analyze_one(project_id: UUID, floor_id: UUID, quality: str = Query(default="medium", pattern="^(easy|medium|expert|maximum)$")):
+def analyze_one(
+    project_id: UUID,
+    floor_id: UUID,
+    quality: str = Query(default="medium", pattern="^(easy|medium|expert|maximum)$"),
+    force: bool = Query(default=False),
+):
     try:
-        return analyze_floor(project_id, floor_id, quality)
+        return analyze_floor(project_id, floor_id, quality, force=force)
     except (ValueError, RuntimeError, TypeError) as exc:
         raise HTTPException(409, str(exc)) from exc
 

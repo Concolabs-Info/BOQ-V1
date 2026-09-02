@@ -150,6 +150,8 @@ export type FloorWorkRoom = {
   geometry: { points: Point[] };
   display_polygon?: { points: Point[] };
   area_m2: number | null;
+  geometry_status: string;
+  source_evidence?: Array<{ kind: string; text?: string | null; confidence?: number; support_ratio?: number; wall_overlap_ratio?: number }>;
   assignments: FloorWorkAssignment[];
   zones: FloorWorkZone[];
   evidence: FloorWorkEvidence[];

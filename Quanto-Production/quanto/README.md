@@ -21,7 +21,7 @@ Ceiling → Dimension | Workbook | 3D
 Roof    → Dimension | Workbook | 3D
 ```
 
-Columns, Beams, Slab, Doors & Windows, Walls, Stairs & Ramps and Foundation now have production Scope definitions, while their later Bind/Detect/measurement workspaces remain in the existing project for later implementation. Review and BOQ remain unchanged. The Projects library is the application entry point and can be reached again from the workflow navigation.
+All planned elements have deterministic production Scope definitions. Floors, Ceilings, Walls, Doors, Windows, Roofs, Stairs and Ramps run through the shared durable element harness and display detected editable geometry, lifecycle gates and review results in Takeoff. Beams, Columns, Slab and Foundation retain their established production execution paths. Confirmed target-element quantities feed the BOQ with ownership and failure safeguards. The Projects library is the application entry point and can be reached again from the workflow navigation.
 
 ## What is production-backed now
 
@@ -114,6 +114,8 @@ Quanto/
 │       │       ├── floors.py
 │       │       ├── ceilings.py
 │       │       ├── roofs.py
+│       │       ├── walls.py
+│       │       ├── stairs_ramps.py
 │       │       ├── model_schemas.py
 │       │       └── prompts.py
 │       └── services/
@@ -122,6 +124,8 @@ Quanto/
 │   ├── schema/002_floor_ceiling.sql
 │   ├── schema/003_roof.sql
 │   ├── schema/004_takeoff_scope.sql
+│   ├── schema/007_walls.sql
+│   ├── schema/008_stairs_ramps.sql
 │   └── migrations/
 ├── storage/                          # plan-defined local project storage
 ├── shared/
@@ -147,37 +151,19 @@ The database must already exist:
 CREATE DATABASE quanto;
 ```
 
-Apply schemas from the repository root. If `psql` is on PATH:
-
-```powershell
-psql -U postgres -d quanto -f ".\database\schema\001_pre.sql"
-psql -U postgres -d quanto -f ".\database\schema\002_floor_ceiling.sql"
-psql -U postgres -d quanto -f ".\database\schema\003_roof.sql"
-psql -U postgres -d quanto -f ".\database\schema\004_takeoff_scope.sql"
-```
-
-If PostgreSQL is installed on E: and is not on PATH, use the full executable path, for example:
-
-```powershell
-& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\001_pre.sql"
-& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\002_floor_ceiling.sql"
-& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\003_roof.sql"
-& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\004_takeoff_scope.sql"
-```
-
-All schema files are written to be safe for the intended upgrade path. A fresh database should apply `001` through `004` in order.
-
-For an existing database that already has Pre + Floor + Ceiling + Roof, apply the new Scope migration:
-
-```powershell
-& "E:\Softwares\PostgreSQL-17\bin\psql.exe" -U postgres -d quanto -f ".\database\schema\004_takeoff_scope.sql"
-```
-
-Or run all idempotent migrations with:
+Apply the numbered migrations from the repository root. The migration script is the recommended path because it keeps existing databases current through Scope, Walls and Stairs/Ramps. If PostgreSQL is installed on E:, run:
 
 ```powershell
 .\infrastructure\scripts\migrations\apply-windows.ps1 -PsqlPath "E:\Softwares\PostgreSQL-17\bin\psql.exe"
 ```
+
+If `psql` is already on PATH:
+
+```powershell
+.\infrastructure\scripts\migrations\apply-windows.ps1
+```
+
+The script applies every file in `database/migrations` in numeric order, including `007_walls.sql`, `008_stairs_ramps.sql`, `009_doors_windows.sql`, `010_columns.sql` and `011_element_harness.sql`.
 
 ### 2. Environment
 
@@ -351,6 +337,6 @@ The package was verified with the backend test suite (including Scope registry/A
 
 ## Docker / deployment
 
-Docker remains optional. `docker-compose.yml` initializes `001_pre.sql`, `002_floor_ceiling.sql`, `003_roof.sql` and `004_takeoff_scope.sql` for a fresh database.
+Docker remains optional. `docker-compose.yml` initializes the current production database chain for a fresh database: Pre, Floor/Ceiling, Roof, Scope history/current-state constraints, Walls and Stairs/Ramps.
 
-For deployment, keep PostgreSQL persistent and keep the plan-defined `STORAGE_ROOT` persistent. Scope manifests/questions/fact sets and Floor/Ceiling/Roof records are stored in PostgreSQL while original PDFs/renders/crops stay in project storage.
+For deployment, keep PostgreSQL persistent and keep the plan-defined `STORAGE_ROOT` persistent. Scope and Takeoff production records are stored in PostgreSQL while original PDFs/renders/crops and persisted analysis artifacts stay in project storage.

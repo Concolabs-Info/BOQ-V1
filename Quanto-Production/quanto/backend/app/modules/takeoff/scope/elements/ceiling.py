@@ -1,4 +1,4 @@
-from ..models import ElementScopeSpec
+from ..models import ElementScopeSpec, FactDependency
 
 SCOPE_SPEC = ElementScopeSpec(
     key="ceiling",
@@ -14,4 +14,5 @@ SCOPE_SPEC = ElementScopeSpec(
     require_vertical_evidence=True,
     require_storey_height=True,
     floor_geometry_fallback=True,
+    dependencies=(FactDependency("floor_geometry", "floor", required=False),),
 )

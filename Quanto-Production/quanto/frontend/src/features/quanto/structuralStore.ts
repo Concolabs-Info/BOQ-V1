@@ -67,6 +67,7 @@ type StructuralState = {
   beamFamilies: BeamFamily[];
   beams: BeamRun[];
   beamDataSource: "demo" | "production";
+  columnDataSource: "demo" | "production";
   slabFamilies: SlabFamily[];
   slabPlates: SlabPlate[];
   selectedId: string | null;
@@ -82,6 +83,7 @@ type StructuralState = {
   updateColumn: (id: string, patch: Partial<ColumnInstance>) => void;
   addColumn: (item: ColumnInstance) => void;
   deleteColumn: (id: string) => void;
+  replaceColumnData: (families: ColumnFamily[], columns: ColumnInstance[]) => void;
   updateBeam: (id: string, patch: Partial<BeamRun>) => void;
   addBeam: (item: BeamRun) => void;
   deleteBeam: (id: string) => void;
@@ -155,6 +157,7 @@ export const useStructuralStore = create<StructuralState>()(
       selectedId: null,
       selectedIds: [],
       beamDataSource: "demo",
+      columnDataSource: "demo",
       workbookOverrides: {},
       workbookConfirmed: {},
       geometryUndo: [],
@@ -278,6 +281,20 @@ export const useStructuralStore = create<StructuralState>()(
           selectedIds: s.selectedIds.filter((value) => value !== id),
         }));
       },
+      replaceColumnData: (families, columns) =>
+        set((s) => ({
+          columnFamilies: clone(families),
+          columns: clone(columns),
+          columnDataSource: "production",
+          selectedId: columns.some((column) => column.id === s.selectedId) ? s.selectedId : null,
+          selectedIds: s.selectedIds.filter((id) => columns.some((column) => column.id === id)),
+          workbookOverrides: Object.fromEntries(
+            Object.entries(s.workbookOverrides).filter(([key]) => !key.startsWith("columns:")),
+          ),
+          workbookConfirmed: Object.fromEntries(
+            Object.entries(s.workbookConfirmed).filter(([key]) => !key.startsWith("columns:")),
+          ),
+        })),
       updateBeam: (id, patch) => {
         const original = get().beams.find((x) => x.id === id);
         if (
@@ -588,6 +605,7 @@ export const useStructuralStore = create<StructuralState>()(
           selectedId: null,
           selectedIds: [],
           beamDataSource: "demo",
+          columnDataSource: "demo",
           workbookOverrides: {},
           workbookConfirmed: {},
           geometryUndo: [],
@@ -596,7 +614,7 @@ export const useStructuralStore = create<StructuralState>()(
     }),
     {
       name: "quanto-structural-demo-v1",
-      version: 12,
+      version: 13,
       partialize: (state) => {
         const { geometryUndo: _geometryUndo, geometryRedo: _geometryRedo, ...persisted } = state;
         return persisted;
@@ -608,6 +626,7 @@ export const useStructuralStore = create<StructuralState>()(
           geometryUndo: [],
           geometryRedo: [],
           beamDataSource: state.beamDataSource || "demo",
+          columnDataSource: state.columnDataSource || "demo",
           columns: (state.columns || []).filter((column) => !legacyColumnIds.has(column.id)),
           beams: (state.beams || []).filter((beam) => !legacyBeamIds.has(beam.id)),
           slabPlates: mergeDetectedSectionSlabs(
@@ -631,10 +650,12 @@ export const useStructuralStore = create<StructuralState>()(
         return {
           ...current,
           ...state,
-          columnFamilies: [
-            ...current.columnFamilies,
-            ...(state.columnFamilies || []).filter((item) => !legacyColumnFamilies.has(item.id) && !current.columnFamilies.some((builtIn) => builtIn.id === item.id)),
-          ],
+          columnFamilies: state.columnDataSource === "production"
+            ? clone(state.columnFamilies || [])
+            : [
+                ...current.columnFamilies,
+                ...(state.columnFamilies || []).filter((item) => !legacyColumnFamilies.has(item.id) && !current.columnFamilies.some((builtIn) => builtIn.id === item.id)),
+              ],
           beamFamilies: state.beamDataSource === "production"
             ? clone(state.beamFamilies || [])
             : [
@@ -642,7 +663,9 @@ export const useStructuralStore = create<StructuralState>()(
                 ...(state.beamFamilies || []).filter((item) => !legacyBeamFamilies.has(item.id) && !current.beamFamilies.some((builtIn) => builtIn.id === item.id)),
               ],
           slabFamilies: mergeSeeded((state.slabFamilies || []).filter((item) => !legacySlabFamilies.has(item.id)), current.slabFamilies, ["mark","description","thicknessMm","falls","source"]),
-          columns: mergeSeeded((state.columns || []).filter((column) => !legacyColumnIds.has(column.id)), current.columns, ["familyId","floorId","viewportId","bbox","heightM","status"]),
+          columns: state.columnDataSource === "production"
+            ? clone(state.columns || [])
+            : mergeSeeded((state.columns || []).filter((column) => !legacyColumnIds.has(column.id)), current.columns, ["familyId","floorId","viewportId","bbox","heightM","status"]),
           beams: state.beamDataSource === "production"
             ? clone(state.beams || [])
             : mergeSeeded((state.beams || []).filter((beam) => !legacyBeamIds.has(beam.id)), current.beams, ["familyId","floorId","viewportId","start","end","kind","dropMm","status"]),

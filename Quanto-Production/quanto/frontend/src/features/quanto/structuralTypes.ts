@@ -13,6 +13,14 @@ export type ColumnFamily = {
   diameterMm?: number;
   source: string;
   color: string;
+  // Production Column-engine evidence. Optional so the existing editor remains compatible.
+  sourceShape?: string | null;
+  material?: string | null;
+  concreteGrade?: string | null;
+  reinforcementDescription?: string | null;
+  reinforcementRateKgPerM3?: number | null;
+  reinforcementKgPerColumn?: number | null;
+  nrmWorkSection?: string | null;
 };
 
 export type ColumnInstance = {
@@ -26,6 +34,18 @@ export type ColumnInstance = {
   diameterOverrideMm?: number;
   heightM: number;
   status: DemoStatus;
+  // Production Column-engine fields.
+  takeoffFloorId?: string;
+  columnMark?: string | null;
+  shape?: string | null;
+  rotationDegrees?: number | null;
+  sectionSource?: string | null;
+  heightSource?: string | null;
+  concreteVolumeM3?: number | null;
+  formworkAreaM2?: number | null;
+  reinforcementKg?: number | null;
+  reinforcementSource?: string | null;
+  confidence?: number | null;
 };
 
 export type BeamFamily = {

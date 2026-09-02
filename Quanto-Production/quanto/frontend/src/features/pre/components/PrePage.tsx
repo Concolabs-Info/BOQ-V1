@@ -537,7 +537,7 @@ function PlansScreen({ projectId }: { projectId: string }) {
     }
     return `${viewportGroupLabels[category as keyof typeof viewportGroupLabels] || "Drawings"} › ${names.join(" › ")}`;
   }
-  function useNewSection() {
+  function handleNewSection() {
     const nextName = newSectionName.trim();
     if (!nextName) return;
     setName(nextName);
@@ -780,7 +780,7 @@ function PlansScreen({ projectId }: { projectId: string }) {
                         value={newSectionName}
                         onChange={(event) => setNewSectionName(event.target.value)}
                         onKeyDown={(event) => {
-                          if (event.key === "Enter") useNewSection();
+                          if (event.key === "Enter") handleNewSection();
                         }}
                         placeholder="Section name"
                       />
@@ -794,7 +794,7 @@ function PlansScreen({ projectId }: { projectId: string }) {
                         </button>
                         <button
                           type="button"
-                          onClick={useNewSection}
+                          onClick={handleNewSection}
                           className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white"
                         >
                           Add section

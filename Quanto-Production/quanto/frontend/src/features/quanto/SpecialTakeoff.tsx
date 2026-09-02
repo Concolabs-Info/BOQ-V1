@@ -95,11 +95,14 @@ function SpecialDimension({
   const router = useRouter();
   const demo = useDemoStore(),
     st = useSpecialStore();
-  const allowed = viewports[element];
+  const productionStairViewports = element === "stairs-ramps" && demo.viewports.some((v) => Boolean((v as typeof v & { scopeRole?: string }).scopeRole))
+    ? demo.viewports.map((v) => v.id)
+    : null;
+  const allowed = productionStairViewports || viewports[element];
   const viewport =
     demo.viewports.find(
       (v) => v.id === demo.selectedViewportId && allowed.includes(v.id),
-    ) || demo.viewports.find((v) => v.id === allowed[0])!;
+    ) || demo.viewports.find((v) => v.id === allowed[0]) || demo.viewports[0]!;
   const vectorSheet=demo.sheets.find((sheet)=>sheet.id===viewport?.sheetId);
   const vectorSize=drawingSize(vectorSheet);
   const pdfVectors=usePdfVectorSource(
@@ -200,7 +203,9 @@ function SpecialDimension({
         else dispatchTakeoffStatus({message:`Select the flight or ramp to ${drawAction==="cutout"?"cut out":"subtract from"} first`});
       }else{
         const id = `FLT-${Date.now()}`;
-        st.addFlight({id,familyId:st.flightFamilies[0].id,railFamilyId:st.railFamilies[0].id,floorId:floorFor(viewport.id),viewportId:viewport.id,points,voids:[],railEdges:points.map(()=>true),status:"ready"});
+        const family = st.flightFamilies[0], rail = st.railFamilies[0];
+        if (!family || !rail) { dispatchTakeoffStatus({ message: "Stair/ramp families are still loading" }); return; }
+        st.addFlight({id,familyId:family.id,railFamilyId:rail.id,floorId:floorFor(viewport.id),viewportId:viewport.id,points,voids:[],railEdges:points.map(()=>false),railEdgesEdited:false,status:"needs_review",kind:family.kind});
       }
     } else {
       const id = `CAP-${Date.now()}`;
@@ -267,7 +272,7 @@ function SpecialDimension({
     const source=element==="stairs-ramps"?st.flights:[...st.piles,...st.caps];
     const rows:ExportRow[]=source.map((item)=>{
       let quantity:number,unit:string;
-      if("points" in item){quantity=polygonArea(item.points)*scaleForViewport(item.viewportId)**2;unit="m²";}
+      if("points" in item){quantity=item.planAreaM2 ?? polygonArea(item.points)*scaleForViewport(item.viewportId)**2;unit="m²";}
       else if("lengthM" in item){quantity=item.lengthM;unit="m";}
       else{quantity=item.bbox.width*item.bbox.height*scaleForViewport(item.viewportId)**2;unit="m²";}
       return{ID:item.id,Element:element==="stairs-ramps"?"Stairs & ramps":"Foundation",Family:item.familyId,Level:floorName(item.floorId),Drawing:demo.viewports.find((value)=>value.id===item.viewportId)?.name||item.viewportId,Quantity:Number(quantity.toFixed(3)),Unit:unit,Status:item.status};
@@ -353,7 +358,7 @@ function SpecialDimension({
         {tab === "drawings" ? (
           <div className="space-y-2 p-3">
             <input className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs" placeholder="Search drawings…" />
-            <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Plans</p>
+            <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{element === "stairs-ramps" && productionStairViewports ? "Scope evidence" : "Plans"}</p>
             {allowed.map((id) => {
               const v = demo.viewports.find((x) => x.id === id);
               const sheet = v ? demo.sheets.find((x) => x.id === v.sheetId) : null;
@@ -726,13 +731,32 @@ function Families({ element, activeId, revealKey }: { element: SpecialElement; a
                 <input className={field} type="number" value={f.treadMm || ""} placeholder="Not shown" onChange={(e) => st.updateFlightFamily(f.id, { treadMm: +e.target.value })} />
               </label>
             </div>
-            <label className="mt-2 block text-xs">
-              Finish
-              <input className={field} value={f.finish} onChange={(e) => st.updateFlightFamily(f.id, { finish: e.target.value })} />
-            </label>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <label className="text-xs">Landing slab (mm)<input className={field} type="number" value={f.landingThicknessMm || ""} placeholder="Not shown" onChange={(e) => st.updateFlightFamily(f.id, { landingThicknessMm: +e.target.value })} /></label>
+              <label className="text-xs">Construction<select className={field} value={f.constructionType || "unknown"} onChange={(e) => st.updateFlightFamily(f.id, { constructionType: e.target.value })}><option value="unknown">Information required</option><option value="in_situ_concrete">In-situ concrete</option><option value="precast_concrete">Precast concrete</option><option value="steel">Steel</option><option value="timber">Timber</option><option value="masonry">Masonry</option><option value="other">Other</option></select></label>
+            </div>
+            {f.kind === "Ramp" ? <label className="mt-2 block text-xs">Support condition<select className={field} value={f.supportCondition || "unknown"} onChange={(e) => st.updateFlightFamily(f.id, { supportCondition: e.target.value })}><option value="unknown">Information required</option><option value="ground_bearing">Ground bearing</option><option value="suspended">Suspended</option><option value="mixed">Mixed</option></select></label> : null}
+            {f.kind === "Stair" ? (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <label className="text-xs">Tread finish<input className={field} value={f.treadFinish || f.finish || ""} onChange={(e) => st.updateFlightFamily(f.id, { treadFinish: e.target.value, finish: e.target.value })} /></label>
+                <label className="text-xs">Riser finish<input className={field} value={f.riserFinish || ""} onChange={(e) => st.updateFlightFamily(f.id, { riserFinish: e.target.value })} /></label>
+                <label className="text-xs">String / apron finish<input className={field} value={f.stringFinish || ""} onChange={(e) => st.updateFlightFamily(f.id, { stringFinish: e.target.value })} /></label>
+              </div>
+            ) : <label className="mt-2 block text-xs">Ramp finish<input className={field} value={f.rampFinish || f.finish || ""} onChange={(e) => st.updateFlightFamily(f.id, { rampFinish: e.target.value, finish: e.target.value })} /></label>}
             <p className="mt-3 rounded-lg bg-amber-50 p-2 text-[11px] leading-4 text-amber-800">
               Evidence: {f.source}
             </p>
+          </details>
+        ))}
+        <h4 className="pt-2 text-xs font-semibold text-slate-400">BALUSTRADES & HANDRAILS</h4>
+        {st.railFamilies.map((f) => (
+          <details key={f.id} className="rounded-xl border border-slate-200 p-3">
+            <summary className="cursor-pointer font-semibold">{f.mark}</summary>
+            <label className="mt-3 block text-xs">Name<input className={field} value={f.mark} onChange={(e) => st.updateRailFamily(f.id, { mark: e.target.value })} /></label>
+            <label className="mt-2 block text-xs">Description<input className={field} value={f.description} onChange={(e) => st.updateRailFamily(f.id, { description: e.target.value })} /></label>
+            <div className="mt-2 grid grid-cols-2 gap-2"><label className="text-xs">Height (mm)<input className={field} type="number" value={f.heightMm || ""} onChange={(e) => st.updateRailFamily(f.id, { heightMm: +e.target.value })} /></label><label className="text-xs">Material<input className={field} value={f.material || ""} onChange={(e) => st.updateRailFamily(f.id, { material: e.target.value })} /></label></div>
+            <label className="mt-2 block text-xs">Finish<input className={field} value={f.finish || ""} onChange={(e) => st.updateRailFamily(f.id, { finish: e.target.value })} /></label>
+            <p className="mt-3 rounded-lg bg-amber-50 p-2 text-[11px] leading-4 text-amber-800">Evidence: {f.source}</p>
           </details>
         ))}
       </div>
@@ -801,6 +825,7 @@ function Inspector({
   element: SpecialElement;
 }) {
   const st = useSpecialStore();
+  const demo = useDemoStore();
   const isFlight = "points" in item,
     isPile = "lengthM" in item;
   const families = isFlight
@@ -845,10 +870,14 @@ function Inspector({
                 : st.updateCap(item.id, { floorId: e.target.value })
           }
         >
-          <option value="GF">Ground</option>
-          <option value="FF">First</option>
-          <option value="TYP">Typical 2nd–6th</option>
-          <option value="RF">Roof Terrace</option>
+          {demo.storeys.length ? demo.storeys.map((storey) => (
+            <option key={storey.id} value={storey.id}>{storey.name}{storey.factor > 1 ? ` × ${storey.factor}` : ""}</option>
+          )) : (<>
+            <option value="GF">Ground</option>
+            <option value="FF">First</option>
+            <option value="TYP">Typical 2nd–6th</option>
+            <option value="RF">Roof Terrace</option>
+          </>)}
         </select>
       </label>
       {isPile ? (
@@ -887,30 +916,41 @@ function Inspector({
           {(() => {
             const family = st.flightFamilies.find((f) => f.id === item.familyId);
             if (!family) return null;
-            const area = polygonArea(item.points) * scaleForViewport(item.viewportId) ** 2;
-            const rise = item.riseOverrideM || (item.floorId === "GF" ? 3.96 : 3.35);
-            const risers = family.riserMm > 0 ? Math.round((rise * 1000) / family.riserMm) : null;
+            const planArea = item.planAreaM2 ?? (polygonArea(item.points) * scaleForViewport(item.viewportId) ** 2);
+            const width = item.widthMm || family.widthMm;
+            const riser = item.riserMm || family.riserMm;
+            const tread = item.treadMm || family.treadMm;
+            const waist = item.waistMm || family.waistMm;
             return (
               <div className="space-y-2 rounded-xl border border-slate-200 p-3 text-xs">
-                <InfoRow label="Kind" value={family.kind} />
-                <InfoRow label="Plan outline" value={`${area.toFixed(2)} m²`} />
-                <InfoRow label="Flight width" value={family.widthMm ? `${family.widthMm} mm` : "Not shown"} />
-                <InfoRow label="Riser / tread" value={family.riserMm && family.treadMm ? `${family.riserMm} / ${family.treadMm} mm` : "Not scheduled"} />
-                <InfoRow label="Waist" value={family.waistMm ? `${family.waistMm} mm` : "Not scheduled"} />
-                <InfoRow label="Risers" value={risers ? String(risers) : "Cannot calculate"} />
-                <InfoRow label="Finish" value={family.finish || "Not scheduled"} />
+                <InfoRow label="Kind" value={item.kind || family.kind} />
+                <InfoRow label="Type mark" value={item.typeMark || family.mark || "Unassigned"} />
+                <InfoRow label="Plan outline" value={`${planArea.toFixed(2)} m²`} />
+                <InfoRow label="True sloping area" value={item.slopingSurfaceAreaM2 != null ? `${item.slopingSurfaceAreaM2.toFixed(2)} m²` : "Needs rise/slope evidence"} />
+                <InfoRow label="Intermediate landing" value={item.landingAreaM2 != null ? `${item.landingAreaM2.toFixed(2)} m²` : "—"} />
+                <InfoRow label="Flight / ramp width" value={width ? `${width} mm` : "Not resolved"} />
+                <InfoRow label="Riser / tread" value={riser && tread ? `${riser} / ${tread} mm` : (item.kind || family.kind) === "Ramp" ? "Not applicable" : "Not resolved"} />
+                <InfoRow label="Rise" value={item.riseOverrideM ? `${item.riseOverrideM.toFixed(3)} m` : "Not resolved"} />
+                <InfoRow label="Slope" value={item.slopeDegrees != null ? `${item.slopeDegrees.toFixed(2)}°${item.slopePercent != null ? ` · ${item.slopePercent.toFixed(1)}%` : ""}` : "Not resolved"} />
+                <InfoRow label="Waist / slab" value={waist ? `${waist} mm` : "Not resolved"} />
+                <InfoRow label="Flights" value={item.flightCount != null ? String(item.flightCount) : "Review geometry"} />
+                <InfoRow label="Risers / treads" value={item.riserCount != null ? `${item.riserCount}${item.treadCount != null ? ` / ${item.treadCount}` : ""}` : "Not resolved"} />
+                <InfoRow label="Construction" value={family.constructionType && family.constructionType !== "unknown" ? family.constructionType.replace(/_/g, " ") : "Information required"} />
+                <InfoRow label="Quantity status" value={item.quantityStatus === "ready" ? "Ready" : "Needs review"} />
+                <InfoRow label="Reinforcement" value={item.reinforcementStatus === "ready" ? "Ready" : "Information required"} />
                 <InfoRow label="Evidence" value={family.source} />
               </div>
             );
           })()}
           <label className="block text-xs">
-            Rise override (m)
+            Rise (m)
             <input
               className={field}
               type="number"
-              value={item.riseOverrideM || 3.35}
+              value={item.riseOverrideM ?? ""}
+              placeholder="Use section / level evidence"
               onChange={(e) =>
-                st.updateFlight(item.id, { riseOverrideM: +e.target.value })
+                st.updateFlight(item.id, { riseOverrideM: e.target.value === "" ? undefined : +e.target.value })
               }
             />
           </label>
@@ -991,7 +1031,7 @@ function SpecialWorkbook({ element }: { element: SpecialElement }) {
         </p>
       </div>
       <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
-        {!rows.length ? <div className="m-6 rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-5 text-sm text-amber-900"><b>No pile or pile-cap quantity lines.</b><p className="mt-2 leading-6">The supplied PDF has no pile layout or schedule. AR/10 foundation details remain available in Dimension as evidence, but their incomplete symbolic dimensions cannot produce a reliable quantity.</p></div> : null}
+        {!rows.length ? <div className="m-6 rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-5 text-sm text-amber-900"><b>{element === "stairs-ramps" ? "No supported Stairs & Ramps quantity lines yet." : "No pile or pile-cap quantity lines."}</b><p className="mt-2 leading-6">{element === "stairs-ramps" ? "Review Scope evidence and resolve any missing rise, slope, construction or family information. Quanto will not invent unsupported quantities." : "The supplied PDF has no pile layout or schedule. AR/10 foundation details remain available in Dimension as evidence, but their incomplete symbolic dimensions cannot produce a reliable quantity."}</p></div> : null}
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
             <tr>
@@ -1049,8 +1089,16 @@ function SpecialWorkbook({ element }: { element: SpecialElement }) {
 
 function Special3D({ element }: { element: SpecialElement }) {
   const st = useSpecialStore(),
-    [floor, setFloor] = useState("GF"),
+    demo = useDemoStore(),
+    [floor, setFloor] = useState("ALL"),
     [selected, setSelected] = useState<string | null>(null);
+  const floorOptions = useMemo(() => element === "stairs-ramps"
+    ? [...demo.storeys.map((storey) => [storey.id, storey.name] as const), ["ALL", "All"] as const]
+    : [["GF", "Ground"], ["FF", "First"], ["TYP", "Typical"], ["ALL", "All"]] as const, [demo.storeys, element]);
+  useEffect(() => {
+    if (floor === "ALL") return;
+    if (!floorOptions.some(([id]) => id === floor)) setFloor("ALL");
+  }, [floor, floorOptions]);
   const items =
     element === "stairs-ramps"
       ? st.flights.filter((x) => floor === "ALL" || x.floorId === floor)
@@ -1066,12 +1114,7 @@ function Special3D({ element }: { element: SpecialElement }) {
     >
       <main className="relative bg-slate-100 p-5">
         <div className="flex gap-2">
-          {[
-            ["GF", "Ground"],
-            ["FF", "First"],
-            ["TYP", "Typical"],
-            ["ALL", "All"],
-          ].map(([id, n]) => (
+          {floorOptions.map(([id, n]) => (
             <button
               className={floor === id ? active : button}
               onClick={() => setFloor(id)}
@@ -1173,17 +1216,26 @@ function Special3D({ element }: { element: SpecialElement }) {
 
 function FlightShape({ item, showRails }: { item: Flight; showRails: boolean }) {
   const st = useSpecialStore(),
-    family = st.flightFamilies.find((f) => f.id === item.familyId)!,
+    family = st.flightFamilies.find((f) => f.id === item.familyId),
     selected = st.selectedIds.includes(item.id);
+  if (!family) return null;
+  const center = centroid(item.points);
+  const planArea = item.planAreaM2 ?? (polygonArea(item.points) * scaleForViewport(item.viewportId) ** 2);
+  const outlinePath = [item.points, ...item.voids]
+    .filter((ring) => ring.length >= 3)
+    .map((ring) => `M ${ring.map((point) => `${point.x} ${point.y}`).join(" L ")} Z`)
+    .join(" ");
+  const useDetectedRails = showRails && !item.railEdgesEdited && (item.railSegments?.length || 0) > 0;
   return (
     <MovePolygon
       item={item}
       onMove={(points) => st.updateFlight(item.id, { points })}
     >
-      <polygon
-        points={item.points.map((p) => `${p.x},${p.y}`).join(" ")}
+      <path
+        d={outlinePath}
         fill={family.color}
         fillOpacity={selected ? 0.35 : 0.2}
+        fillRule="evenodd"
         stroke={selected ? "#2563eb" : family.color}
         strokeWidth={selected ? 5 : 3}
         vectorEffect="non-scaling-stroke"
@@ -1193,25 +1245,31 @@ function FlightShape({ item, showRails }: { item: Flight; showRails: boolean }) 
           if (e.ctrlKey || e.metaKey || e.shiftKey) st.toggleSelect(item.id); else st.select(item.id);
         }}
       />
+      {(item.components || []).filter((component) => component.component_type === "run" && (component.polygon?.length || 0) >= 3).map((component, index) => (
+        <polygon key={`component-${component.run_id || index}`} points={(component.polygon || []).map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={family.color} strokeOpacity="0.55" strokeWidth="1.5" strokeDasharray="7 6" vectorEffect="non-scaling-stroke" pointerEvents="none" />
+      ))}
       <text
-        x={centroid(item.points).x}
-        y={centroid(item.points).y - 7}
+        x={center.x}
+        y={center.y - 7}
         textAnchor="middle"
         pointerEvents="none"
         className="fill-slate-900 text-[18px] font-bold"
       >
-        {family.mark}
+        {item.typeMark || family.mark}
       </text>
       <text
-        x={centroid(item.points).x}
-        y={centroid(item.points).y + 23}
+        x={center.x}
+        y={center.y + 23}
         textAnchor="middle"
         pointerEvents="none"
         className="fill-slate-700 text-[13px] font-semibold"
       >
-        {(polygonArea(item.points) * scaleForViewport(item.viewportId) ** 2).toFixed(2)} m²{item.evidenceOnly ? " · linked arrival" : " · details TBC"}
+        {planArea.toFixed(2)} m² · {item.kind || family.kind}{item.quantityStatus === "ready" ? " · ready" : " · review"}
       </text>
-      {showRails && item.points.map((point, index) => {
+      {useDetectedRails ? item.railSegments?.map((segment, index) => {
+        if (segment.line.length < 2) return null;
+        return <polyline key={`rail-segment-${segment.rail_id || index}`} points={segment.line.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="#f59e0b" strokeWidth="8" vectorEffect="non-scaling-stroke" pointerEvents="none" />;
+      }) : showRails && item.points.map((point, index) => {
         if (!item.railEdges[index]) return null;
         const next = item.points[(index + 1) % item.points.length];
         return <line key={`rail-${index}`} x1={point.x} y1={point.y} x2={next.x} y2={next.y} stroke="#f59e0b" strokeWidth="8" vectorEffect="non-scaling-stroke" pointerEvents="none" />;
@@ -1472,12 +1530,16 @@ function quantity(
   st: ReturnType<typeof useSpecialStore.getState>,
 ) {
   if ("points" in item) {
-    const f = st.flightFamilies.find((x) => x.id === item.familyId)!;
-    const area =
-      polygonArea(item.points) * scaleForViewport(item.viewportId) ** 2;
+    const family = st.flightFamilies.find((x) => x.id === item.familyId);
+    if (item.concreteM3 != null) return { label: "Concrete volume", value: `${item.concreteM3.toFixed(2)} m³` };
+    if (item.rampFinishM2 != null) return { label: "Ramp finish", value: `${item.rampFinishM2.toFixed(2)} m²` };
+    if (item.treadFinishM2 != null) return { label: "Tread / landing finish", value: `${item.treadFinishM2.toFixed(2)} m²` };
+    if (item.slopingSurfaceAreaM2 != null) return { label: "True sloping area", value: `${item.slopingSurfaceAreaM2.toFixed(2)} m²` };
+    if (item.quantityStatus) return { label: "Quantity status", value: item.quantityStatus === "ready" ? "Ready" : "Needs review" };
+    const area = polygonArea(item.points) * scaleForViewport(item.viewportId) ** 2;
     return {
       label: "Concrete volume",
-      value: f.waistMm > 0 ? `${((area * f.waistMm) / 1000).toFixed(2)} m³` : "Awaiting stair detail",
+      value: family?.waistMm ? `${((area * family.waistMm) / 1000).toFixed(2)} m³` : "Awaiting stair/ramp detail",
     };
   }
   if ("lengthM" in item) {
@@ -1506,44 +1568,51 @@ function workbookRows(
     qty: number;
   }[] = [];
   if (element === "stairs-ramps") {
-    for (const f of st.flightFamilies)
-      for (const floorId of [
-        ...new Set(
-          st.flights.filter((x) => x.familyId === f.id && !x.evidenceOnly).map((x) => x.floorId),
-        ),
-      ]) {
-        const items = st.flights.filter(
-          (x) => x.familyId === f.id && x.floorId === floorId && !x.evidenceOnly,
-          ),
-          factor = floorFactor(floorId);
+    const addMeasured = (
+      key: string,
+      name: string,
+      floorId: string,
+      items: Flight[],
+      property: keyof Pick<Flight, "concreteM3"|"formworkM2"|"treadFinishM2"|"riserFinishM2"|"stringApronFinishM2"|"rampFinishM2"|"balustradeLengthM">,
+      unit: string,
+      calc: string,
+    ) => {
+      const measured = items.map((item) => item[property]).filter((value): value is number => typeof value === "number");
+      if (!measured.length) return;
+      const factor = floorFactor(floorId);
+      rows.push({ key, name, floor: floorName(floorId), calc: `${calc}${factor > 1 ? ` × typical factor ${factor}` : ""}`, unit, qty: +((measured.reduce((sum, value) => sum + value, 0)) * factor).toFixed(3) });
+    };
+    for (const family of st.flightFamilies) {
+      const floorIds = [...new Set(st.flights.filter((item) => item.familyId === family.id && !item.evidenceOnly).map((item) => item.floorId))];
+      for (const floorId of floorIds) {
+        const items = st.flights.filter((item) => item.familyId === family.id && item.floorId === floorId && !item.evidenceOnly);
+        const factor = floorFactor(floorId);
         rows.push({
-          key: `flight:${f.id}:${floorId}`,
-          name: `${f.mark} · ${f.description}`,
+          key: `flight:${family.id}:${floorId}`,
+          name: `${family.mark} · ${family.description}`,
           floor: floorName(floorId),
-          calc: `${items.length} flights × ${factor}`,
+          calc: `${items.length} stair/ramp assembl${items.length === 1 ? "y" : "ies"}${factor > 1 ? ` × ${factor}` : ""}`,
           unit: "nr",
           qty: items.length * factor,
         });
-        const rail =
-          items.reduce(
-            (s, x) =>
-              s +
-              edgeLengthM(
-                x.points,
-                x.railEdges,
-                scaleForViewport(x.viewportId),
-              ),
-            0,
-          ) * factor;
-        if (rail > 0) rows.push({
-          key: `rail:${f.id}:${floorId}`,
-          name: `${st.railFamilies[0]?.mark || "Rail"} · ${st.railFamilies[0]?.description || "Balustrade"}`,
-          floor: floorName(floorId),
-          calc: "Verified enabled flight edges",
-          unit: "m",
-          qty: +rail.toFixed(2),
-        });
+        addMeasured(`concrete:${family.id}:${floorId}`, `${family.mark} · in-situ concrete`, floorId, items, "concreteM3", "m³", "Detected runs + owned intermediate landings");
+        addMeasured(`formwork:${family.id}:${floorId}`, `${family.mark} · soffit formwork`, floorId, items, "formworkM2", "m²", "True sloping soffit + owned intermediate landings");
+        if (family.treadFinish || family.finish) addMeasured(`tread:${family.id}:${floorId}`, `${family.treadFinish || family.finish} · stair treads / landings`, floorId, items, "treadFinishM2", "m²", "Horizontal tread + owned landing finish area");
+        if (family.riserFinish) addMeasured(`riser:${family.id}:${floorId}`, `${family.riserFinish} · stair risers`, floorId, items, "riserFinishM2", "m²", "Resolved stair width × total rise");
+        if (family.stringFinish) addMeasured(`string:${family.id}:${floorId}`, `${family.stringFinish} · stair string / apron`, floorId, items, "stringApronFinishM2", "m²", "Supported side-profile extent");
+        if (family.rampFinish || family.finish) addMeasured(`ramp-finish:${family.id}:${floorId}`, `${family.rampFinish || family.finish} · ramp surface`, floorId, items, "rampFinishM2", "m²", "True sloping ramp + owned landing area");
       }
+    }
+    const railGroups = new Map<string, Flight[]>();
+    st.flights.filter((item) => !item.evidenceOnly && item.balustradeLengthM != null && item.balustradeLengthM > 0).forEach((item) => {
+      const key = `${item.railFamilyId}:${item.floorId}`;
+      railGroups.set(key, [...(railGroups.get(key) || []), item]);
+    });
+    for (const [key, items] of railGroups) {
+      const [railFamilyId, floorId] = key.split(":");
+      const rail = st.railFamilies.find((family) => family.id === railFamilyId);
+      addMeasured(`rail:${key}`, `${rail?.mark || "Balustrade"} · ${rail?.description || "handrail / balustrade"}`, floorId, items, "balustradeLengthM", "m", "Detected/verified rail edges at true slope");
+    }
   } else {
     for (const f of st.pileFamilies) {
       const items = st.piles.filter((x) => x.familyId === f.id),
@@ -1587,6 +1656,9 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   return <div className="flex items-start justify-between gap-3"><span className="text-slate-500">{label}</span><b className="max-w-[190px] text-right text-slate-700">{value}</b></div>;
 }
 function floorFor(viewportId: string) {
+  const viewport = useDemoStore.getState().viewports.find((item) => item.id === viewportId) as (ReturnType<typeof useDemoStore.getState>["viewports"][number] & { connectedLevelRefs?: string[] }) | undefined;
+  const connected = viewport?.connectedLevelRefs?.[0];
+  if (connected) return connected;
   return viewportId === "VP-FIRST"
     ? "FF"
     : viewportId === "VP-TYP"

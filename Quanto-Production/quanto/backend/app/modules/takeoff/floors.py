@@ -1,18 +1,29 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import re
+import threading
+import traceback
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import Point as ShapelyPoint, Polygon, MultiPolygon
 from shapely.ops import unary_union
 
 from ...database.json_value import Jsonb
 
-from ...core.config import get_settings
 from ...database.connection import fetch_all, fetch_one, transaction
-from ...services.ai.model_client import get_model_client
+from ...services.storage.paths import project_root
+from ...services.ai.codex_account import codex_account_status
+from .harness.model_client import HarnessModelClient
+from .harness.evaluator import evaluate_element
+from .harness.facts import publish_element_facts
+from .harness.runtime import run_element_harness
+from .harness.derived import recalculate_skirting_opening_deductions
+from .floor_wall_geometry import audit_and_snap_floor_spaces, wall_audit_failures
 from .common import (
     PALETTE,
     area_m2,
@@ -20,13 +31,12 @@ from .common import (
     ensure_takeoff_floors,
     extract_viewport_text,
     floor_context,
-    model_for_quality,
     perimeter_m,
     project_text_evidence,
     require_frozen_project,
     viewport_demo_context,
 )
-from .model_schemas import FloorCatalogOutput, FloorGeometryOutput
+from .model_schemas import FloorCatalogOutput, FloorGeometryOutput, FloorSpaceOut
 from .prompts import (
     FLOOR_CATALOG_PROMPT,
     FLOOR_CATALOG_SYSTEM,
@@ -35,10 +45,266 @@ from .prompts import (
 )
 
 
+FLOOR_PROVIDER = "codex-account"
+FLOOR_MODEL_LABEL = "ChatGPT/Codex account"
+FLOOR_CACHE_VERSION = "quanto-floor-account-cache-v3"
+FLOOR_PROMPT_VERSION = "floor-account-v4"
+_FLOOR_LOCKS: dict[str, threading.Lock] = {}
+_FLOOR_LOCK_GUARD = threading.Lock()
+
+
+def _floor_runtime_dir(project_id: UUID | str) -> Path:
+    path = project_root(project_id) / "floors"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _floor_status_path(project_id: UUID | str) -> Path:
+    return _floor_runtime_dir(project_id) / "status.json"
+
+
+def _floor_cache_path(project_id: UUID | str, floor_id: UUID | str) -> Path:
+    path = _floor_runtime_dir(project_id) / "results"
+    path.mkdir(parents=True, exist_ok=True)
+    return path / f"{floor_id}.json"
+
+
+def _viewport_cache_path(project_id: UUID | str, viewport_id: UUID | str) -> Path:
+    path = _floor_runtime_dir(project_id) / "viewport-results"
+    path.mkdir(parents=True, exist_ok=True)
+    return path / f"{viewport_id}.json"
+
+
+def _read_json(path: Path, default: Any) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def _write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value, indent=2, default=str), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _set_floor_status(project_id: UUID | str, status: str, progress: int, message: str, **extra: Any) -> dict[str, Any]:
+    payload = {"status": status, "progress": progress, "message": message, **extra}
+    _write_json(_floor_status_path(project_id), payload)
+    return payload
+
+
+def _floor_lock(project_id: UUID | str) -> threading.Lock:
+    pid = str(project_id)
+    with _FLOOR_LOCK_GUARD:
+        return _FLOOR_LOCKS.setdefault(pid, threading.Lock())
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _floor_source_hash(project: dict[str, Any], ctx: dict[str, Any]) -> str:
+    crop_path = Path(ctx["crop_path"])
+    payload = {
+        "cache_version": FLOOR_CACHE_VERSION,
+        "prompt_version": FLOOR_PROMPT_VERSION,
+        "frame_version": project.get("frame_version"),
+        "floor_id": str(ctx["id"]),
+        "viewport_id": str(ctx["viewport_id"]),
+        "crop_version": int(ctx.get("crop_version") or 0),
+        "drawing_width": int(ctx["drawing_width"]),
+        "drawing_height": int(ctx["drawing_height"]),
+        "mm_per_pixel": float(ctx["mm_per_pixel"]) if ctx.get("mm_per_pixel") else None,
+        "crop_sha256": _file_sha256(crop_path),
+    }
+    return content_hash(payload)
+
+
+def _viewport_source_hash(project: dict[str, Any], ctx: dict[str, Any]) -> str:
+    """Hash physical drawing evidence shared by every level using one typical viewport."""
+    crop_path = Path(ctx["crop_path"])
+    return content_hash({
+        "cache_version": FLOOR_CACHE_VERSION,
+        "prompt_version": FLOOR_PROMPT_VERSION,
+        "frame_version": project.get("frame_version"),
+        "viewport_id": str(ctx["viewport_id"]),
+        "crop_version": int(ctx.get("crop_version") or 0),
+        "drawing_width": int(ctx["drawing_width"]),
+        "drawing_height": int(ctx["drawing_height"]),
+        "mm_per_pixel": float(ctx["mm_per_pixel"]) if ctx.get("mm_per_pixel") else None,
+        "crop_sha256": _file_sha256(crop_path),
+    })
+
+
+def _load_cached_detection(project_id: str, floor_id: str, source_hash: str) -> tuple[FloorGeometryOutput, FloorCatalogOutput] | None:
+    payload = _read_json(_floor_cache_path(project_id, floor_id), {})
+    if payload.get("schema_version") != FLOOR_CACHE_VERSION or payload.get("source_hash") != source_hash:
+        return None
+    try:
+        return (
+            FloorGeometryOutput.model_validate(payload.get("geometry") or {}),
+            FloorCatalogOutput.model_validate(payload.get("catalog") or {}),
+        )
+    except Exception:
+        return None
+
+
+def _save_cached_detection(
+    project_id: str,
+    floor_id: str,
+    source_hash: str,
+    quality: str,
+    geometry: FloorGeometryOutput,
+    catalog: FloorCatalogOutput,
+) -> None:
+    _write_json(
+        _floor_cache_path(project_id, floor_id),
+        {
+            "schema_version": FLOOR_CACHE_VERSION,
+            "provider": FLOOR_PROVIDER,
+            "source_hash": source_hash,
+            "quality": quality,
+            "geometry": geometry.model_dump(mode="json"),
+            "catalog": catalog.model_dump(mode="json"),
+        },
+    )
+
+
+def _load_viewport_detection(
+    project_id: str, viewport_id: str, viewport_hash: str, quality: str,
+) -> tuple[FloorGeometryOutput, FloorCatalogOutput, str] | None:
+    payload = _read_json(_viewport_cache_path(project_id, viewport_id), {})
+    quality_rank = {"easy": 0, "medium": 1, "expert": 2, "maximum": 3}
+    if (
+        payload.get("schema_version") != FLOOR_CACHE_VERSION
+        or payload.get("viewport_hash") != viewport_hash
+        or quality_rank.get(str(payload.get("quality") or "medium"), 1) < quality_rank.get(quality, 1)
+    ):
+        return None
+    try:
+        return (
+            FloorGeometryOutput.model_validate(payload.get("geometry") or {}),
+            FloorCatalogOutput.model_validate(payload.get("catalog") or {}),
+            str(payload.get("source_floor_name") or ""),
+        )
+    except Exception:
+        return None
+
+
+def _save_viewport_detection(
+    project_id: str,
+    ctx: dict[str, Any],
+    viewport_hash: str,
+    quality: str,
+    geometry: FloorGeometryOutput,
+    catalog: FloorCatalogOutput,
+) -> None:
+    _write_json(
+        _viewport_cache_path(project_id, ctx["viewport_id"]),
+        {
+            "schema_version": FLOOR_CACHE_VERSION,
+            "provider": FLOOR_PROVIDER,
+            "viewport_hash": viewport_hash,
+            "quality": quality,
+            "source_floor_name": str(ctx.get("name") or ""),
+            "geometry": geometry.model_dump(mode="json"),
+            "catalog": catalog.model_dump(mode="json"),
+        },
+    )
+
+
+def _catalog_cache_path(project_id: UUID | str) -> Path:
+    return _floor_runtime_dir(project_id) / "catalog.json"
+
+
+def _load_catalog_cache(project_id: str, catalog_hash: str) -> FloorCatalogOutput | None:
+    payload = _read_json(_catalog_cache_path(project_id), {})
+    if payload.get("schema_version") != FLOOR_CACHE_VERSION or payload.get("catalog_hash") != catalog_hash:
+        return None
+    try:
+        return FloorCatalogOutput.model_validate(payload.get("catalog") or {})
+    except Exception:
+        return None
+
+
+def _save_catalog_cache(project_id: str, catalog_hash: str, quality: str, catalog: FloorCatalogOutput) -> None:
+    _write_json(
+        _catalog_cache_path(project_id),
+        {
+            "schema_version": FLOOR_CACHE_VERSION,
+            "provider": FLOOR_PROVIDER,
+            "catalog_hash": catalog_hash,
+            "quality": quality,
+            "catalog": catalog.model_dump(mode="json"),
+        },
+    )
 
 
 def _shape(points: list[dict[str, float]], holes: list[list[dict[str, float]]] | None = None) -> Polygon:
     return Polygon([(p["x"], p["y"]) for p in points], [[(p["x"], p["y"]) for p in ring] for ring in (holes or [])])
+
+
+def _subtract_non_floor_regions(output: FloorGeometryOutput) -> None:
+    """Turn trusted non-floor overlaps into deterministic room deductions.
+
+    Vision is responsible for identifying shafts/ducts/voids; polygon boolean
+    arithmetic is code-owned. This avoids asking the model to reproduce the same
+    boundary twice (once as an exclusion and once as a room hole).
+    """
+    exclusions: list[Polygon] = []
+    for region in output.non_floor_regions:
+        polygon = _shape([{"x": point.x, "y": point.y} for point in region.polygon])
+        if not polygon.is_empty and polygon.is_valid and polygon.area > 1:
+            exclusions.append(polygon)
+    if not exclusions:
+        return
+    excluded_union = unary_union(exclusions)
+    corrected_spaces = []
+    corrections = 0
+    for space in output.spaces:
+        source = _shape(
+            [{"x": point.x, "y": point.y} for point in space.polygon],
+            [[{"x": point.x, "y": point.y} for point in ring] for ring in space.holes],
+        )
+        if source.is_empty or not source.is_valid:
+            corrected_spaces.append(space)
+            continue
+        corrected = source.difference(excluded_union)
+        if corrected.is_empty or abs(corrected.area - source.area) <= 4:
+            corrected_spaces.append(space)
+            continue
+        components = [corrected] if isinstance(corrected, Polygon) else [
+            item for item in getattr(corrected, "geoms", []) if isinstance(item, Polygon) and item.area > 1
+        ]
+        if not components:
+            corrected_spaces.append(space)
+            continue
+        components.sort(key=lambda item: item.area, reverse=True)
+        for part_index, component in enumerate(components, start=1):
+            data = space.model_dump(mode="python")
+            data["polygon"] = [
+                {"x": float(x), "y": float(y)} for x, y in list(component.exterior.coords)[:-1]
+            ]
+            data["holes"] = [
+                [{"x": float(x), "y": float(y)} for x, y in list(ring.coords)[:-1]]
+                for ring in component.interiors
+            ]
+            if part_index > 1:
+                base_name = str(data.get("name") or data.get("normalized_type") or "Floor space")
+                data["name"] = f"{base_name} · Part {part_index}"
+            corrected_spaces.append(space.__class__.model_validate(data))
+        corrections += 1
+    if corrections:
+        output.spaces = corrected_spaces
+        output.warnings.append(
+            f"Code deducted confirmed non-floor shafts/ducts/voids from {corrections} overlapping floor space(s)."
+        )
 
 
 def _validate_floor_geometry(output: FloorGeometryOutput) -> None:
@@ -66,6 +332,68 @@ def _validate_floor_geometry(output: FloorGeometryOutput) -> None:
                 raise RuntimeError(
                     f"Non-floor region '{excluded.name}' overlaps FloorSpace {name}. Return it as a hole/exclusion; result rejected to prevent over-measurement."
                 )
+
+
+def _audit_room_label_coverage(output: FloorGeometryOutput, words: list[dict[str, Any]]) -> list[str]:
+    """Report plan room labels not contained by a semantically matching space.
+
+    Labels outside the detected building envelope are ignored because they are
+    normally legends/notes. A TOI label inside a living-room polygon still fails:
+    physical coverage alone is not enough when the room identity is wrong.
+    """
+    expected_types: dict[str, tuple[str, ...]] = {
+        "bed": ("bed",), "bedroom": ("bed",),
+        "toilet": ("toilet", "bath", "wc", "washroom"), "toi": ("toilet", "bath", "wc", "washroom"),
+        "bath": ("toilet", "bath", "wc", "washroom"), "bathroom": ("toilet", "bath", "wc", "washroom"),
+        "wc": ("toilet", "bath", "wc", "washroom"),
+        "living": ("living", "open_plan"), "dining": ("dining", "open_plan"),
+        "pantry": ("pantry", "kitchen", "open_plan"), "kitchen": ("pantry", "kitchen", "open_plan"),
+        "bal": ("balcony",), "balcony": ("balcony",),
+        "lobby": ("lobby",), "corridor": ("corridor", "passage"), "passage": ("corridor", "passage"),
+        "store": ("store",), "gym": ("gym",), "gymnasium": ("gym",),
+        "office": ("office", "management"), "management": ("office", "management"),
+        "laundry": ("laundry", "utility"), "utility": ("laundry", "utility"),
+    }
+    spaces: list[tuple[Polygon, str]] = []
+    for space in output.spaces:
+        pts = [{"x": p.x, "y": p.y} for p in space.polygon]
+        holes = [[{"x": p.x, "y": p.y} for p in ring] for ring in space.holes]
+        try:
+            spaces.append((_shape(pts, holes), str(space.normalized_type or "").lower().replace("-", "_")))
+        except Exception:
+            continue
+    if not spaces:
+        return ["No valid floor spaces were returned"]
+    min_x = min(poly.bounds[0] for poly, _ in spaces)
+    min_y = min(poly.bounds[1] for poly, _ in spaces)
+    max_x = max(poly.bounds[2] for poly, _ in spaces)
+    max_y = max(poly.bounds[3] for poly, _ in spaces)
+    envelope_margin = max(12.0, min(max_x - min_x, max_y - min_y) * 0.025)
+    missing: list[str] = []
+    seen: set[tuple[str, int, int]] = set()
+    for word in words:
+        raw = str(word.get("text") or "").strip()
+        token = re.sub(r"[^a-z]", "", raw.lower())
+        bbox = word.get("bbox") or []
+        if token not in expected_types or len(bbox) != 4:
+            continue
+        x = (float(bbox[0]) + float(bbox[2])) / 2.0
+        y = (float(bbox[1]) + float(bbox[3])) / 2.0
+        if x < min_x - envelope_margin or x > max_x + envelope_margin or y < min_y - envelope_margin or y > max_y + envelope_margin:
+            continue
+        key = (token, round(x), round(y))
+        if key in seen:
+            continue
+        seen.add(key)
+        point = ShapelyPoint(x, y)
+        expected = expected_types[token]
+        if not any(
+            (poly.covers(point) or poly.distance(point) <= 3)
+            and any(value in room_type for value in expected)
+            for poly, room_type in spaces
+        ):
+            missing.append(f"{raw} near ({round(x)}, {round(y)}) must be inside a matching {'/'.join(expected)} space")
+    return missing[:20]
 
 def _points(value: Any) -> list[dict[str, float]]:
     if isinstance(value, dict):
@@ -142,13 +470,12 @@ def _rule_matches(room_type: str, values: list[str]) -> bool:
 
 
 def _start_run(project_id: str, floor_id: str | None, task: str, model: str | None, request_hash: str) -> str:
-    settings = get_settings()
     with transaction() as conn:
         row = conn.execute(
             """INSERT INTO takeoff_analysis_run(project_id,floor_id,module,task_type,provider,model_id,
                    prompt_version,status,progress,message,request_hash)
-               VALUES (%s,%s,'floor',%s,%s,%s,'floor-v1','running',5,%s,%s) RETURNING id""",
-            (project_id, floor_id, task, settings.takeoff_ai_provider, model, "Starting floor analysis", request_hash),
+               VALUES (%s,%s,'floor',%s,%s,%s,%s,'running',5,%s,%s) RETURNING id""",
+            (project_id, floor_id, task, FLOOR_PROVIDER, model, FLOOR_PROMPT_VERSION, "Starting floor analysis", request_hash),
         ).fetchone()
     return str(row["id"])
 
@@ -244,7 +571,8 @@ def _resolve_work(space: Any, finish_code: str | None, catalog: FloorCatalogOutp
 
 
 def _insert_spaces(project_id: str, floor: dict[str, Any], geometry: FloorGeometryOutput, catalog: FloorCatalogOutput,
-                   finish_ids: dict[str, str], work_ids: dict[str, str], analysis_model_id: str | None) -> None:
+                   finish_ids: dict[str, str], work_ids: dict[str, str], analysis_model_id: str | None,
+                   wall_audits: list[dict[str, Any]] | None = None) -> None:
     mmpp = float(floor["mm_per_pixel"]) if floor.get("mm_per_pixel") else None
     with transaction() as conn:
         confirmed = conn.execute("SELECT count(*) AS n FROM floor_space WHERE floor_id=%s AND user_confirmed=true", (str(floor["id"]),)).fetchone()["n"]
@@ -254,6 +582,8 @@ def _insert_spaces(project_id: str, floor: dict[str, Any], geometry: FloorGeomet
         conn.execute("DELETE FROM floor_region WHERE floor_id=%s", (str(floor["id"]),))
 
         for idx, space in enumerate(geometry.spaces, start=1):
+            wall_audit = wall_audits[idx - 1] if wall_audits and idx <= len(wall_audits) else None
+            geometry_status = str((wall_audit or {}).get("status") or "boundary_review")
             pts = [{"x": p.x, "y": p.y} for p in space.polygon]
             holes = [[{"x": p.x, "y": p.y} for p in ring] for ring in space.holes]
             outer_area = area_m2(pts, mmpp)
@@ -262,15 +592,24 @@ def _insert_spaces(project_id: str, floor: dict[str, Any], geometry: FloorGeomet
             perim = perimeter_m(pts, mmpp)
             friendly = f"{int(floor['level_index']):02d}-{idx:03d}"
             source_evidence = [item.model_dump() for item in space.evidence]
+            if wall_audit:
+                source_evidence.append({
+                    "kind": "pdf_wall_vectors",
+                    "text": " ".join(wall_audit.get("reasons") or []) or "Boundary supported by PDF wall vectors.",
+                    "confidence": wall_audit.get("support_ratio", 0.0),
+                    "support_ratio": wall_audit.get("support_ratio", 0.0),
+                    "wall_overlap_ratio": wall_audit.get("wall_overlap_ratio", 0.0),
+                    "snapped_edges": wall_audit.get("snapped_edges", 0),
+                })
             row = conn.execute(
                 """INSERT INTO floor_space(project_id,floor_id,friendly_number,name,raw_label,room_type,environment,
-                       space_kind,geometry,generated_geometry,source_evidence,area_m2,perimeter_m,confidence,status,
-                       open_plan,user_confirmed)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'needs_review',%s,false) RETURNING id""",
+                       space_kind,geometry,generated_geometry,source_evidence,area_m2,perimeter_m,confidence,include_in_boq,status,
+                       geometry_status,open_plan,user_confirmed)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,false,'needs_review',%s,%s,false) RETURNING id""",
                 (project_id, str(floor["id"]), friendly, space.name or space.raw_label or space.normalized_type,
                  space.raw_label, space.normalized_type, space.environment, "external" if space.environment != "internal" else "internal",
                  Jsonb(_geometry(pts, holes)), Jsonb(_geometry(pts, holes)), Jsonb(source_evidence), gross, perim,
-                 min(space.geometry_confidence, space.semantic_confidence), bool(space.functional_zones)),
+                 min(space.geometry_confidence, space.semantic_confidence), geometry_status, bool(space.functional_zones)),
             ).fetchone()
             room_id = str(row["id"])
             conn.execute(
@@ -408,8 +747,8 @@ def _insert_spaces(project_id: str, floor: dict[str, Any], geometry: FloorGeomet
                 friendly = f"{int(floor['level_index']):02d}-C{connector_counter:03d}"
                 room = conn.execute(
                     """INSERT INTO floor_space(project_id,floor_id,friendly_number,name,raw_label,room_type,environment,space_kind,
-                           geometry,generated_geometry,source_evidence,area_m2,perimeter_m,confidence,status,geometry_status,user_confirmed)
-                       VALUES (%s,%s,%s,%s,%s,'connector','internal','connector',%s,%s,%s,%s,%s,%s,'needs_review','detected',false) RETURNING id""",
+                           geometry,generated_geometry,source_evidence,area_m2,perimeter_m,confidence,include_in_boq,status,geometry_status,user_confirmed)
+                       VALUES (%s,%s,%s,%s,%s,'connector','internal','connector',%s,%s,%s,%s,%s,%s,false,'needs_review','detected',false) RETURNING id""",
                     (project_id, str(floor["id"]), friendly, region.name or "Door / opening floor strip", region.name,
                      Jsonb(_geometry(cpts, choles)), Jsonb(_geometry(cpts, choles)), Jsonb([e.model_dump() for e in region.evidence]),
                      cnet, perimeter_m(cpts, mmpp), region.confidence),
@@ -450,44 +789,318 @@ def _insert_spaces(project_id: str, floor: dict[str, Any], geometry: FloorGeomet
             (analysis_model_id, str(floor["id"])),
         )
 
+    # Openings may already exist when a Floor is reprojected from cache. Recalculate
+    # only the derived skirting quantity; the detected FloorSpace geometry remains unchanged.
+    try:
+        recalculate_skirting_opening_deductions(project_id, str(floor["id"]))
+    except Exception:
+        # The opening tables may not exist on a database that has not applied later migrations yet.
+        # Floor detection itself must remain usable; the cross-element derivation will run again
+        # after the Doors & Windows harness publishes its facts.
+        pass
 
-def analyze_floor(project_id: UUID | str, floor_id: UUID | str, quality: str = "medium") -> dict[str, Any]:
+
+def audit_saved_floor_boundaries(project_id: UUID | str, floor_id: UUID | str | None = None) -> dict[str, Any]:
+    """Grade already-saved rooms without silently changing their geometry.
+
+    This is used when a project predates the wall-conformity gate. Verified
+    human geometry stays verified. All other rooms receive fresh vector evidence;
+    unsafe rooms are unconfirmed across finishes and derived floor work.
+    """
+    pid = str(project_id)
+    params: tuple[Any, ...] = (pid, str(floor_id)) if floor_id else (pid,)
+    floor_rows = fetch_all(
+        "SELECT id FROM takeoff_floor WHERE project_id=%s" + (" AND id=%s" if floor_id else "") + " ORDER BY level_index",
+        params,
+    )
+    summary = {"floors": 0, "rooms": 0, "wall_verified": 0, "boundary_review": 0}
+    for floor_row in floor_rows:
+        ctx = floor_context(str(floor_row["id"]))
+        room_rows = fetch_all(
+            """SELECT id,name,raw_label,room_type,environment,geometry,source_evidence,confidence,geometry_status
+               FROM floor_space
+               WHERE floor_id=%s AND excluded=false AND space_kind<>'connector'
+               ORDER BY friendly_number""",
+            (str(floor_row["id"]),),
+        )
+        spaces: list[FloorSpaceOut] = []
+        audited_rows: list[dict[str, Any]] = []
+        for room in room_rows:
+            geometry = room.get("geometry") or {}
+            points = _points(geometry)
+            holes = geometry.get("deducts") or geometry.get("holes") or [] if isinstance(geometry, dict) else []
+            if len(points) < 3:
+                continue
+            spaces.append(FloorSpaceOut.model_validate({
+                "raw_label": room.get("raw_label"),
+                "name": room.get("name"),
+                "normalized_type": room.get("room_type") or "unclassified",
+                "environment": room.get("environment") if room.get("environment") in {"internal", "external", "semi_external"} else "internal",
+                "polygon": points,
+                "holes": holes,
+                "evidence": [],
+                "geometry_confidence": min(1.0, max(0.0, float(room.get("confidence") or 0))),
+                "semantic_confidence": min(1.0, max(0.0, float(room.get("confidence") or 0))),
+            }))
+            audited_rows.append(room)
+        if not spaces:
+            continue
+        output = FloorGeometryOutput(
+            source_width_px=int(ctx["drawing_width"]),
+            source_height_px=int(ctx["drawing_height"]),
+            floor_label=str(ctx.get("name") or ""),
+            spaces=spaces,
+        )
+        audits = audit_and_snap_floor_spaces(output, str(ctx["viewport_id"]), snap=False)
+        with transaction() as conn:
+            for room, audit in zip(audited_rows, audits, strict=True):
+                if room.get("geometry_status") == "user_verified":
+                    status = "user_verified"
+                else:
+                    status = str(audit["status"])
+                evidence = [item for item in (room.get("source_evidence") or []) if item.get("kind") != "pdf_wall_vectors"]
+                evidence.append({
+                    "kind": "pdf_wall_vectors",
+                    "text": " ".join(audit.get("reasons") or []) or "Boundary supported by PDF wall vectors.",
+                    "confidence": audit.get("support_ratio", 0.0),
+                    "support_ratio": audit.get("support_ratio", 0.0),
+                    "wall_overlap_ratio": audit.get("wall_overlap_ratio", 0.0),
+                })
+                conn.execute(
+                    "UPDATE floor_space SET geometry_status=%s,source_evidence=%s,updated_at=now() WHERE id=%s",
+                    (status, Jsonb(evidence), str(room["id"])),
+                )
+                if status == "boundary_review":
+                    conn.execute(
+                        "UPDATE finish_assignment SET status='needs_review',review_required=true,user_confirmed=false,updated_at=now() WHERE room_id=%s",
+                        (str(room["id"]),),
+                    )
+                    conn.execute(
+                        "UPDATE floor_work_assignment SET status='needs_review',review_required=true,user_confirmed=false,updated_at=now() WHERE room_id=%s",
+                        (str(room["id"]),),
+                    )
+                summary["rooms"] += 1
+                summary["wall_verified" if status in {"wall_verified", "user_verified"} else "boundary_review"] += 1
+        summary["floors"] += 1
+    return summary
+
+
+def analyze_floor(
+    project_id: UUID | str,
+    floor_id: UUID | str,
+    quality: str = "medium",
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Detect one floor using the signed-in ChatGPT/Codex account.
+
+    The raw structured detection is cached in project storage before it is
+    projected into PostgreSQL. Reopening the same unchanged project therefore
+    never needs another model turn. Explicit force-runs are the only normal
+    way to spend another model turn for the same source.
+    """
     pid, fid = str(project_id), str(floor_id)
-    require_frozen_project(pid)
+    project = require_frozen_project(pid)
     ctx = floor_context(fid)
     if str(ctx["project_id"]) != pid:
         raise ValueError("Floor does not belong to project")
     if not ctx.get("scale_verified") or not ctx.get("mm_per_pixel"):
         raise RuntimeError("Confirm the controlling plan scale in Pre before Floor analysis.")
 
-    model = model_for_quality(quality)
-    request_payload = {"project": pid, "floor": fid, "crop_version": ctx["crop_version"], "quality": quality}
-    run_id = _start_run(pid, fid, "geometry_and_finish", model, content_hash(request_payload))
+    source_hash = _floor_source_hash(project, ctx)
+    viewport_hash = _viewport_source_hash(project, ctx)
+    existing = fetch_one("SELECT count(*) AS n FROM floor_space WHERE floor_id=%s", (fid,))
+    existing_count = int(existing["n"]) if existing else 0
+    if existing_count > 0 and not force:
+        boundary_audit = audit_saved_floor_boundaries(pid, fid)
+        saved = _load_cached_detection(pid, fid, source_hash)
+        if saved is not None:
+            saved_geometry, saved_catalog = saved
+            _subtract_non_floor_regions(saved_geometry)
+            _validate_floor_geometry(saved_geometry)
+            _save_viewport_detection(pid, ctx, viewport_hash, quality, saved_geometry, saved_catalog)
+        return {
+            "spaces": existing_count,
+            "skipped": True,
+            "cached": True,
+            "reason": "saved floor geometry",
+            "source_hash": source_hash,
+            "boundary_audit": boundary_audit,
+        }
+
+    if force:
+        confirmed = fetch_one(
+            "SELECT count(*) AS n FROM floor_space WHERE floor_id=%s AND user_confirmed=true",
+            (fid,),
+        )
+        if confirmed and int(confirmed["n"]) > 0:
+            raise RuntimeError(
+                "This floor contains user-confirmed geometry. Clear/replace it explicitly before rerunning detection so confirmed work is never overwritten."
+            )
+
+    cached = None if force else _load_cached_detection(pid, fid, source_hash)
+    if cached is not None:
+        geometry, catalog = cached
+        _subtract_non_floor_regions(geometry)
+        _validate_floor_geometry(geometry)
+        wall_audits = audit_and_snap_floor_spaces(geometry, str(ctx["viewport_id"]))
+        _validate_floor_geometry(geometry)
+        finish_ids, work_ids = _upsert_catalog(pid, catalog)
+        _insert_spaces(pid, ctx, geometry, catalog, finish_ids, work_ids, FLOOR_MODEL_LABEL, wall_audits)
+        return {
+            "spaces": len(geometry.spaces),
+            "warnings": geometry.warnings + catalog.warnings,
+            "questions": geometry.questions,
+            "cached": True,
+            "source_hash": source_hash,
+        }
+
+    # A single approved typical-plan viewport can represent several storeys.
+    # Reuse the already validated physical geometry so identical walls produce
+    # identical quantities on every represented level. Storey identity remains
+    # attached by _insert_spaces through the target takeoff_floor record.
+    shared = _load_viewport_detection(pid, str(ctx["viewport_id"]), viewport_hash, quality)
+    if shared is not None:
+        geometry, catalog, source_floor_name = shared
+        geometry = geometry.model_copy(deep=True)
+        geometry.floor_label = str(ctx.get("name") or geometry.floor_label or "")
+        if source_floor_name and source_floor_name != str(ctx.get("name") or ""):
+            target_name = str(ctx.get("name") or "this level")
+            geometry.warnings = [warning.replace(source_floor_name, target_name) for warning in geometry.warnings]
+            geometry.questions = [question.replace(source_floor_name, target_name) for question in geometry.questions]
+        _subtract_non_floor_regions(geometry)
+        _validate_floor_geometry(geometry)
+        shared_missing = _audit_room_label_coverage(geometry, extract_viewport_text(ctx["viewport_id"]))
+        if not shared_missing:
+            wall_audits = audit_and_snap_floor_spaces(geometry, str(ctx["viewport_id"]))
+            _validate_floor_geometry(geometry)
+            geometry.warnings.append(
+                f"Validated geometry was reused from the same approved typical-plan viewport for {ctx['name']}."
+            )
+            _save_cached_detection(pid, fid, source_hash, quality, geometry, catalog)
+            finish_ids, work_ids = _upsert_catalog(pid, catalog)
+            _insert_spaces(pid, ctx, geometry, catalog, finish_ids, work_ids, FLOOR_MODEL_LABEL, wall_audits)
+            return {
+                "spaces": len(geometry.spaces),
+                "warnings": geometry.warnings + catalog.warnings,
+                "questions": geometry.questions,
+                "cached": True,
+                "shared_viewport": True,
+                "source_hash": source_hash,
+            }
+
+    auth = codex_account_status()
+    if not auth.get("available"):
+        raise RuntimeError(auth.get("error") or "Floor account detection is not installed")
+    if not auth.get("authenticated"):
+        raise RuntimeError("Connect a ChatGPT account in the Floor workspace before running detection.")
+
+    run_id = _start_run(pid, fid, "geometry_and_finish", FLOOR_MODEL_LABEL, source_hash)
     try:
-        model_client = get_model_client("takeoff")
+        model_client = HarnessModelClient("floor", pid)
         words = extract_viewport_text(ctx["viewport_id"])
         prompt = FLOOR_GEOMETRY_PROMPT.format(
             width=ctx["drawing_width"], height=ctx["drawing_height"], floor_name=ctx["name"],
             context="\n".join(f"{x['text']} @ {x['bbox']}" for x in words),
         )
-        geometry = model_client.parse_image(ctx["crop_path"], prompt, FloorGeometryOutput, system=FLOOR_SYSTEM, model=model)
-        if geometry.source_width_px != int(ctx["drawing_width"]) or geometry.source_height_px != int(ctx["drawing_height"]):
-            raise RuntimeError(
-                f"AI coordinate space mismatch: returned {geometry.source_width_px}x{geometry.source_height_px}, "
-                f"expected {ctx['drawing_width']}x{ctx['drawing_height']}. The result was rejected rather than rescaled silently."
+        geometry = model_client.parse_image(
+            ctx["crop_path"], prompt, FloorGeometryOutput,
+            system=FLOOR_SYSTEM, quality=quality,
+        )
+
+        def validate_detected_geometry(candidate: FloorGeometryOutput) -> tuple[list[str], list[dict[str, Any]]]:
+            if candidate.source_width_px != int(ctx["drawing_width"]) or candidate.source_height_px != int(ctx["drawing_height"]):
+                raise RuntimeError(
+                    f"AI coordinate space mismatch: returned {candidate.source_width_px}x{candidate.source_height_px}, "
+                    f"expected {ctx['drawing_width']}x{ctx['drawing_height']}. The result was rejected rather than rescaled silently."
+                )
+            _subtract_non_floor_regions(candidate)
+            _validate_floor_geometry(candidate)
+            coverage_failures = _audit_room_label_coverage(candidate, words)
+            wall_audits = audit_and_snap_floor_spaces(candidate, str(ctx["viewport_id"]))
+            _validate_floor_geometry(candidate)
+            return coverage_failures, wall_audits
+
+        validation_failures: list[str]
+        wall_audits: list[dict[str, Any]] = []
+        try:
+            coverage_failures, wall_audits = validate_detected_geometry(geometry)
+            validation_failures = coverage_failures + wall_audit_failures(wall_audits)
+        except RuntimeError as exc:
+            validation_failures = [str(exc)]
+        if validation_failures:
+            repair_prompt = (
+                prompt
+                + "\n\nCORRECTION PASS — the previous result failed deterministic geometry and/or room-label validation.\n"
+                + "Return a COMPLETE replacement result, not a patch. Fix every listed problem. All polygons and holes "
+                  "must be simple, valid, non-self-intersecting rings. Redraw each listed room from its own enclosing "
+                  "inner-wall loop and place every edge on the visible INNER FACE of the wall. Room polygons must never "
+                  "cut across wall thickness or cross an unrelated partition. The matching label centre must be inside "
+                  "its matching room polygon. Do not move or "
+                  "rename labels, and do not use balcony/exterior strips as bathroom or bedroom geometry.\nFailures:\n- "
+                + "\n- ".join(validation_failures)
+                + "\n\nPrevious structured result (use only to locate what must be corrected):\n"
+                + geometry.model_dump_json()
             )
-        _validate_floor_geometry(geometry)
+            geometry = model_client.parse_image(
+                ctx["crop_path"], repair_prompt, FloorGeometryOutput,
+                system=FLOOR_SYSTEM, quality="expert",
+            )
+            try:
+                remaining_coverage, wall_audits = validate_detected_geometry(geometry)
+            except RuntimeError as exc:
+                remaining_coverage = [str(exc)]
+                wall_audits = []
+            if remaining_coverage:
+                raise RuntimeError(
+                    "Floor detection was rejected because geometry or labelled rooms remained invalid after correction: "
+                    + "; ".join(remaining_coverage)
+                )
+            geometry.warnings.append(
+                "Room boundaries were automatically corrected after deterministic geometry and semantic-label validation."
+            )
+        wall_review_count = sum(audit.get("status") != "wall_verified" for audit in wall_audits)
+        if wall_review_count:
+            geometry.warnings.append(
+                f"{wall_review_count} room boundary/boundaries remain below the PDF wall-vector confidence gate. "
+                "They were saved for visible correction but are blocked from confirmation and BOQ."
+            )
 
         specs = project_text_evidence(pid)
         catalog = FloorCatalogOutput()
         if specs.strip():
-            catalog = model_client.parse_text(
-                FLOOR_CATALOG_PROMPT.format(spec_text=specs), FloorCatalogOutput,
-                system=FLOOR_CATALOG_SYSTEM, model=model,
-            )
+            catalog_hash = content_hash({
+                "frame_version": project.get("frame_version"),
+                "prompt_version": FLOOR_PROMPT_VERSION,
+                "spec_sha256": hashlib.sha256(specs.encode("utf-8")).hexdigest(),
+            })
+            # Geometry may be intentionally re-run while the project specification
+            # is unchanged. Reuse the project catalog in that case; its own hash
+            # invalidates automatically when specification evidence changes.
+            cached_catalog = _load_catalog_cache(pid, catalog_hash)
+            if cached_catalog is not None:
+                catalog = cached_catalog
+            else:
+                catalog = model_client.parse_text(
+                    FLOOR_CATALOG_PROMPT.format(spec_text=specs), FloorCatalogOutput,
+                    system=FLOOR_CATALOG_SYSTEM, quality=quality,
+                )
+                _save_catalog_cache(pid, catalog_hash, quality, catalog)
+
+        # Save the expensive model result first. If DB projection is interrupted,
+        # the same detection can be restored later without another account turn.
+        _save_cached_detection(pid, fid, source_hash, quality, geometry, catalog)
+        _save_viewport_detection(pid, ctx, viewport_hash, quality, geometry, catalog)
+
         finish_ids, work_ids = _upsert_catalog(pid, catalog)
-        _insert_spaces(pid, ctx, geometry, catalog, finish_ids, work_ids, model)
-        result = {"spaces": len(geometry.spaces), "warnings": geometry.warnings + catalog.warnings, "questions": geometry.questions}
+        _insert_spaces(pid, ctx, geometry, catalog, finish_ids, work_ids, FLOOR_MODEL_LABEL, wall_audits)
+        result = {
+            "spaces": len(geometry.spaces),
+            "warnings": geometry.warnings + catalog.warnings,
+            "questions": geometry.questions,
+            "cached": False,
+            "source_hash": source_hash,
+        }
         _finish_run(run_id, status="completed", progress=100, message="Floor analysis complete", result=result)
         return result
     except Exception as exc:
@@ -497,24 +1110,132 @@ def analyze_floor(project_id: UUID | str, floor_id: UUID | str, quality: str = "
         raise
 
 
-def analyze_project_floors(project_id: UUID | str, quality: str = "medium") -> dict[str, Any]:
+def analyze_project_floors(
+    project_id: UUID | str,
+    quality: str = "medium",
+    *,
+    force: bool = False,
+    progress_callback: Any | None = None,
+) -> dict[str, Any]:
     from .scope.engine import get_scope
 
-    scope = get_scope(str(project_id), "floor", auto_run=True)
+    pid = str(project_id)
+    scope = get_scope(pid, "floor", auto_run=True)
     if scope.get("status") == "blocked":
         first = next((gap.get("message") for gap in scope.get("coverage_gaps", []) if gap.get("severity") == "blocked"), "Floor Scope is blocked")
         raise RuntimeError(f"Floor Scope is not ready: {first}")
-    floors = ensure_takeoff_floors(project_id)
+    floors = ensure_takeoff_floors(pid)
     if not floors:
         raise RuntimeError("No Takeoff floors can be built. Complete Pre storeys/plans first.")
+    if force:
+        # A force run means fresh source interpretation. Remove only the derived
+        # viewport AI caches before the first floor is processed. The first use
+        # of each unique drawing is then detected afresh; later typical storeys
+        # can reuse that newly validated result during this same project run.
+        for viewport_id in {str(floor.get("viewport_id")) for floor in floors if floor.get("viewport_id")}:
+            _viewport_cache_path(pid, viewport_id).unlink(missing_ok=True)
     results = []
-    for floor in floors:
-        existing = fetch_one("SELECT count(*) AS n FROM floor_space WHERE floor_id=%s", (str(floor["id"]),))
-        if existing and int(existing["n"]) > 0:
-            results.append({"floor_id": str(floor["id"]), "skipped": True, "reason": "existing floor geometry"})
-            continue
-        results.append({"floor_id": str(floor["id"]), **analyze_floor(project_id, floor["id"], quality)})
+    total = len(floors)
+    for index, floor in enumerate(floors, start=1):
+        if progress_callback:
+            progress_callback(index, total, floor)
+        results.append({
+            "floor_id": str(floor["id"]),
+            **analyze_floor(pid, floor["id"], quality, force=force),
+        })
     return {"floors": results}
+
+
+def _run_floor_analysis(project_id: str, quality: str, force: bool, *, lock_acquired: bool = False) -> None:
+    lock = _floor_lock(project_id)
+    if not lock_acquired and not lock.acquire(blocking=False):
+        return
+    try:
+        _set_floor_status(project_id, "running", 3, "Preparing floor drawings")
+
+        def progress(index: int, total: int, floor: dict[str, Any]) -> None:
+            pct = 8 + int(((index - 1) / max(total, 1)) * 84)
+            _set_floor_status(
+                project_id, "running", pct,
+                f"Detecting floor areas · {floor.get('name') or f'floor {index}'}",
+                current=index, total=total, floor_id=str(floor.get("id") or ""),
+            )
+
+        result, _harness_report = run_element_harness(
+            project_id, "floor", quality, force,
+            lambda: analyze_project_floors(project_id, quality, force=force, progress_callback=progress),
+            evaluate_element, publish_element_facts,
+        )
+        _set_floor_status(
+            project_id, "completed", 100, "Floor analysis complete", result=result,
+            harness_status=_harness_report.status,
+            harness_issues=[
+                {"code": issue.code, "message": issue.message, "severity": issue.severity, "entity_refs": list(issue.entity_refs)}
+                for issue in _harness_report.issues
+            ],
+            harness_stats=_harness_report.stats,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _set_floor_status(
+            project_id, "failed", 100, "Floor analysis failed",
+            error_message=str(exc)[:1000], traceback=traceback.format_exc(limit=6),
+        )
+    finally:
+        lock.release()
+
+
+def start_floor_analysis(project_id: UUID | str, quality: str = "medium", *, force: bool = False) -> dict[str, Any]:
+    pid = str(project_id)
+    require_frozen_project(pid)
+    auth = codex_account_status()
+    if not auth.get("available"):
+        raise RuntimeError(auth.get("error") or "Floor account detection is not installed")
+    if not auth.get("authenticated"):
+        raise RuntimeError("Connect a ChatGPT account in the Floor workspace before running detection.")
+    if force:
+        confirmed = fetch_one(
+            "SELECT count(*) AS n FROM floor_space WHERE project_id=%s AND user_confirmed=true",
+            (pid,),
+        )
+        if confirmed and int(confirmed["n"]) > 0:
+            raise RuntimeError(
+                "This project contains user-confirmed Floor geometry. Clear/replace it explicitly before rerunning detection so confirmed work is never overwritten."
+            )
+
+    lock = _floor_lock(pid)
+    if not lock.acquire(blocking=False):
+        return _read_json(
+            _floor_status_path(pid),
+            {"status": "running", "progress": 1, "message": "Preparing floor drawings"},
+        )
+    status = _set_floor_status(pid, "running", 1, "Preparing floor drawings")
+    thread = threading.Thread(
+        target=_run_floor_analysis,
+        kwargs={"project_id": pid, "quality": quality, "force": force, "lock_acquired": True},
+        daemon=True,
+        name=f"floors-{pid[:8]}",
+    )
+    try:
+        thread.start()
+    except Exception:
+        lock.release()
+        raise
+    return status
+
+
+def floor_analysis_status(project_id: UUID | str) -> dict[str, Any]:
+    pid = str(project_id)
+    status = _read_json(_floor_status_path(pid), {})
+    if status:
+        if status.get("status") == "running" and not _floor_lock(pid).locked():
+            return _set_floor_status(pid, "failed", int(status.get("progress") or 0), "Previous Floor run was interrupted. Retry will reuse saved/cached evidence.", error_message="interrupted", recoverable=True)
+        return status
+    run = fetch_one(
+        "SELECT status,progress,message,error_message FROM takeoff_analysis_run "
+        "WHERE project_id=%s AND module='floor' ORDER BY created_at DESC LIMIT 1",
+        (pid,),
+    )
+    return run or {"status": "not_started", "progress": 0, "message": None, "error_message": None}
 
 
 def _db_status(status: str | None) -> str:
@@ -540,7 +1261,8 @@ def floor_demo_state(project_id: UUID | str) -> dict[str, Any]:
                   f.viewport_id FROM finish_zone z
            JOIN floor_space s ON s.id=z.room_id JOIN takeoff_floor f ON f.id=z.floor_id
            LEFT JOIN finish_assignment a ON a.zone_id=z.id
-           WHERE z.project_id=%s ORDER BY f.level_index,z.friendly_number""",
+           WHERE z.project_id=%s AND s.space_kind<>'connector'
+           ORDER BY f.level_index,z.friendly_number""",
         (pid,),
     )
     zones = []
@@ -555,12 +1277,31 @@ def floor_demo_state(project_id: UUID | str) -> dict[str, Any]:
             "viewportId": str(row["viewport_id"]), "points": _points(geometry), "deducts": geometry.get("deducts") or [],
             "room": row.get("room_name") or row.get("room_type") or row.get("name") or "Floor zone", "status": status,
         })
+    region_rows = fetch_all(
+        """SELECT r.*,f.viewport_id FROM floor_region r
+           JOIN takeoff_floor f ON f.id=r.floor_id
+           WHERE r.project_id=%s AND r.region_kind<>'connector'
+           ORDER BY f.level_index,r.region_kind,r.name""",
+        (pid,),
+    )
+    review_regions = [{
+        "id": str(row["id"]),
+        "kind": str(row["region_kind"]),
+        "name": row.get("name") or str(row.get("classification") or "Review region").replace("_", " ").title(),
+        "classification": row.get("classification") or row["region_kind"],
+        "floorId": str(row["floor_id"]),
+        "viewportId": str(row["viewport_id"]),
+        "points": _points(row.get("geometry") or {}),
+        "areaM2": float(row["area_m2"]) if row.get("area_m2") is not None else None,
+        "confidence": float(row["confidence"]) if row.get("confidence") is not None else None,
+    } for row in region_rows if len(_points(row.get("geometry") or {})) >= 3]
     ui = fetch_one("SELECT state_json FROM takeoff_ui_state WHERE project_id=%s AND module='floor'", (pid,))
-    runs = fetch_one("SELECT status,progress,message,error_message FROM takeoff_analysis_run WHERE project_id=%s AND module='floor' ORDER BY created_at DESC LIMIT 1", (pid,))
     return {
-        **context, "families": families, "zones": zones, "uiState": (ui or {}).get("state_json") or {},
-        "analysis": runs or {"status": "not_started", "progress": 0, "message": None, "error_message": None},
-        "provider": get_settings().takeoff_ai_provider,
+        **context, "families": families, "zones": zones, "reviewRegions": review_regions,
+        "uiState": (ui or {}).get("state_json") or {},
+        "analysis": floor_analysis_status(pid),
+        "provider": FLOOR_PROVIDER,
+        "auth": codex_account_status(),
     }
 
 

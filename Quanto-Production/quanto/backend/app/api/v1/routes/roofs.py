@@ -17,12 +17,18 @@ from ....modules.takeoff.roofs import (
     _save_geometry,
     _validate_geometry,
     analyze_project_roofs,
+    start_roof_analysis,
     roof_demo_state,
     roof_state,
     save_roof_demo_state,
     update_roof_entity,
 )
 from ....services.pdf.media import ensure_viewport_crop
+from ....services.ai.codex_account import (
+    codex_account_status,
+    logout_codex_account,
+    start_codex_account_login,
+)
 from ....modules.takeoff.model_schemas import RoofGeometryOutput
 
 router = APIRouter(tags=["roof-takeoff"])
@@ -88,10 +94,34 @@ def put_demo_state(project_id: UUID, body: DemoStateBody):
         raise HTTPException(409, str(exc)) from exc
 
 
+@router.get("/projects/{project_id}/takeoff/roof/auth")
+def roof_auth_status(project_id: UUID):
+    del project_id
+    return codex_account_status(refresh=True)
+
+
+@router.post("/projects/{project_id}/takeoff/roof/auth/login")
+def roof_auth_login(project_id: UUID):
+    del project_id
+    try:
+        return start_codex_account_login()
+    except (ValueError, RuntimeError, TypeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/takeoff/roof/auth/logout")
+def roof_auth_logout(project_id: UUID):
+    del project_id
+    try:
+        return logout_codex_account()
+    except (ValueError, RuntimeError, TypeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.post("/projects/{project_id}/takeoff/roof/analyze")
 def analyze_takeoff_roof(project_id: UUID, quality: str = Query(default="medium", pattern="^(easy|medium|expert|maximum)$"), force: bool = False):
     try:
-        return analyze_project_roofs(project_id, quality=quality, force=force)
+        return start_roof_analysis(project_id, quality=quality, force=force)
     except (ValueError, RuntimeError, TypeError) as exc:
         raise HTTPException(409, str(exc)) from exc
 

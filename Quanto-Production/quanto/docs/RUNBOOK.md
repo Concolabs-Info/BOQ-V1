@@ -56,7 +56,7 @@ This permanently removes the local database and uploaded drawings.
 
 ## Database migration
 
-Fresh Docker databases load `database/schema/001_pre.sql` automatically. Existing databases should run migrations in filename order:
+Fresh Docker databases load the current production schema chain automatically, including the shared element harness migration `011_element_harness.sql`. Existing databases should run migrations in filename order:
 
 ```bash
 ./infrastructure/scripts/migrations/apply.sh

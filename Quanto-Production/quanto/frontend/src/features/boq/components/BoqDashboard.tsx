@@ -178,6 +178,7 @@ export function BoqDashboard({ projectId, initialPanel = null }: { projectId: st
 
       <div className="space-y-5 bg-slate-50 p-5 lg:p-6">
         {error ? <ErrorMessage message={error} /> : null}
+        {state?.production_error ? <ErrorMessage message={`Production takeoff quantities could not be refreshed. Existing BOQ rows were preserved. ${state.production_error}`} /> : null}
 
         <main className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="border-b border-slate-200 px-5 py-4">

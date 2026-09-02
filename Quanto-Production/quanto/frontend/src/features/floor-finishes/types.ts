@@ -111,6 +111,8 @@ export type FinishRoom = {
   space_kind: string;
   include_in_boq: boolean;
   status: string;
+  geometry_status: string;
+  source_evidence?: Array<{ kind: string; text?: string | null; confidence?: number; support_ratio?: number; wall_overlap_ratio?: number }>;
   assignments: FinishAssignment[];
   zones: FinishZone[];
   evidence: FinishEvidence[];
@@ -140,6 +142,8 @@ export type FinishSummary = {
   conflicts: number;
   unassigned: number;
   area_m2: number;
+  boundary_review: number;
+  boundary_review_area_m2: number;
 };
 
 export type FloorFinishState = {

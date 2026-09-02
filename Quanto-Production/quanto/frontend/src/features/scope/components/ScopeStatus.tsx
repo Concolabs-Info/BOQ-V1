@@ -118,9 +118,9 @@ export function ScopeStatus({ projectId, element }: { projectId: string; element
 
   return (
     <div className={`mb-2 border ${tone}`}>
-      <button type="button" onClick={() => setOpen((value) => !value)} className="flex min-h-9 w-full items-center justify-between gap-4 px-3 py-1.5 text-left">
+      <button type="button" onClick={() => setOpen((value) => !value)} className="flex min-h-8 w-full items-center justify-between gap-3 px-2.5 py-1 text-left">
         <div className="flex min-w-0 items-center gap-3 text-xs">
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-current/10 text-[10px]">{scope.status === "blocked" ? "!" : "✓"}</span>
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-current/10 text-[9px]">{scope.status === "blocked" ? "!" : "✓"}</span>
           <span className="shrink-0 font-semibold">{title}</span>
           <span className="truncate border-l border-current/15 pl-3 opacity-80">{coverageText}</span>
         </div>

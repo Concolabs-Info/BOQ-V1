@@ -1,4 +1,4 @@
-from ..models import ElementScopeSpec
+from ..models import ElementScopeSpec, FactDependency
 
 SCOPE_SPEC = ElementScopeSpec(
     key="floor",
@@ -12,4 +12,5 @@ SCOPE_SPEC = ElementScopeSpec(
     evidence_keywords=("floor", "finish", "room", "screed", "skirting", "waterproof"),
     legacy_name_patterns=("floor plan", "general arrangement", "apartment plan", "layout"),
     use_storey_source=True,
+    dependencies=(FactDependency("opening_area", "doors-windows", required=False),),
 )

@@ -1,6 +1,6 @@
 "use client";
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import {
   CEILING_FAMILIES,
   CEILING_ZONES,
@@ -26,6 +26,7 @@ import type {
   ChatMessage,
   DemoStatus,
   FinishFamily,
+  FloorReviewRegion,
   HeightRecord,
   Opening,
   OpeningFamily,
@@ -46,6 +47,30 @@ import type { BoqDocumentSetup, BoqExport, BoqRow } from "@/features/boq/types";
 import { requestGuardedAction, useEditSessionStore } from "@/features/quanto/editing/editSessionStore";
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+const quotaSafeBrowserStorage = createJSONStorage(() => ({
+  getItem: (name: string) => {
+    try { return window.localStorage.getItem(name); } catch { return null; }
+  },
+  setItem: (name: string, value: string) => {
+    try {
+      window.localStorage.setItem(name, value);
+    } catch {
+      // The persisted takeoff state is only a small UI preference cache. If an
+      // older release left one oversized geometry snapshot behind, remove only
+      // this store key and retry; production geometry remains on the server.
+      try {
+        window.localStorage.removeItem(name);
+        window.localStorage.setItem(name, value);
+      } catch {
+        // Storage can be disabled/private. Never crash the workspace for it.
+      }
+    }
+  },
+  removeItem: (name: string) => {
+    try { window.localStorage.removeItem(name); } catch { /* optional cache */ }
+  },
+}));
 function stageLiveChange<T>(key: string, title: string, original: T, restore: (value: T) => void): boolean {
   const edit = useEditSessionStore.getState();
   if (edit.saving) return false;
@@ -74,6 +99,7 @@ export type DemoState = {
   storeys: Storey[];
   openings: Opening[];
   floorZones: Zone[];
+  floorReviewRegions: FloorReviewRegion[];
   ceilingZones: Zone[];
   walls: Wall[];
   roofZones: RoofZone[];
@@ -205,6 +231,7 @@ function seed() {
     storeys: clone(STOREYS),
     openings: clone(OPENINGS),
     floorZones: clone(FLOOR_ZONES),
+    floorReviewRegions: [],
     ceilingZones: clone(CEILING_ZONES),
     walls: clone(WALLS),
     roofZones: clone(ROOF_ZONES),
@@ -430,17 +457,20 @@ export const useDemoStore = create<DemoState>()(
         const original = get().walls.find((x) => x.id === id);
         if (original && hasBoqField(original, patch) && !stageLiveChange(`demo:wall:${id}`, `wall ${id}`, original, (value) => set((st) => ({ walls: st.walls.map((x) => x.id === id ? value : x) })))) return;
         set((st) => ({
-          walls: st.walls.map((x) =>
-            x.id === id
-              ? {
-                  ...x,
-                  ...patch,
-                  status:
-                    patch.status ??
-                    (x.status === "confirmed" ? "ready" : x.status),
-                }
-              : x,
-          ),
+          walls: st.walls.map((x) => {
+            if (x.id !== id) return x;
+            const geometryChanged = patch.start !== undefined || patch.end !== undefined || patch.viewportId !== undefined;
+            const quantityChanged = geometryChanged || patch.heightM !== undefined;
+            const finishChanged = patch.side1Finish !== undefined || patch.side2Finish !== undefined;
+            return {
+              ...x,
+              ...patch,
+              ...(quantityChanged ? { lengthM: undefined, grossAreaM2: undefined, netAreaM2: undefined } : {}),
+              ...(geometryChanged ? { openingDeductionM2: undefined } : {}),
+              ...((quantityChanged || finishChanged) ? { side1FinishAreaM2: undefined, side2FinishAreaM2: undefined, finishFaces: undefined } : {}),
+              status: patch.status ?? (x.status === "confirmed" ? "ready" : x.status),
+            };
+          }),
         }));
       },
       addWall: (wall) => { const selected = get().selectedEntityId; if (!stageLiveChange(`demo:create:wall:${wall.id}`, `new wall ${wall.id}`, selected, (value) => set((st) => ({ walls: st.walls.filter((x) => x.id !== wall.id), selectedEntityId: value })))) return; set((st) => ({ walls: [...st.walls, wall], selectedEntityId: wall.id, selectedEntityIds:[wall.id], rightTab: "item" })); },
@@ -680,7 +710,23 @@ export const useDemoStore = create<DemoState>()(
     }),
     {
       name: "quanto-demo-state-v4",
-      version: 12,
+      version: 13,
+      storage: quotaSafeBrowserStorage,
+      // Drawings, vectors, detected zones and undo geometry can be many MB and
+      // are server-owned in a real project. Persist only compact user/UI data.
+      partialize: (state) => ({
+        selectedViewportId: state.selectedViewportId,
+        selectedEntityId: state.selectedEntityId,
+        selectedEntityIds: state.selectedEntityIds,
+        leftCollapsed: state.leftCollapsed,
+        rightTab: state.rightTab,
+        workbookOverrides: state.workbookOverrides,
+        workbookConfirmed: state.workbookConfirmed,
+        boqOverrides: state.boqOverrides,
+        manualRows: state.manualRows,
+        exports: state.exports,
+        boqSetup: state.boqSetup,
+      }),
       merge: (persisted, current) => {
         const saved = persisted as Partial<DemoState>;
         const obsoleteFloorZones = new Set(["FZ-G01","FZ-G02","FZ-G03","FZ-G04","FZ-01","FZ-02","FZ-03","FZ-04","FZ-11","FZ-12","FZ-13","FZ-14"]);
@@ -738,6 +784,9 @@ export const useDemoStore = create<DemoState>()(
           wallFinishFamilies: mergeBuiltIns(saved.wallFinishFamilies, current.wallFinishFamilies),
           roofFamilies: mergeBuiltIns(saved.roofFamilies, current.roofFamilies),
           floorZones: mergeSeedGeometry(savedFloorZones, current.floorZones, ["familyId", "room", "viewportId", "floorId", "points", "deducts"]),
+          // Classified/excluded floor regions are read-only server evidence. Never
+          // revive an obsolete local copy when switching projects or drawings.
+          floorReviewRegions: current.floorReviewRegions,
           ceilingZones: mergeSeedGeometry(savedCeilingZones, current.ceilingZones, ["familyId", "room", "viewportId", "floorId", "points", "deducts"]),
           walls: mergeSeedGeometry(savedWalls, current.walls, ["familyId", "floorId", "viewportId", "start", "end", "heightM", "side1Finish", "side2Finish", "status"]),
           roofZones: mergeSeedGeometry(savedRoofZones, current.roofZones, ["familyId", "upstandFamilyId", "scope", "floorId", "viewportId", "points", "deducts", "upstandEdges", "status"]),

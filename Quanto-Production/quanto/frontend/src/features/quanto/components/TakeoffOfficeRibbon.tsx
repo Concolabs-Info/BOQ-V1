@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type SVGProps } from "react";
 import { useDemoStore } from "@/features/demo/store";
 import { appRoutes } from "@/shared/constants/appRoutes";
@@ -14,6 +15,7 @@ import {
   type TakeoffWorkspaceStatus,
 } from "../takeoffCommands";
 import { usePdfSnapModes } from "../snapping/pdfVectorSnap";
+import { friendlyRoomLabel } from "../friendlyLabels";
 
 type RibbonTab =
   | "home"
@@ -104,6 +106,10 @@ const contextual: Record<string, RibbonGroup> = {
 };
 
 export function TakeoffOfficeRibbon({ projectId, element, view, elementName }: { projectId: string; element: string; view: string; elementName: string }) {
+  const search = useSearchParams();
+  const floorPartSuffix = element === "floor" && search.get("floorPart")
+    ? `?floorPart=${encodeURIComponent(search.get("floorPart") || "areas")}`
+    : "";
   const [active, setActive] = useState<RibbonTab>("home");
   const [activeCommand, setActiveCommand] = useState("home-navigate-select");
   const [commandOpen, setCommandOpen] = useState(false);
@@ -177,7 +183,7 @@ export function TakeoffOfficeRibbon({ projectId, element, view, elementName }: {
             {(["Undo", "Redo", "Delete"] as const).map((label) => <button key={label} type="button" title={`${label}${label === "Undo" ? " (Ctrl+Z)" : label === "Redo" ? " (Ctrl+Y)" : " (Delete)"}`} aria-label={label} onClick={() => runQuickAction(label)} className={label === "Delete" ? "flex h-8 items-center gap-1.5 border-l border-slate-200 px-2.5 text-[10px] font-semibold text-red-600 hover:bg-red-50" : "flex h-8 items-center gap-1.5 border-l border-slate-200 px-2.5 text-[10px] font-semibold text-slate-700 first:border-l-0 hover:bg-slate-100"}><span className="text-base leading-none" aria-hidden="true">{commandEmoji(label)}</span><span>{label}</span></button>)}
           </div>
           <div className="mb-1 ml-auto flex shrink-0 items-center rounded-md border border-slate-300 bg-white p-0.5">
-            {[["dimension", "Drawing"], ["workbook", "Workbook"], ["3d", "3D"]].map(([key, label]) => <Link key={key} href={appRoutes.takeoff(projectId, element, key)} className={view === key ? "rounded bg-slate-800 px-3 py-1.5 text-[10px] font-bold text-white" : "rounded px-3 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100"}>{label}</Link>)}
+            {[["dimension", "Drawing"], ["workbook", "Workbook"], ["3d", "3D"]].map(([key, label]) => <Link key={key} href={`${appRoutes.takeoff(projectId, element, key)}${floorPartSuffix}`} className={view === key ? "rounded bg-slate-800 px-3 py-1.5 text-[10px] font-bold text-white" : "rounded px-3 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100"}>{label}</Link>)}
           </div>
         </div>
       </div>
@@ -191,6 +197,19 @@ export function TakeoffOfficeRibbon({ projectId, element, view, elementName }: {
 export function TakeoffOfficeStatusBar({ elementName }: { elementName: string }) {
   const selectedId = useDemoStore((state) => state.selectedEntityId);
   const selectedIds = useDemoStore((state) => state.selectedEntityIds);
+  const selectedLabel = useDemoStore((state) => {
+    const id = state.selectedEntityId;
+    if (!id) return null;
+    const zone = [...state.floorZones, ...state.ceilingZones].find((item) => item.id === id);
+    if (zone) return friendlyRoomLabel(zone.room);
+    const opening = state.openings.find((item) => item.id === id);
+    if (opening) return opening.openingTag || state.openingFamilies.find((item) => item.id === opening.familyId)?.description || (opening.kind === "door" ? "Door" : "Window");
+    const wall = state.walls.find((item) => item.id === id);
+    if (wall) return state.wallFamilies.find((item) => item.id === wall.familyId)?.description || "Wall";
+    const roof = state.roofZones.find((item) => item.id === id);
+    if (roof) return `${roof.scope} roof area`;
+    return "Takeoff item";
+  });
   const selectedViewportId = useDemoStore((state) => state.selectedViewportId);
   const viewport = useDemoStore((state) => state.viewports.find((item) => item.id === selectedViewportId));
   const [view, setView] = useState<TakeoffViewState>({ zoom: 1, x: 0, y: 0, fullscreen: false });
@@ -202,7 +221,7 @@ export function TakeoffOfficeStatusBar({ elementName }: { elementName: string })
     window.addEventListener(TAKEOFF_STATUS_EVENT, statusListener);
     return () => { window.removeEventListener(TAKEOFF_VIEW_EVENT, viewListener); window.removeEventListener(TAKEOFF_STATUS_EVENT, statusListener); };
   }, []);
-  return <div className="flex h-7 shrink-0 items-center justify-between gap-3 overflow-hidden border-t border-slate-300 bg-[#eef2f6] px-3 text-[10px] font-medium text-slate-600"><div className="flex min-w-0 items-center gap-4"><span className="truncate font-semibold text-slate-800">{viewport?.name || elementName}</span><span>Scale {viewport?.scaleMPerPx ? "calibrated" : "—"}</span><span>{Math.round(view.zoom * 100)}%</span><span>X {Math.round(view.x)}</span><span>Y {Math.round(view.y)}</span><span className={status.snap ? "text-blue-700" : ""}>Snap {status.snap ? "ON" : "OFF"}</span><span>Ortho {status.ortho ? "ON" : "OFF"}</span></div><div className="flex shrink-0 items-center gap-4"><span>{status.message}</span><span>{selectedIds.length > 1 ? `${selectedIds.length} selected` : selectedId ? `Selected ${selectedId}` : "0 selected"}</span><span className={status.saving === "saved" ? "text-emerald-700" : "text-amber-700"}>{status.saving === "saving" ? "Saving…" : status.saving === "editing" ? "Editing…" : "Saved ✓"}</span></div></div>;
+  return <div className="flex h-7 shrink-0 items-center justify-between gap-3 overflow-hidden border-t border-slate-300 bg-[#eef2f6] px-3 text-[10px] font-medium text-slate-600"><div className="flex min-w-0 items-center gap-4"><span className="truncate font-semibold text-slate-800">{viewport?.name || elementName}</span><span>Scale {viewport?.scaleMPerPx ? "calibrated" : "—"}</span><span>{Math.round(view.zoom * 100)}%</span><span>X {Math.round(view.x)}</span><span>Y {Math.round(view.y)}</span><span className={status.snap ? "text-blue-700" : ""}>Snap {status.snap ? "ON" : "OFF"}</span><span>Ortho {status.ortho ? "ON" : "OFF"}</span></div><div className="flex shrink-0 items-center gap-4"><span>{status.message}</span><span>{selectedIds.length > 1 ? `${selectedIds.length} selected` : selectedId ? `Selected: ${selectedLabel}` : "0 selected"}</span><span className={status.saving === "saved" ? "text-emerald-700" : "text-amber-700"}>{status.saving === "saving" ? "Saving…" : status.saving === "editing" ? "Editing…" : "Saved ✓"}</span></div></div>;
 }
 
 function accentClass(accent?: RibbonCommand["accent"]) {

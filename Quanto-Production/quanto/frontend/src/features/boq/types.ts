@@ -197,6 +197,7 @@ export type FormalBoqReport = {
 
 export type BoqState = {
   project_id: string;
+  production_error?: string | null;
   boq: {
     id: string;
     name: string;

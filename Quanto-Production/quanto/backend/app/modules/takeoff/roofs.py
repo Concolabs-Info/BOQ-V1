@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import re
+import threading
+import traceback
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -9,18 +13,21 @@ from uuid import UUID
 from PIL import Image
 from shapely.geometry import LineString, Polygon
 
-from ...core.config import get_settings
 from ...database.connection import fetch_all, fetch_one, transaction
 from ...database.json_value import Jsonb
-from ...services.ai.model_client import get_model_client
+from ...services.ai.codex_account import codex_account_status
+from .harness.model_client import HarnessModelClient
+from .harness.evaluator import evaluate_element
+from .harness.facts import publish_element_facts
+from .harness.runtime import run_element_harness
 from ...services.pdf.media import ensure_viewport_crop
+from ...services.storage.paths import project_root
 from .common import (
     PALETTE,
     area_m2,
     content_hash,
     ensure_takeoff_floors,
     extract_viewport_text,
-    model_for_quality,
     perimeter_m,
     project_text_evidence,
     require_frozen_project,
@@ -48,6 +55,133 @@ ROOF_WORDS = re.compile(
 )
 EXCLUDE_ONLY_WORDS = re.compile(r"\b(site plan|foundation|ground floor parking|schedule only)\b", re.I)
 UPSTAND_EDGE_TYPES = {"parapet", "abutment", "roof_step", "level_change"}
+
+ROOF_PROVIDER = "codex-account"
+ROOF_MODEL_LABEL = "ChatGPT/Codex account"
+ROOF_CACHE_VERSION = "quanto-roof-account-cache-v1"
+ROOF_PROMPT_VERSION = "roof-account-v2"
+_ROOF_LOCKS: dict[str, threading.Lock] = {}
+_ROOF_LOCK_GUARD = threading.Lock()
+
+
+def _roof_runtime_dir(project_id: UUID | str) -> Path:
+    path = project_root(project_id) / "roofs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _roof_status_path(project_id: UUID | str) -> Path:
+    return _roof_runtime_dir(project_id) / "status.json"
+
+
+def _roof_result_path(project_id: UUID | str, level_id: UUID | str) -> Path:
+    path = _roof_runtime_dir(project_id) / "results"
+    path.mkdir(parents=True, exist_ok=True)
+    return path / f"{level_id}.json"
+
+
+def _roof_systems_path(project_id: UUID | str) -> Path:
+    return _roof_runtime_dir(project_id) / "systems.json"
+
+
+def _read_json(path: Path, default: Any) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def _write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value, indent=2, default=str), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _set_roof_status(project_id: UUID | str, status: str, progress: int, message: str, **extra: Any) -> dict[str, Any]:
+    payload = {"status": status, "progress": progress, "message": message, **extra}
+    _write_json(_roof_status_path(project_id), payload)
+    return payload
+
+
+def _roof_lock(project_id: UUID | str) -> threading.Lock:
+    pid = str(project_id)
+    with _ROOF_LOCK_GUARD:
+        return _ROOF_LOCKS.setdefault(pid, threading.Lock())
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _roof_source_hash(project: dict[str, Any], level: dict[str, Any], ctx: dict[str, Any], image_path: Path, words: list[dict[str, Any]]) -> str:
+    return content_hash({
+        "cache_version": ROOF_CACHE_VERSION,
+        "prompt_version": ROOF_PROMPT_VERSION,
+        "frame_version": project.get("frame_version"),
+        "level_id": str(level["id"]),
+        "viewport_id": str(level["source_viewport_id"]),
+        "crop_version": int(ctx.get("crop_version") or level.get("crop_version") or 0),
+        "width": int(ctx["crop_width_px"]),
+        "height": int(ctx["crop_height_px"]),
+        "mm_per_pixel": float(level["mm_per_pixel"]) if level.get("mm_per_pixel") else None,
+        "crop_sha256": _file_sha256(Path(image_path)),
+        "drawing_text": words,
+    })
+
+
+def _load_geometry_cache(project_id: str, level_id: str, source_hash: str) -> RoofGeometryOutput | None:
+    payload = _read_json(_roof_result_path(project_id, level_id), {})
+    if payload.get("schema_version") != ROOF_CACHE_VERSION or payload.get("source_hash") != source_hash:
+        return None
+    try:
+        return RoofGeometryOutput.model_validate(payload.get("geometry") or {})
+    except Exception:
+        return None
+
+
+def _save_geometry_cache(project_id: str, level_id: str, source_hash: str, quality: str, geometry: RoofGeometryOutput) -> None:
+    _write_json(_roof_result_path(project_id, level_id), {
+        "schema_version": ROOF_CACHE_VERSION,
+        "provider": ROOF_PROVIDER,
+        "source_hash": source_hash,
+        "quality": quality,
+        "geometry": geometry.model_dump(mode="json"),
+    })
+
+
+def _load_systems_cache(project_id: str, systems_hash: str) -> RoofSystemResolutionOutput | None:
+    payload = _read_json(_roof_systems_path(project_id), {})
+    if payload.get("schema_version") != ROOF_CACHE_VERSION or payload.get("systems_hash") != systems_hash:
+        return None
+    try:
+        return RoofSystemResolutionOutput.model_validate(payload.get("systems") or {})
+    except Exception:
+        return None
+
+
+def _save_systems_cache(project_id: str, systems_hash: str, quality: str, systems: RoofSystemResolutionOutput) -> None:
+    _write_json(_roof_systems_path(project_id), {
+        "schema_version": ROOF_CACHE_VERSION,
+        "provider": ROOF_PROVIDER,
+        "systems_hash": systems_hash,
+        "quality": quality,
+        "systems": systems.model_dump(mode="json"),
+    })
+
+
+def _confirmed_roof_work(project_id: str, level_id: str | None = None) -> bool:
+    filters = " AND level_id=%s" if level_id else ""
+    params = (project_id, level_id) if level_id else (project_id,)
+    for table in ("roof_plane", "roof_edge", "roof_opening", "roof_component", "roof_region"):
+        row = fetch_one(f"SELECT count(*) AS n FROM {table} WHERE project_id=%s{filters} AND user_confirmed=true", params)
+        if row and int(row["n"]) > 0:
+            return True
+    return False
 
 
 def _points(items: Any) -> list[dict[str, float]]:
@@ -316,7 +450,7 @@ def _replace_repaired_geometry(output: RoofGeometryOutput, repair: RoofGeometryR
                 return
 
 
-def _targeted_repair(image_path: Path, output: RoofGeometryOutput, issue: dict[str, Any], model: str | None) -> bool:
+def _targeted_repair(project_id: str, image_path: Path, output: RoofGeometryOutput, issue: dict[str, Any], quality: str) -> bool:
     bbox = issue.get("bbox")
     if not bbox:
         return False
@@ -332,7 +466,7 @@ def _targeted_repair(image_path: Path, output: RoofGeometryOutput, issue: dict[s
         repair_path = image_path.with_name(f"{image_path.stem}-roof-repair.png")
         crop.save(repair_path)
     try:
-        repair = get_model_client("takeoff").parse_image(
+        repair = HarnessModelClient("roof", project_id).parse_image(
             repair_path,
             ROOF_REPAIR_PROMPT.format(
                 entity_kind=issue["entity_kind"], entity_id=issue["entity_id"], problem=issue["problem"],
@@ -340,8 +474,7 @@ def _targeted_repair(image_path: Path, output: RoofGeometryOutput, issue: dict[s
             ),
             RoofGeometryRepairOutput,
             system=ROOF_REPAIR_SYSTEM,
-            model=model,
-            max_schema_retries=0,
+            quality=quality,
         )
         _replace_repaired_geometry(output, repair, x0, y0)
         return True
@@ -353,7 +486,6 @@ def _targeted_repair(image_path: Path, output: RoofGeometryOutput, issue: dict[s
 
 
 def _start_run(project_id: str, level_id: str | None, task: str, model: str | None, request_hash: str) -> str:
-    settings = get_settings()
     floor_id = None
     if level_id:
         level = fetch_one("SELECT host_floor_id FROM roof_level WHERE id=%s", (level_id,))
@@ -362,8 +494,8 @@ def _start_run(project_id: str, level_id: str | None, task: str, model: str | No
         row = conn.execute(
             """INSERT INTO takeoff_analysis_run(project_id,floor_id,module,task_type,provider,model_id,prompt_version,
                    status,progress,message,request_hash)
-               VALUES (%s,%s,'roof',%s,%s,%s,'roof-v1','running',5,%s,%s) RETURNING id""",
-            (project_id, floor_id, task, settings.takeoff_ai_provider, model, "Starting roof analysis", request_hash),
+               VALUES (%s,%s,'roof',%s,%s,%s,%s,'running',5,%s,%s) RETURNING id""",
+            (project_id, floor_id, task, ROOF_PROVIDER, model, ROOF_PROMPT_VERSION, "Starting roof analysis", request_hash),
         ).fetchone()
     return str(row["id"])
 
@@ -381,10 +513,9 @@ def _save_geometry(project_id: str, level: dict[str, Any], output: RoofGeometryO
     """Persist AI geometry, never overwriting user-confirmed roof planes."""
     plane_ids: dict[str, str] = {}
     mmpp = float(level["mm_per_pixel"]) if level.get("mm_per_pixel") else None
+    if _confirmed_roof_work(project_id, str(level["id"])):
+        raise RuntimeError("This roof source contains user-confirmed roof work. Automatic detection will not overwrite it.")
     with transaction() as conn:
-        confirmed = conn.execute("SELECT count(*) AS n FROM roof_plane WHERE level_id=%s AND user_confirmed=true", (str(level["id"]),)).fetchone()["n"]
-        if confirmed:
-            raise RuntimeError("This roof source contains user-confirmed roof geometry. AI will not overwrite it.")
         conn.execute("DELETE FROM roof_review_item WHERE level_id=%s", (str(level["id"]),))
         conn.execute("DELETE FROM roof_region WHERE level_id=%s", (str(level["id"]),))
         conn.execute("DELETE FROM roof_plane WHERE level_id=%s", (str(level["id"]),))
@@ -701,44 +832,75 @@ def _recalculate_level(level_id: str) -> None:
             )
 
 
-def analyze_project_roofs(project_id: UUID | str, quality: str = "medium", force: bool = False) -> dict[str, Any]:
+def analyze_project_roofs(
+    project_id: UUID | str,
+    quality: str = "medium",
+    force: bool = False,
+    *,
+    progress_callback: Any | None = None,
+) -> dict[str, Any]:
     from .scope.engine import get_scope
 
     pid = str(project_id)
-    require_frozen_project(pid)
+    project = require_frozen_project(pid)
     scope = get_scope(pid, "roof", auto_run=True)
     if scope.get("status") == "blocked":
         first = next((gap.get("message") for gap in scope.get("coverage_gaps", []) if gap.get("severity") == "blocked"), "Roof Scope is blocked")
         raise RuntimeError(f"Roof Scope is not ready: {first}")
-    settings = get_settings()
-    if settings.takeoff_ai_provider.lower().strip() != "openai":
-        raise RuntimeError("Automatic Roof detection requires TAKEOFF_AI_PROVIDER=openai and a backend OPENAI_API_KEY. Manual Roof editing remains available without AI.")
     levels = _ensure_roof_levels(pid)
     if not levels:
         raise RuntimeError("No confirmed roof plan / roof terrace / roof crop was found in the frozen Pre Project Frame. Review Plans and include the roof drawing first.")
-    model = model_for_quality(quality)
-    client = get_model_client("takeoff")
-    analysed = 0
-    skipped = 0
-    for level in levels:
-        image_path, ctx = ensure_viewport_crop(level["source_viewport_id"])
-        words = extract_viewport_text(level["source_viewport_id"], max_items=650)
-        request_hash = content_hash({
-            "task": "roof_geometry", "viewport": str(level["source_viewport_id"]), "crop_version": ctx["crop_version"],
-            "width": ctx["crop_width_px"], "height": ctx["crop_height_px"], "model": model, "prompt": "roof-v1",
-        })
-        cached = fetch_one(
-            """SELECT id FROM takeoff_analysis_run WHERE project_id=%s AND module='roof' AND task_type='geometry'
-               AND request_hash=%s AND status='completed' ORDER BY created_at DESC LIMIT 1""",
-            (pid, request_hash),
+    if force and _confirmed_roof_work(pid):
+        raise RuntimeError(
+            "This project contains user-confirmed Roof work. Clear/replace it explicitly before rerunning detection so confirmed work is never overwritten."
         )
+
+    analysed = 0
+    cached_sources = 0
+    saved_sources = 0
+    account_checked = False
+    client: HarnessModelClient | None = None
+    total = len(levels)
+
+    def account_client() -> HarnessModelClient:
+        nonlocal account_checked, client
+        if not account_checked:
+            auth = codex_account_status()
+            if not auth.get("available"):
+                raise RuntimeError(auth.get("error") or "Roof account detection is not installed")
+            if not auth.get("authenticated"):
+                raise RuntimeError("Connect a ChatGPT account in the Roof workspace before running detection.")
+            account_checked = True
+        if client is None:
+            client = HarnessModelClient("roof", pid)
+        return client
+
+    for index, level in enumerate(levels, start=1):
+        if progress_callback:
+            progress_callback(index, total, level, "geometry")
+        image_path, ctx = ensure_viewport_crop(level["source_viewport_id"])
+        image_path = Path(image_path)
+        words = extract_viewport_text(level["source_viewport_id"], max_items=650)
+        source_hash = _roof_source_hash(project, level, ctx, image_path, words)
         existing = fetch_one("SELECT count(*) AS n FROM roof_plane WHERE level_id=%s", (str(level["id"]),))
-        if cached and existing and existing["n"] and not force:
-            skipped += 1
+        existing_count = int(existing["n"]) if existing else 0
+        if existing_count > 0 and not force:
+            saved_sources += 1
             continue
-        run_id = _start_run(pid, str(level["id"]), "geometry", model, request_hash)
+
+        output = None if force else _load_geometry_cache(pid, str(level["id"]), source_hash)
+        if output is not None:
+            issues = _validate_geometry(output)
+            if issues:
+                output = None
+            else:
+                _save_geometry(pid, level, output)
+                cached_sources += 1
+                continue
+
+        run_id = _start_run(pid, str(level["id"]), "geometry", ROOF_MODEL_LABEL, source_hash)
         try:
-            output = client.parse_image(
+            output = account_client().parse_image(
                 image_path,
                 ROOF_GEOMETRY_PROMPT.format(
                     width=ctx["crop_width_px"], height=ctx["crop_height_px"], source_name=level["name"],
@@ -746,59 +908,171 @@ def analyze_project_roofs(project_id: UUID | str, quality: str = "medium", force
                 ),
                 RoofGeometryOutput,
                 system=ROOF_SYSTEM,
-                model=model,
-                max_schema_retries=0,
+                quality=quality,
             )
             if output.source_width_px != ctx["crop_width_px"] or output.source_height_px != ctx["crop_height_px"]:
                 raise RuntimeError("Roof model returned a different coordinate space than the exact source crop")
             issues = _validate_geometry(output)
-            # Roof plan hard limit: one primary geometry call + at most one targeted repair call.
+            # Roof hard limit: one primary geometry call plus at most one targeted repair.
             if issues:
-                _targeted_repair(Path(image_path), output, issues[0], model)
+                _targeted_repair(pid, image_path, output, issues[0], quality)
                 issues = _validate_geometry(output)
             if issues:
                 raise RuntimeError(f"Roof geometry still needs review after the one allowed targeted repair: {issues[0]['problem']}")
+
+            # Persist the expensive structured detection before DB projection. If
+            # projection is interrupted, the unchanged roof can be restored without
+            # another account model turn.
+            _save_geometry_cache(pid, str(level["id"]), source_hash, quality, output)
             _save_geometry(pid, level, output)
-            _finish_run(run_id, "completed", 70, "Roof geometry detected; resolving roof systems", output.model_dump())
+            _finish_run(run_id, "completed", 70, "Roof geometry detected; resolving roof systems", output.model_dump(mode="json"))
             analysed += 1
         except Exception as exc:
             _finish_run(run_id, "failed", 100, "Roof geometry analysis failed", error=str(exc))
             raise
 
-    # One catalog resolution across the project, cached by current detected keys + project text.
-    planes = fetch_all("SELECT rp.source_key,rr.source_key AS roof_key,rp.source_evidence FROM roof_plane rp LEFT JOIN roof_region rr ON rr.id=rp.region_id WHERE rp.project_id=%s", (pid,))
+    planes = fetch_all(
+        "SELECT rp.source_key,rr.source_key AS roof_key,rp.source_evidence FROM roof_plane rp "
+        "LEFT JOIN roof_region rr ON rr.id=rp.region_id WHERE rp.project_id=%s",
+        (pid,),
+    )
     if planes:
+        if progress_callback:
+            progress_callback(total, total, levels[-1], "systems")
         spec_text = project_text_evidence(pid, max_chars=70000)
-        catalog_hash = content_hash({"task": "roof_systems", "planes": planes, "spec": spec_text, "model": model, "prompt": "roof-systems-v1"})
-        cached_catalog = fetch_one(
-            """SELECT result_json FROM takeoff_analysis_run WHERE project_id=%s AND module='roof' AND task_type='systems'
-               AND request_hash=%s AND status='completed' ORDER BY created_at DESC LIMIT 1""",
-            (pid, catalog_hash),
-        )
-        if cached_catalog and not force:
-            catalog = RoofSystemResolutionOutput.model_validate(cached_catalog["result_json"])
-        else:
-            run_id = _start_run(pid, None, "systems", model, catalog_hash)
+        systems_hash = content_hash({
+            "cache_version": ROOF_CACHE_VERSION,
+            "prompt_version": ROOF_PROMPT_VERSION,
+            "frame_version": project.get("frame_version"),
+            "task": "roof_systems",
+            "planes": planes,
+            "spec_sha256": hashlib.sha256(spec_text.encode("utf-8")).hexdigest(),
+        })
+        # A deliberate geometry rerun should not spend another model turn on
+        # unchanged specification/build-up evidence. This cache invalidates on its
+        # own when plane evidence or project specification text changes.
+        catalog = _load_systems_cache(pid, systems_hash)
+        if catalog is None:
+            run_id = _start_run(pid, None, "systems", ROOF_MODEL_LABEL, systems_hash)
             try:
-                catalog = client.parse_text(
+                catalog = account_client().parse_text(
                     ROOF_CATALOG_PROMPT.format(
-                        roof_context="\n".join(f"roof={row.get('roof_key')} plane={row.get('source_key')} evidence={row.get('source_evidence') or []}" for row in planes),
+                        roof_context="\n".join(
+                            f"roof={row.get('roof_key')} plane={row.get('source_key')} evidence={row.get('source_evidence') or []}"
+                            for row in planes
+                        ),
                         spec_text=spec_text,
                     ),
                     RoofSystemResolutionOutput,
                     system=ROOF_CATALOG_SYSTEM,
-                    model=model,
+                    quality=quality,
                 )
-                _finish_run(run_id, "completed", 100, "Roof systems resolved", catalog.model_dump())
+                _save_systems_cache(pid, systems_hash, quality, catalog)
+                _finish_run(run_id, "completed", 100, "Roof systems resolved", catalog.model_dump(mode="json"))
             except Exception as exc:
                 _finish_run(run_id, "failed", 100, "Roof system resolution failed", error=str(exc))
                 raise
         systems = _upsert_systems(pid, catalog)
         _apply_assignments(pid, catalog, systems)
     else:
-        # Still ensure explicit editable families exist if geometry was not available.
         _upsert_systems(pid, RoofSystemResolutionOutput())
-    return {"status": "completed", "analysed_sources": analysed, "cached_sources": skipped, "levels": len(levels), "state": roof_demo_state(pid)}
+
+    return {
+        "status": "completed",
+        "analysed_sources": analysed,
+        "cached_sources": cached_sources,
+        "saved_sources": saved_sources,
+        "levels": len(levels),
+    }
+
+
+def _run_roof_analysis(project_id: str, quality: str, force: bool, *, lock_acquired: bool = False) -> None:
+    lock = _roof_lock(project_id)
+    if not lock_acquired and not lock.acquire(blocking=False):
+        return
+    try:
+        _set_roof_status(project_id, "running", 3, "Preparing roof drawings")
+
+        def progress(index: int, total: int, level: dict[str, Any], stage: str) -> None:
+            if stage == "systems":
+                pct = 90
+                message = "Resolving roof systems and build-ups"
+            else:
+                pct = 8 + int(((index - 1) / max(total, 1)) * 78)
+                message = f"Detecting roof geometry · {level.get('name') or f'roof {index}'}"
+            _set_roof_status(
+                project_id, "running", pct, message,
+                current=index, total=total, level_id=str(level.get("id") or ""), stage=stage,
+            )
+
+        result, _harness_report = run_element_harness(
+            project_id, "roof", quality, force,
+            lambda: analyze_project_roofs(project_id, quality, force=force, progress_callback=progress),
+            evaluate_element, publish_element_facts,
+        )
+        _set_roof_status(
+            project_id, "completed", 100, "Roof analysis complete", result=result,
+            harness_status=_harness_report.status,
+            harness_issues=[
+                {"code": issue.code, "message": issue.message, "severity": issue.severity, "entity_refs": list(issue.entity_refs)}
+                for issue in _harness_report.issues
+            ],
+            harness_stats=_harness_report.stats,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _set_roof_status(
+            project_id, "failed", 100, "Roof analysis failed",
+            error_message=str(exc)[:1000], traceback=traceback.format_exc(limit=6),
+        )
+    finally:
+        lock.release()
+
+
+def start_roof_analysis(project_id: UUID | str, quality: str = "medium", *, force: bool = False) -> dict[str, Any]:
+    pid = str(project_id)
+    require_frozen_project(pid)
+    if force and _confirmed_roof_work(pid):
+        raise RuntimeError(
+            "This project contains user-confirmed Roof work. Clear/replace it explicitly before rerunning detection so confirmed work is never overwritten."
+        )
+
+    auth = codex_account_status()
+    if not auth.get("available"):
+        raise RuntimeError(auth.get("error") or "Roof account detection is not installed")
+    if not auth.get("authenticated"):
+        raise RuntimeError("Connect a ChatGPT account in the Roof workspace before running detection.")
+
+    lock = _roof_lock(pid)
+    if not lock.acquire(blocking=False):
+        return _read_json(_roof_status_path(pid), {"status": "running", "progress": 1, "message": "Preparing roof drawings"})
+    status = _set_roof_status(pid, "running", 1, "Preparing roof drawings")
+    thread = threading.Thread(
+        target=_run_roof_analysis,
+        kwargs={"project_id": pid, "quality": quality, "force": force, "lock_acquired": True},
+        daemon=True,
+        name=f"roofs-{pid[:8]}",
+    )
+    try:
+        thread.start()
+    except Exception:
+        lock.release()
+        raise
+    return status
+
+
+def roof_analysis_status(project_id: UUID | str) -> dict[str, Any]:
+    pid = str(project_id)
+    status = _read_json(_roof_status_path(pid), {})
+    if status:
+        if status.get("status") == "running" and not _roof_lock(pid).locked():
+            return _set_roof_status(pid, "failed", int(status.get("progress") or 0), "Previous Roof run was interrupted. Retry will reuse saved/cached evidence.", error_message="interrupted", recoverable=True)
+        return status
+    run = fetch_one(
+        "SELECT status,progress,message,error_message FROM takeoff_analysis_run "
+        "WHERE project_id=%s AND module='roof' ORDER BY created_at DESC LIMIT 1",
+        (pid,),
+    )
+    return run or {"status": "not_started", "progress": 0, "message": None, "error_message": None}
 
 
 def _nearest_polygon_edge_index(polygon: list[dict[str, float]], line: list[dict[str, float]]) -> int | None:
@@ -879,12 +1153,11 @@ def roof_demo_state(project_id: UUID | str) -> dict[str, Any]:
             "structuralBasis": props.get("basis") if props else None,
         })
     ui = fetch_one("SELECT state_json FROM takeoff_ui_state WHERE project_id=%s AND module='roof'", (pid,))
-    run = fetch_one("SELECT status,progress,message,error_message FROM takeoff_analysis_run WHERE project_id=%s AND module='roof' ORDER BY created_at DESC LIMIT 1", (pid,))
     return {
         "sheets": base["sheets"], "viewports": base["viewports"], "storeys": base["storeys"],
         "families": families, "upstandFamilies": upstand_families, "zones": zones,
-        "uiState": (ui or {}).get("state_json") or {}, "analysis": run,
-        "provider": get_settings().takeoff_ai_provider.lower().strip(),
+        "uiState": (ui or {}).get("state_json") or {}, "analysis": roof_analysis_status(pid),
+        "provider": ROOF_PROVIDER, "auth": codex_account_status(),
         "reviewItems": fetch_all("SELECT * FROM roof_review_item WHERE project_id=%s AND resolved=false ORDER BY severity DESC,created_at", (pid,)),
     }
 

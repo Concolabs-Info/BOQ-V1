@@ -5,7 +5,12 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
 from ....database.connection import fetch_all
-from ....modules.takeoff.ceilings import analyze_project_ceilings, ceiling_demo_state, save_ceiling_demo_state
+from ....modules.takeoff.ceilings import ceiling_demo_state, save_ceiling_demo_state, start_ceiling_analysis
+from ....services.ai.codex_account import (
+    codex_account_status,
+    logout_codex_account,
+    start_codex_account_login,
+)
 
 router = APIRouter(tags=["ceiling-takeoff"])
 
@@ -33,10 +38,38 @@ def put_demo_state(project_id: UUID, body: DemoStateBody):
         raise HTTPException(409, str(exc)) from exc
 
 
-@router.post("/projects/{project_id}/takeoff/ceiling/analyze")
-def analyze_all(project_id: UUID, quality: str = Query(default="medium", pattern="^(easy|medium|expert|maximum)$")):
+@router.get("/projects/{project_id}/takeoff/ceiling/auth")
+def ceiling_auth_status(project_id: UUID):
+    del project_id
+    return codex_account_status(refresh=True)
+
+
+@router.post("/projects/{project_id}/takeoff/ceiling/auth/login")
+def ceiling_auth_login(project_id: UUID):
+    del project_id
     try:
-        return analyze_project_ceilings(project_id, quality)
+        return start_codex_account_login()
+    except (ValueError, RuntimeError, TypeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/takeoff/ceiling/auth/logout")
+def ceiling_auth_logout(project_id: UUID):
+    del project_id
+    try:
+        return logout_codex_account()
+    except (ValueError, RuntimeError, TypeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/takeoff/ceiling/analyze")
+def analyze_all(
+    project_id: UUID,
+    quality: str = Query(default="medium", pattern="^(easy|medium|expert|maximum)$"),
+    force: bool = Query(default=False),
+):
+    try:
+        return start_ceiling_analysis(project_id, quality, force=force)
     except (ValueError, RuntimeError, TypeError) as exc:
         raise HTTPException(409, str(exc)) from exc
 

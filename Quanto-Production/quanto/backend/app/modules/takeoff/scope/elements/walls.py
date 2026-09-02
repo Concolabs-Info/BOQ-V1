@@ -12,8 +12,8 @@ SCOPE_SPEC = ElementScopeSpec(
     evidence_keywords=("wall", "partition", "masonry", "blockwork", "brickwork"),
     require_vertical_evidence=True,
     dependencies=(
-        FactDependency("opening_area", "doors-windows", required=True),
-        FactDependency("instance_position", "columns", required=True),
-        FactDependency("beam_solid", "beams", required=True),
+        FactDependency("opening_area", "doors-windows", required=False),
+        FactDependency("instance_position", "columns", required=False),
+        FactDependency("beam_solid", "beams", required=False),
     ),
 )

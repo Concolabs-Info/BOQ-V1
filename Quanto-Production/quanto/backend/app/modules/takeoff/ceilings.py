@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import re
+import threading
+import traceback
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -10,17 +14,20 @@ from shapely.geometry import Polygon
 
 from ...database.json_value import Jsonb
 
-from ...core.config import get_settings
 from ...database.connection import fetch_all, fetch_one, transaction
-from ...services.ai.model_client import get_model_client
+from ...services.ai.codex_account import codex_account_status
+from .harness.model_client import HarnessModelClient
+from .harness.evaluator import evaluate_element
+from .harness.facts import publish_element_facts
+from .harness.runtime import run_element_harness
 from ...services.pdf.media import ensure_viewport_crop
+from ...services.storage.paths import project_root
 from .common import (
     PALETTE,
     area_m2,
     content_hash,
     ensure_takeoff_floors,
     extract_viewport_text,
-    model_for_quality,
     project_text_evidence,
     require_frozen_project,
     source_mm_per_pixel,
@@ -39,6 +46,174 @@ from .prompts import (
     SECTION_PROMPT,
     SECTION_SYSTEM,
 )
+
+
+CEILING_PROVIDER = "codex-account"
+CEILING_MODEL_LABEL = "ChatGPT/Codex account"
+CEILING_CACHE_VERSION = "quanto-ceiling-account-cache-v1"
+CEILING_PROMPT_VERSION = "ceiling-account-v2"
+_CEILING_LOCKS: dict[str, threading.Lock] = {}
+_CEILING_LOCK_GUARD = threading.Lock()
+
+
+def _ceiling_runtime_dir(project_id: UUID | str) -> Path:
+    path = project_root(project_id) / "ceilings"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _ceiling_status_path(project_id: UUID | str) -> Path:
+    return _ceiling_runtime_dir(project_id) / "status.json"
+
+
+def _ceiling_result_path(project_id: UUID | str, floor_id: UUID | str) -> Path:
+    path = _ceiling_runtime_dir(project_id) / "results"
+    path.mkdir(parents=True, exist_ok=True)
+    return path / f"{floor_id}.json"
+
+
+def _ceiling_catalog_path(project_id: UUID | str) -> Path:
+    return _ceiling_runtime_dir(project_id) / "catalog.json"
+
+
+def _ceiling_section_path(project_id: UUID | str, viewport_id: UUID | str) -> Path:
+    path = _ceiling_runtime_dir(project_id) / "sections"
+    path.mkdir(parents=True, exist_ok=True)
+    return path / f"{viewport_id}.json"
+
+
+def _read_json(path: Path, default: Any) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def _write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value, indent=2, default=str), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _set_ceiling_status(project_id: UUID | str, status: str, progress: int, message: str, **extra: Any) -> dict[str, Any]:
+    payload = {"status": status, "progress": progress, "message": message, **extra}
+    _write_json(_ceiling_status_path(project_id), payload)
+    return payload
+
+
+def _ceiling_lock(project_id: UUID | str) -> threading.Lock:
+    pid = str(project_id)
+    with _CEILING_LOCK_GUARD:
+        return _CEILING_LOCKS.setdefault(pid, threading.Lock())
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _ceiling_catalog_hash(project: dict[str, Any], specs: str) -> str:
+    return content_hash({
+        "cache_version": CEILING_CACHE_VERSION,
+        "prompt_version": CEILING_PROMPT_VERSION,
+        "frame_version": project.get("frame_version"),
+        "spec_sha256": hashlib.sha256(specs.encode("utf-8")).hexdigest(),
+    })
+
+
+def _load_catalog_cache(project_id: str, catalog_hash: str) -> CeilingCatalogOutput | None:
+    payload = _read_json(_ceiling_catalog_path(project_id), {})
+    if payload.get("schema_version") != CEILING_CACHE_VERSION or payload.get("catalog_hash") != catalog_hash:
+        return None
+    try:
+        return CeilingCatalogOutput.model_validate(payload.get("catalog") or {})
+    except Exception:
+        return None
+
+
+def _save_catalog_cache(project_id: str, catalog_hash: str, quality: str, catalog: CeilingCatalogOutput) -> None:
+    _write_json(
+        _ceiling_catalog_path(project_id),
+        {
+            "schema_version": CEILING_CACHE_VERSION,
+            "provider": CEILING_PROVIDER,
+            "catalog_hash": catalog_hash,
+            "quality": quality,
+            "catalog": catalog.model_dump(mode="json"),
+        },
+    )
+
+
+def _floor_space_context(floor_id: UUID | str) -> list[dict[str, Any]]:
+    rows = fetch_all(
+        "SELECT id,name,room_type,environment,geometry,user_confirmed FROM floor_space "
+        "WHERE floor_id=%s AND excluded=false ORDER BY friendly_number,id",
+        (str(floor_id),),
+    )
+    return [{
+        "id": str(row["id"]),
+        "name": row.get("name"),
+        "room_type": row.get("room_type"),
+        "environment": row.get("environment"),
+        "geometry": row.get("geometry") or {},
+        "user_confirmed": bool(row.get("user_confirmed")),
+    } for row in rows]
+
+
+def _rcp_source_hash(
+    project: dict[str, Any],
+    floor: dict[str, Any],
+    rcp: dict[str, Any],
+    image_path: Path,
+    crop: dict[str, Any],
+    mm_per_pixel: float,
+) -> str:
+    return content_hash({
+        "cache_version": CEILING_CACHE_VERSION,
+        "prompt_version": CEILING_PROMPT_VERSION,
+        "frame_version": project.get("frame_version"),
+        "floor_id": str(floor["id"]),
+        "viewport_id": str(rcp["id"]),
+        "crop_version": int(rcp.get("crop_version") or 0),
+        "width": int(crop["crop_width_px"]),
+        "height": int(crop["crop_height_px"]),
+        "mm_per_pixel": float(mm_per_pixel),
+        "crop_sha256": _file_sha256(image_path),
+        "floor_spaces": _floor_space_context(floor["id"]),
+    })
+
+
+def _load_rcp_cache(project_id: str, floor_id: str, source_hash: str) -> CeilingGeometryOutput | None:
+    payload = _read_json(_ceiling_result_path(project_id, floor_id), {})
+    if payload.get("schema_version") != CEILING_CACHE_VERSION or payload.get("source_hash") != source_hash:
+        return None
+    try:
+        return CeilingGeometryOutput.model_validate(payload.get("geometry") or {})
+    except Exception:
+        return None
+
+
+def _save_rcp_cache(
+    project_id: str,
+    floor_id: str,
+    source_hash: str,
+    quality: str,
+    geometry: CeilingGeometryOutput,
+) -> None:
+    _write_json(
+        _ceiling_result_path(project_id, floor_id),
+        {
+            "schema_version": CEILING_CACHE_VERSION,
+            "provider": CEILING_PROVIDER,
+            "source_hash": source_hash,
+            "quality": quality,
+            "geometry": geometry.model_dump(mode="json"),
+        },
+    )
 
 
 def _validate_ceiling_geometry(output: CeilingGeometryOutput) -> None:
@@ -108,13 +283,12 @@ def _source_text(evidence: Any) -> str:
 
 
 def _start_run(project_id: str, floor_id: str | None, task: str, model: str | None, request_hash: str) -> str:
-    settings = get_settings()
     with transaction() as conn:
         row = conn.execute(
             """INSERT INTO takeoff_analysis_run(project_id,floor_id,module,task_type,provider,model_id,prompt_version,
                    status,progress,message,request_hash)
-               VALUES (%s,%s,'ceiling',%s,%s,%s,'ceiling-v1','running',5,%s,%s) RETURNING id""",
-            (project_id, floor_id, task, settings.takeoff_ai_provider, model, "Starting ceiling analysis", request_hash),
+               VALUES (%s,%s,'ceiling',%s,%s,%s,%s,'running',5,%s,%s) RETURNING id""",
+            (project_id, floor_id, task, CEILING_PROVIDER, model, CEILING_PROMPT_VERSION, "Starting ceiling analysis", request_hash),
         ).fetchone()
     return str(row["id"])
 
@@ -193,22 +367,97 @@ def _find_rcp_for_floor(project_id: str, floor: dict[str, Any]) -> dict[str, Any
     )
 
 
-def _section_observations(project_id: str, quality: str) -> list[dict[str, Any]]:
-    existing = fetch_all(
-        "SELECT metadata FROM takeoff_evidence WHERE project_id=%s AND module='ceiling' AND evidence_type='section_observation' ORDER BY created_at",
-        (project_id,),
+def _section_source_hash(
+    project: dict[str, Any],
+    section: dict[str, Any],
+    image_path: Path,
+    crop: dict[str, Any],
+    storeys: list[dict[str, Any]],
+) -> str:
+    return content_hash({
+        "cache_version": CEILING_CACHE_VERSION,
+        "prompt_version": CEILING_PROMPT_VERSION,
+        "frame_version": project.get("frame_version"),
+        "viewport_id": str(section["id"]),
+        "crop_version": int(section.get("crop_version") or 0),
+        "width": int(crop["crop_width_px"]),
+        "height": int(crop["crop_height_px"]),
+        "crop_sha256": _file_sha256(image_path),
+        "storeys": [
+            {
+                "name": row.get("name"),
+                "level_index": row.get("level_index"),
+                "height_mm": row.get("height_mm"),
+            }
+            for row in storeys
+        ],
+    })
+
+
+def _load_section_cache(project_id: str, viewport_id: str, source_hash: str) -> SectionObservationOutput | None:
+    payload = _read_json(_ceiling_section_path(project_id, viewport_id), {})
+    if payload.get("schema_version") != CEILING_CACHE_VERSION or payload.get("source_hash") != source_hash:
+        return None
+    try:
+        return SectionObservationOutput.model_validate(payload.get("output") or {})
+    except Exception:
+        return None
+
+
+def _save_section_cache(
+    project_id: str,
+    viewport_id: str,
+    source_hash: str,
+    quality: str,
+    output: SectionObservationOutput,
+) -> None:
+    _write_json(
+        _ceiling_section_path(project_id, viewport_id),
+        {
+            "schema_version": CEILING_CACHE_VERSION,
+            "provider": CEILING_PROVIDER,
+            "source_hash": source_hash,
+            "quality": quality,
+            "output": output.model_dump(mode="json"),
+        },
     )
-    if existing:
-        return [row["metadata"] for row in existing if row.get("metadata")]
+
+
+def _persist_section_observations(project_id: str, section: dict[str, Any], output: SectionObservationOutput) -> list[dict[str, Any]]:
+    observations: list[dict[str, Any]] = []
+    with transaction() as conn:
+        conn.execute(
+            "DELETE FROM takeoff_evidence WHERE project_id=%s AND module='ceiling' "
+            "AND evidence_type='section_observation' AND source_viewport_id=%s",
+            (project_id, str(section["id"])),
+        )
+        for observation in output.observations:
+            data = observation.model_dump()
+            data["source_viewport_id"] = str(section["id"])
+            data["source_name"] = section.get("name") or section.get("title")
+            observations.append(data)
+            conn.execute(
+                """INSERT INTO takeoff_evidence(project_id,module,evidence_type,source_viewport_id,source_text,
+                       geometry,confidence,metadata)
+                   VALUES (%s,'ceiling','section_observation',%s,%s,%s,%s,%s)""",
+                (project_id, str(section["id"]), observation.observation_type,
+                 Jsonb(observation.evidence[0].bbox if observation.evidence and observation.evidence[0].bbox else None),
+                 observation.confidence, Jsonb(data)),
+            )
+    return observations
+
+
+def _section_observations(project_id: str, quality: str) -> list[dict[str, Any]]:
     from .scope.engine import get_scope
 
+    project = require_frozen_project(project_id)
     scope = get_scope(project_id, "ceiling", auto_run=True)
     section_ids = [
         row["viewport_id"] for row in (scope.get("selected_viewports") or [])
         if row.get("role") == "supporting_vertical"
     ][:3]
     sections = fetch_all(
-        """SELECT v.id,v.name,v.level_label,s.title,p.page_number FROM viewport v
+        """SELECT v.id,v.name,v.level_label,v.crop_version,s.title,p.page_number FROM viewport v
            JOIN sheet s ON s.id=v.sheet_id JOIN page p ON p.id=s.page_id
            WHERE v.id = ANY(%s::uuid[])
            ORDER BY CASE WHEN v.view_kind='section' THEN 0 ELSE 1 END,p.page_number""",
@@ -216,38 +465,28 @@ def _section_observations(project_id: str, quality: str) -> list[dict[str, Any]]
     ) if section_ids else []
     if not sections:
         return []
-    model = model_for_quality(quality)
-    client = get_model_client("takeoff")
     storeys = fetch_all("SELECT name,level_index,height_mm FROM storey WHERE project_id=%s ORDER BY level_index", (project_id,))
+    client = HarnessModelClient("ceiling", project_id)
     observations: list[dict[str, Any]] = []
     for section in sections:
         try:
-            image, _ = ensure_viewport_crop(section["id"])
-            words = extract_viewport_text(section["id"], max_items=550)
-            output = client.parse_image(
-                image,
-                SECTION_PROMPT.format(
-                    storeys="; ".join(f"{s['level_index']}: {s['name']} ({s.get('height_mm') or '?'} mm)" for s in storeys),
-                    context="\n".join(f"{w['text']} @ {w['bbox']}" for w in words),
-                ),
-                SectionObservationOutput,
-                system=SECTION_SYSTEM,
-                model=model,
-            )
-            with transaction() as conn:
-                for observation in output.observations:
-                    data = observation.model_dump()
-                    data["source_viewport_id"] = str(section["id"])
-                    data["source_name"] = section.get("name") or section.get("title")
-                    observations.append(data)
-                    conn.execute(
-                        """INSERT INTO takeoff_evidence(project_id,module,evidence_type,source_viewport_id,source_text,
-                               geometry,confidence,metadata)
-                           VALUES (%s,'ceiling','section_observation',%s,%s,%s,%s,%s)""",
-                        (project_id, str(section["id"]), observation.observation_type,
-                         Jsonb(observation.evidence[0].bbox if observation.evidence and observation.evidence[0].bbox else None),
-                         observation.confidence, Jsonb(data)),
-                    )
+            image, crop = ensure_viewport_crop(section["id"])
+            source_hash = _section_source_hash(project, section, image, crop, storeys)
+            output = _load_section_cache(project_id, str(section["id"]), source_hash)
+            if output is None:
+                words = extract_viewport_text(section["id"], max_items=550)
+                output = client.parse_image(
+                    image,
+                    SECTION_PROMPT.format(
+                        storeys="; ".join(f"{s['level_index']}: {s['name']} ({s.get('height_mm') or '?'} mm)" for s in storeys),
+                        context="\n".join(f"{w['text']} @ {w['bbox']}" for w in words),
+                    ),
+                    SectionObservationOutput,
+                    system=SECTION_SYSTEM,
+                    quality=quality,
+                )
+                _save_section_cache(project_id, str(section["id"]), source_hash, quality, output)
+            observations.extend(_persist_section_observations(project_id, section, output))
         except Exception:
             # Section evidence is an enhancement. Failure must not destroy valid plan-derived ceilings.
             continue
@@ -296,14 +535,16 @@ def _profile_from_observation(observation: dict[str, Any] | None) -> tuple[str, 
 
 def _derive_from_floor_spaces(project_id: str, floor: dict[str, Any], catalog: CeilingCatalogOutput,
                               def_ids: dict[str, str], observations: list[dict[str, Any]]) -> int:
-    spaces = fetch_all("SELECT * FROM floor_space WHERE floor_id=%s AND excluded=false AND user_confirmed=true ORDER BY friendly_number", (str(floor["id"]),))
+    spaces = fetch_all("SELECT * FROM floor_space WHERE floor_id=%s AND excluded=false ORDER BY friendly_number", (str(floor["id"]),))
     if not spaces:
         raise RuntimeError("Floor geometry is required before deriving ceilings when no reflected ceiling plan exists.")
     count = 0
     with transaction() as conn:
         confirmed = conn.execute("SELECT count(*) AS n FROM ceiling_zone WHERE floor_id=%s AND user_confirmed=true", (str(floor["id"]),)).fetchone()["n"]
-        if confirmed:
-            raise RuntimeError("This floor has user-confirmed ceiling zones. AI/derivation will not overwrite them.")
+        confirmed_features = conn.execute("SELECT count(*) AS n FROM ceiling_feature WHERE floor_id=%s AND user_confirmed=true", (str(floor["id"]),)).fetchone()["n"]
+        if confirmed or confirmed_features:
+            raise RuntimeError("This floor has user-confirmed ceiling work. AI/derivation will not overwrite it.")
+        conn.execute("DELETE FROM ceiling_feature WHERE floor_id=%s AND user_confirmed=false", (str(floor["id"]),))
         conn.execute("DELETE FROM ceiling_zone WHERE floor_id=%s", (str(floor["id"]),))
         for index, space in enumerate(spaces, start=1):
             geometry = space.get("geometry") or {}
@@ -311,11 +552,15 @@ def _derive_from_floor_spaces(project_id: str, floor: dict[str, Any], catalog: C
             holes = [[{"x": float(p["x"]), "y": float(p["y"])} for p in ring] for ring in (geometry.get("deducts") or [])]
             if len(pts) < 3:
                 continue
+            source_confirmed = bool(space.get("user_confirmed"))
             room_type = space.get("room_type") or space.get("name")
             definition_id, method, confidence, code = _resolve_definition(room_type, None, catalog, def_ids)
             definition = conn.execute("SELECT * FROM ceiling_definition WHERE id=%s", (definition_id,)).fetchone()
             observation = _observation_for(room_type, floor["name"], observations)
             profile_type, profile = _profile_from_observation(observation)
+            if not source_confirmed and not observation:
+                profile_type = "unknown_special"
+                profile["reason"] = "Floor-derived review candidate; Ceiling profile must be confirmed"
             if definition and definition.get("system_type") == "no_ceiling":
                 profile_type = "no_ceiling"
             # For external/open FloorSpaces, absence of supported ceiling evidence is
@@ -324,6 +569,7 @@ def _derive_from_floor_spaces(project_id: str, floor: dict[str, Any], catalog: C
             if method == "unassigned" and space.get("environment") != "internal":
                 profile_type = "no_ceiling"
                 profile["reason"] = "No supported ceiling/soffit evidence for external/open floor space"
+            profile["floor_geometry_status"] = "confirmed" if source_confirmed else "needs_review"
             include = profile_type not in {"no_ceiling", "open_to_sky"}
             mmpp = float(floor["mm_per_pixel"]) if floor.get("mm_per_pixel") else None
             outer_area = area_m2(pts, mmpp)
@@ -340,7 +586,9 @@ def _derive_from_floor_spaces(project_id: str, floor: dict[str, Any], catalog: C
                  space.get("name") or room_type or "Ceiling", Jsonb({"points": pts, "deducts": holes}), profile_type, Jsonb(profile),
                  outer_area, deduction, gross, surface, include, confidence, definition_id, code, method, confidence,
                  "suggested" if code else "unassigned", Jsonb([str(space["id"])]),
-                 Jsonb([{"kind": "derived_from_confirmed_floor_space", "room_id": str(space["id"]), "confidence": space.get("confidence")}] +
+                 Jsonb([{"kind": "derived_from_floor_space" if source_confirmed else "derived_from_unconfirmed_floor_space",
+                         "room_id": str(space["id"]), "confidence": space.get("confidence"),
+                         "review_required": not source_confirmed}] +
                        ([{"kind": "section", "observation": observation}] if observation else []))),
             ).fetchone()
             count += 1
@@ -351,33 +599,69 @@ def _derive_from_floor_spaces(project_id: str, floor: dict[str, Any], catalog: C
     return count
 
 
-def _analyze_rcp(project_id: str, floor: dict[str, Any], rcp: dict[str, Any], quality: str,
-                 catalog: CeilingCatalogOutput, def_ids: dict[str, str]) -> int:
+def _analyze_rcp(
+    project: dict[str, Any],
+    project_id: str,
+    floor: dict[str, Any],
+    rcp: dict[str, Any],
+    quality: str,
+    catalog: CeilingCatalogOutput,
+    def_ids: dict[str, str],
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
     image, ctx = ensure_viewport_crop(rcp["id"])
     mmpp, verified = source_mm_per_pixel(rcp["id"])
     if not verified or not mmpp:
         raise RuntimeError(f"Reflected ceiling plan '{rcp.get('name') or rcp.get('title')}' needs a confirmed scale in Pre.")
-    words = extract_viewport_text(rcp["id"])
-    rooms = fetch_all("SELECT id,name,room_type,geometry FROM floor_space WHERE floor_id=%s AND excluded=false", (str(floor["id"]),))
-    room_context = "\n".join(f"{r.get('name') or r.get('room_type')} | {r.get('geometry')}" for r in rooms[:100])
-    model = model_for_quality(quality)
-    output = get_model_client("takeoff").parse_image(
-        image,
-        CEILING_GEOMETRY_PROMPT.format(
-            width=ctx["crop_width_px"], height=ctx["crop_height_px"], floor_name=floor["name"], rooms=room_context,
-            context="\n".join(f"{x['text']} @ {x['bbox']}" for x in words),
-        ),
-        CeilingGeometryOutput,
-        system=CEILING_SYSTEM,
-        model=model,
-    )
-    if output.source_width_px != ctx["crop_width_px"] or output.source_height_px != ctx["crop_height_px"]:
-        raise RuntimeError("Ceiling AI coordinate space does not match the exact RCP crop; result rejected.")
-    _validate_ceiling_geometry(output)
+
+    source_hash = _rcp_source_hash(project, floor, rcp, image, ctx, float(mmpp))
+    output = None if force else _load_rcp_cache(project_id, str(floor["id"]), source_hash)
+    cached = output is not None
+    if output is None:
+        auth = codex_account_status()
+        if not auth.get("available"):
+            raise RuntimeError(auth.get("error") or "Ceiling account detection is not installed")
+        if not auth.get("authenticated"):
+            raise RuntimeError("Connect a ChatGPT account in the Ceiling workspace before running detection.")
+
+        words = extract_viewport_text(rcp["id"])
+        rooms = _floor_space_context(floor["id"])
+        room_context = "\n".join(
+            f"{r.get('name') or r.get('room_type')} | {r.get('geometry')}" for r in rooms[:100]
+        )
+        output = HarnessModelClient("ceiling", project_id).parse_image(
+            image,
+            CEILING_GEOMETRY_PROMPT.format(
+                width=ctx["crop_width_px"], height=ctx["crop_height_px"], floor_name=floor["name"], rooms=room_context,
+                context="\n".join(f"{x['text']} @ {x['bbox']}" for x in words),
+            ),
+            CeilingGeometryOutput,
+            system=CEILING_SYSTEM,
+            quality=quality,
+        )
+        if output.source_width_px != ctx["crop_width_px"] or output.source_height_px != ctx["crop_height_px"]:
+            raise RuntimeError("Ceiling AI coordinate space does not match the exact RCP crop; result rejected.")
+        _validate_ceiling_geometry(output)
+        # Persist the expensive structured result before database projection. If
+        # projection is interrupted, the same unchanged RCP can be restored
+        # without another ChatGPT/Codex model turn.
+        _save_rcp_cache(project_id, str(floor["id"]), source_hash, quality, output)
+    else:
+        _validate_ceiling_geometry(output)
+
     with transaction() as conn:
-        confirmed = conn.execute("SELECT count(*) AS n FROM ceiling_zone WHERE floor_id=%s AND user_confirmed=true", (str(floor["id"]),)).fetchone()["n"]
-        if confirmed:
-            raise RuntimeError("This floor has user-confirmed ceiling zones. Analysis will not overwrite them.")
+        confirmed = conn.execute(
+            "SELECT count(*) AS n FROM ceiling_zone WHERE floor_id=%s AND user_confirmed=true",
+            (str(floor["id"]),),
+        ).fetchone()["n"]
+        confirmed_features = conn.execute(
+            "SELECT count(*) AS n FROM ceiling_feature WHERE floor_id=%s AND user_confirmed=true",
+            (str(floor["id"]),),
+        ).fetchone()["n"]
+        if confirmed or confirmed_features:
+            raise RuntimeError("This floor has user-confirmed ceiling work. Analysis will not overwrite it.")
+        conn.execute("DELETE FROM ceiling_feature WHERE floor_id=%s AND user_confirmed=false", (str(floor["id"]),))
         conn.execute("DELETE FROM ceiling_zone WHERE floor_id=%s", (str(floor["id"]),))
         count = 0
         for index, zone in enumerate(output.zones, start=1):
@@ -387,14 +671,15 @@ def _analyze_rcp(project_id: str, floor: dict[str, Any], rcp: dict[str, Any], qu
             room_type = zone.room_labels[0] if zone.room_labels else zone.name
             definition_id, method, confidence, code = _resolve_definition(room_type, visible_code, catalog, def_ids)
             include = zone.special_type not in {"no_ceiling", "open_to_sky"}
-            outer_area = area_m2(pts, mmpp)
-            deduction = sum((area_m2(ring, mmpp) or 0.0) for ring in holes)
+            outer_area = area_m2(pts, float(mmpp))
+            deduction = sum((area_m2(ring, float(mmpp)) or 0.0) for ring in holes)
             gross = round(max(0.0, (outer_area or 0.0) - deduction), 4) if outer_area is not None else None
             surface = gross if zone.special_type in {"flat", "exposed_soffit", "external_soffit", "dropped"} else None
             profile = {
                 "source_viewport_id": str(rcp["id"]), "ceiling_level_text": zone.ceiling_level_text,
                 "high_level_text": zone.high_level_text, "low_level_text": zone.low_level_text,
                 "slope_direction_degrees": zone.slope_direction_degrees,
+                "source_hash": source_hash,
             }
             evidence = [e.model_dump() for e in zone.evidence]
             if zone.finish_evidence:
@@ -416,7 +701,7 @@ def _analyze_rcp(project_id: str, floor: dict[str, Any], rcp: dict[str, Any], qu
                 geom["points"] = [{"x": p.x, "y": p.y} for p in feature.polygon]
             if feature.line:
                 geom["line"] = [{"x": p.x, "y": p.y} for p in feature.line]
-            qty = area_m2(geom.get("points", []), mmpp) if geom.get("points") else None
+            qty = area_m2(geom.get("points", []), float(mmpp)) if geom.get("points") else None
             conn.execute(
                 """INSERT INTO ceiling_feature(project_id,floor_id,feature_type,name,geometry,measurement_basis,gross_quantity,
                        net_quantity,measurement_unit,width_mm,height_mm,depth_mm,status,user_confirmed,confidence,evidence)
@@ -426,15 +711,24 @@ def _analyze_rcp(project_id: str, floor: dict[str, Any], rcp: dict[str, Any], qu
                  feature.width_mm, feature.height_mm, feature.depth_mm, feature.confidence,
                  Jsonb([e.model_dump() for e in feature.evidence])),
             )
-        conn.execute("UPDATE takeoff_floor SET ceiling_version=ceiling_version+1,analysis_status='ceiling_ready',updated_at=now() WHERE id=%s", (str(floor["id"]),))
-    return count
+        conn.execute(
+            "UPDATE takeoff_floor SET ceiling_version=ceiling_version+1,analysis_status='ceiling_ready',updated_at=now() WHERE id=%s",
+            (str(floor["id"]),),
+        )
+    return {"zones": count, "cached": cached, "source_hash": source_hash}
 
 
-def analyze_project_ceilings(project_id: UUID | str, quality: str = "medium") -> dict[str, Any]:
+def analyze_project_ceilings(
+    project_id: UUID | str,
+    quality: str = "medium",
+    *,
+    force: bool = False,
+    progress_callback: Any | None = None,
+) -> dict[str, Any]:
     from .scope.engine import get_scope
 
     pid = str(project_id)
-    require_frozen_project(pid)
+    project = require_frozen_project(pid)
     scope = get_scope(pid, "ceiling", auto_run=True)
     if scope.get("status") == "blocked":
         first = next((gap.get("message") for gap in scope.get("coverage_gaps", []) if gap.get("severity") == "blocked"), "Ceiling Scope is blocked")
@@ -450,45 +744,188 @@ def analyze_project_ceilings(project_id: UUID | str, quality: str = "medium") ->
         "SELECT count(*) AS n FROM floor_space WHERE project_id=%s AND excluded=false AND user_confirmed=false",
         (pid,),
     )
-    if pending_floor_review and int(pending_floor_review["n"]) > 0:
-        raise RuntimeError(
-            "Confirm the detected Floor zones in Floor → Dimension before Ceiling analysis. "
-            "Ceiling will not silently build from unreviewed FloorSpace geometry."
+    review_only_fallback = bool(pending_floor_review and int(pending_floor_review["n"]) > 0)
+
+    if force:
+        confirmed_zones = fetch_one(
+            "SELECT count(*) AS n FROM ceiling_zone WHERE project_id=%s AND user_confirmed=true",
+            (pid,),
         )
-    model = model_for_quality(quality)
-    run_id = _start_run(pid, None, "geometry_and_finish", model, content_hash({"project": pid, "quality": quality, "task": "ceiling"}))
+        confirmed_features = fetch_one(
+            "SELECT count(*) AS n FROM ceiling_feature WHERE project_id=%s AND user_confirmed=true",
+            (pid,),
+        )
+        if (confirmed_zones and int(confirmed_zones["n"]) > 0) or (confirmed_features and int(confirmed_features["n"]) > 0):
+            raise RuntimeError(
+                "This project contains user-confirmed Ceiling work. Clear/replace it explicitly before rerunning detection so confirmed work is never overwritten."
+            )
+
+    results: list[dict[str, Any]] = []
+    pending_floors: list[dict[str, Any]] = []
+    for floor in floors:
+        existing = fetch_one("SELECT count(*) AS n FROM ceiling_zone WHERE floor_id=%s", (str(floor["id"]),))
+        if existing and int(existing["n"]) > 0 and not force:
+            results.append({"floor_id": str(floor["id"]), "skipped": True, "cached": True, "reason": "saved ceiling zones"})
+        else:
+            pending_floors.append(floor)
+
+    if not pending_floors:
+        return {"floors": results, "warnings": [], "section_observations": 0, "cached": True}
+
+    run_id = _start_run(
+        pid, None, "geometry_and_finish", CEILING_MODEL_LABEL,
+        content_hash({"project": pid, "quality": quality, "task": "ceiling", "force": force, "prompt": CEILING_PROMPT_VERSION}),
+    )
     try:
         specs = project_text_evidence(pid)
         catalog = CeilingCatalogOutput()
         if specs.strip():
-            catalog = get_model_client("takeoff").parse_text(
-                CEILING_CATALOG_PROMPT.format(spec_text=specs), CeilingCatalogOutput,
-                system=CEILING_CATALOG_SYSTEM, model=model,
-            )
+            catalog_hash = _ceiling_catalog_hash(project, specs)
+            cached_catalog = _load_catalog_cache(pid, catalog_hash)
+            if cached_catalog is not None:
+                catalog = cached_catalog
+            else:
+                auth = codex_account_status()
+                if not auth.get("available"):
+                    raise RuntimeError(auth.get("error") or "Ceiling account detection is not installed")
+                if not auth.get("authenticated"):
+                    raise RuntimeError("Connect a ChatGPT account in the Ceiling workspace before running detection.")
+                catalog = HarnessModelClient("ceiling", project_id).parse_text(
+                    CEILING_CATALOG_PROMPT.format(spec_text=specs), CeilingCatalogOutput,
+                    system=CEILING_CATALOG_SYSTEM, quality=quality,
+                )
+                _save_catalog_cache(pid, catalog_hash, quality, catalog)
         def_ids = _upsert_catalog(pid, catalog)
         observations: list[dict[str, Any]] = []
         # Only section-analyse when at least one floor has no dedicated RCP.
-        if any(_find_rcp_for_floor(pid, floor) is None for floor in floors):
+        # Defer expensive vertical-section interpretation while the controlling
+        # Floor geometry itself is still provisional. The visible candidate is
+        # intentionally profile-unresolved and cannot enter BOQ; section evidence
+        # is resolved on the confirmed follow-up run.
+        if not review_only_fallback and any(_find_rcp_for_floor(pid, floor) is None for floor in pending_floors):
             observations = _section_observations(pid, quality)
-        results = []
-        for floor in floors:
-            existing = fetch_one("SELECT count(*) AS n FROM ceiling_zone WHERE floor_id=%s", (str(floor["id"]),))
-            if existing and int(existing["n"]) > 0:
-                results.append({"floor_id": str(floor["id"]), "skipped": True, "reason": "existing ceiling zones"})
-                continue
+        total = len(pending_floors)
+        for index, floor in enumerate(pending_floors, start=1):
+            if progress_callback:
+                progress_callback(index, total, floor)
             rcp = _find_rcp_for_floor(pid, floor)
             if rcp:
-                count = _analyze_rcp(pid, floor, rcp, quality, catalog, def_ids)
-                results.append({"floor_id": str(floor["id"]), "source": "rcp", "zones": count, "viewport_id": str(rcp["id"])})
+                detected = _analyze_rcp(project, pid, floor, rcp, quality, catalog, def_ids, force=force)
+                results.append({
+                    "floor_id": str(floor["id"]), "source": "rcp", "viewport_id": str(rcp["id"]), **detected,
+                })
             else:
                 count = _derive_from_floor_spaces(pid, floor, catalog, def_ids, observations)
-                results.append({"floor_id": str(floor["id"]), "source": "floor_space", "zones": count})
-        result = {"floors": results, "warnings": catalog.warnings, "section_observations": len(observations)}
+                results.append({"floor_id": str(floor["id"]), "source": "floor_space", "zones": count, "cached": True})
+        warnings = list(catalog.warnings)
+        if review_only_fallback:
+            warnings.append(
+                "Some Ceiling zones were derived from unconfirmed Floor geometry. They are review-only and are excluded from BOQ until confirmed."
+            )
+        result = {"floors": results, "warnings": warnings, "section_observations": len(observations)}
         _finish_run(run_id, "completed", "Ceiling analysis complete", result=result)
         return result
     except Exception as exc:
         _finish_run(run_id, "failed", "Ceiling analysis failed", error=str(exc))
         raise
+
+
+def _run_ceiling_analysis(project_id: str, quality: str, force: bool, *, lock_acquired: bool = False) -> None:
+    lock = _ceiling_lock(project_id)
+    if not lock_acquired and not lock.acquire(blocking=False):
+        return
+    try:
+        _set_ceiling_status(project_id, "running", 3, "Preparing ceiling drawings")
+
+        def progress(index: int, total: int, floor: dict[str, Any]) -> None:
+            pct = 10 + int(((index - 1) / max(total, 1)) * 82)
+            _set_ceiling_status(
+                project_id, "running", pct,
+                f"Detecting ceiling areas · {floor.get('name') or f'floor {index}'}",
+                current=index, total=total, floor_id=str(floor.get("id") or ""),
+            )
+
+        result, _harness_report = run_element_harness(
+            project_id, "ceiling", quality, force,
+            lambda: analyze_project_ceilings(project_id, quality, force=force, progress_callback=progress),
+            evaluate_element, publish_element_facts,
+        )
+        _set_ceiling_status(
+            project_id, "completed", 100, "Ceiling analysis complete", result=result,
+            harness_status=_harness_report.status,
+            harness_issues=[
+                {"code": issue.code, "message": issue.message, "severity": issue.severity, "entity_refs": list(issue.entity_refs)}
+                for issue in _harness_report.issues
+            ],
+            harness_stats=_harness_report.stats,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _set_ceiling_status(
+            project_id, "failed", 100, "Ceiling analysis failed",
+            error_message=str(exc)[:1000], traceback=traceback.format_exc(limit=6),
+        )
+    finally:
+        lock.release()
+
+
+def start_ceiling_analysis(project_id: UUID | str, quality: str = "medium", *, force: bool = False) -> dict[str, Any]:
+    pid = str(project_id)
+    require_frozen_project(pid)
+
+    if force:
+        confirmed_zones = fetch_one(
+            "SELECT count(*) AS n FROM ceiling_zone WHERE project_id=%s AND user_confirmed=true",
+            (pid,),
+        )
+        confirmed_features = fetch_one(
+            "SELECT count(*) AS n FROM ceiling_feature WHERE project_id=%s AND user_confirmed=true",
+            (pid,),
+        )
+        if (confirmed_zones and int(confirmed_zones["n"]) > 0) or (confirmed_features and int(confirmed_features["n"]) > 0):
+            raise RuntimeError(
+                "This project contains user-confirmed Ceiling work. Clear/replace it explicitly before rerunning detection so confirmed work is never overwritten."
+            )
+
+    auth = codex_account_status()
+    if not auth.get("available"):
+        raise RuntimeError(auth.get("error") or "Ceiling account detection is not installed")
+    if not auth.get("authenticated"):
+        raise RuntimeError("Connect a ChatGPT account in the Ceiling workspace before running detection.")
+
+    lock = _ceiling_lock(pid)
+    if not lock.acquire(blocking=False):
+        return _read_json(
+            _ceiling_status_path(pid),
+            {"status": "running", "progress": 1, "message": "Preparing ceiling drawings"},
+        )
+    status = _set_ceiling_status(pid, "running", 1, "Preparing ceiling drawings")
+    thread = threading.Thread(
+        target=_run_ceiling_analysis,
+        kwargs={"project_id": pid, "quality": quality, "force": force, "lock_acquired": True},
+        daemon=True,
+        name=f"ceilings-{pid[:8]}",
+    )
+    try:
+        thread.start()
+    except Exception:
+        lock.release()
+        raise
+    return status
+
+
+def ceiling_analysis_status(project_id: UUID | str) -> dict[str, Any]:
+    pid = str(project_id)
+    status = _read_json(_ceiling_status_path(pid), {})
+    if status:
+        if status.get("status") == "running" and not _ceiling_lock(pid).locked():
+            return _set_ceiling_status(pid, "failed", int(status.get("progress") or 0), "Previous Ceiling run was interrupted. Retry will reuse saved/cached evidence.", error_message="interrupted", recoverable=True)
+        return status
+    run = fetch_one(
+        "SELECT status,progress,message,error_message FROM takeoff_analysis_run "
+        "WHERE project_id=%s AND module='ceiling' ORDER BY created_at DESC LIMIT 1",
+        (pid,),
+    )
+    return run or {"status": "not_started", "progress": 0, "message": None, "error_message": None}
 
 
 def _ceiling_extra_viewports(project_id: str, context: dict[str, Any]) -> None:
@@ -546,10 +983,12 @@ def ceiling_demo_state(project_id: UUID | str) -> dict[str, Any]:
             "status": "confirmed" if row.get("user_confirmed") else "needs_review" if row.get("status") == "needs_review" else "ready",
         })
     ui = fetch_one("SELECT state_json FROM takeoff_ui_state WHERE project_id=%s AND module='ceiling'", (pid,))
-    run = fetch_one("SELECT status,progress,message,error_message FROM takeoff_analysis_run WHERE project_id=%s AND module='ceiling' ORDER BY created_at DESC LIMIT 1", (pid,))
-    return {**context, "families": families, "zones": zones, "uiState": (ui or {}).get("state_json") or {},
-            "analysis": run or {"status": "not_started", "progress": 0, "message": None, "error_message": None},
-            "provider": get_settings().takeoff_ai_provider}
+    return {
+        **context, "families": families, "zones": zones, "uiState": (ui or {}).get("state_json") or {},
+        "analysis": ceiling_analysis_status(pid),
+        "provider": CEILING_PROVIDER,
+        "auth": codex_account_status(),
+    }
 
 
 def save_ceiling_demo_state(project_id: UUID | str, payload: dict[str, Any]) -> dict[str, Any]:

@@ -1,4 +1,4 @@
-from ..models import ElementScopeSpec
+from ..models import ElementScopeSpec, FactDependency
 
 SCOPE_SPEC = ElementScopeSpec(
     key="roof",
@@ -13,4 +13,5 @@ SCOPE_SPEC = ElementScopeSpec(
     legacy_name_patterns=("roof", "roof terrace", "roof deck", "canopy"),
     group_mode="roof_scope",
     require_vertical_evidence=True,
+    dependencies=(FactDependency("slab_solid", "slab", required=False),),
 )

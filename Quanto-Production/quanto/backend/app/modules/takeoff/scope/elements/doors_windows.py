@@ -1,4 +1,4 @@
-from ..models import ElementScopeSpec
+from ..models import ElementScopeSpec, FactDependency
 
 SCOPE_SPEC = ElementScopeSpec(
     key="doors-windows",
@@ -11,4 +11,5 @@ SCOPE_SPEC = ElementScopeSpec(
     detail_subjects=("door", "window"),
     evidence_keywords=("door", "window", "opening", "ironmongery", "glazing"),
     require_vertical_evidence=False,
+    dependencies=(FactDependency("wall_geometry", "walls", required=False),),
 )

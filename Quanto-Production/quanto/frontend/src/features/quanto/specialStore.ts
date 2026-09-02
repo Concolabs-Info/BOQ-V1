@@ -140,6 +140,9 @@ export const useSpecialStore = create<State>()(
                 ? {
                     ...item,
                     points: item.points.map(movePoint),
+                    voids: item.voids.map((ring) => ring.map(movePoint)),
+                    railSegments: item.railSegments?.map((segment) => ({ ...segment, line: segment.line.map(movePoint) })),
+                    geometryUserModified: true,
                     status: item.status === "confirmed" ? "ready" : item.status,
                   }
                 : item,
@@ -207,14 +210,21 @@ export const useSpecialStore = create<State>()(
           )
         )
           return;
+        const geometryEdited = Object.prototype.hasOwnProperty.call(patch, "points") || Object.prototype.hasOwnProperty.call(patch, "voids");
+        const adjustedBase = Object.prototype.hasOwnProperty.call(patch, "railEdges") && !Object.prototype.hasOwnProperty.call(patch, "railEdgesEdited")
+          ? { ...patch, railEdgesEdited: true }
+          : patch;
+        const adjusted = geometryEdited && !Object.prototype.hasOwnProperty.call(adjustedBase, "geometryUserModified")
+          ? { ...adjustedBase, geometryUserModified: true }
+          : adjustedBase;
         set((s) => ({
           flights: s.flights.map((x) =>
             x.id === id
               ? {
                   ...x,
-                  ...patch,
+                  ...adjusted,
                   status:
-                    patch.status ??
+                    adjusted.status ??
                     (x.status === "confirmed" ? "ready" : x.status),
                 }
               : x,

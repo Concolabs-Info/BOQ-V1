@@ -12,7 +12,7 @@ from .models import ElementScopeSpec, FactDependency
 from .questions import answered_choice, list_questions, sync_questions
 from .registry import canonical_element, get_scope_spec
 
-SCOPE_SCHEMA_VERSION = "takeoff-scope-v1"
+SCOPE_SCHEMA_VERSION = "takeoff-scope-v2"
 
 
 def _norm(value: Any) -> str:
@@ -480,6 +480,26 @@ def compute_scope(project_id: str, element: str) -> dict[str, Any]:
                 floor_fact = _floor_geometry_status(project_id, scope_ref)
                 if floor_fact["status"] == "complete":
                     geometry_route = "floor_geometry_fallback"
+                elif floor_fact["status"] == "pending":
+                    # Detection and commercial approval are separate gates. Show
+                    # Floor-derived Ceiling candidates during review, but keep
+                    # them unconfirmed and therefore outside the official BOQ.
+                    geometry_route = "floor_geometry_fallback"
+                    gaps.append({
+                        "code": "floor_geometry_needs_review",
+                        "scope_ref": scope_ref,
+                        "severity": "warning",
+                        "message": f"No ceiling drawing is available for {level.get('name')}; detected Floor geometry will be used as review-only Ceiling candidates.",
+                        "entity_refs": [floor_fact["floor_id"]] if floor_fact.get("floor_id") else [],
+                    })
+                    questions.append(_question(
+                        scope_ref,
+                        "floor_geometry_needs_review",
+                        "dependency",
+                        "Review and confirm the Floor geometry before confirming any Floor-derived Ceiling quantities.",
+                        effect="hold",
+                        entity_refs=[floor_fact["floor_id"]] if floor_fact.get("floor_id") else [],
+                    ))
                 else:
                     gaps.append({"code": "floor_geometry_not_ready", "scope_ref": scope_ref, "severity": "blocked", "message": f"No ceiling drawing is available for {level.get('name')} and confirmed Floor geometry is not ready.", "entity_refs": []})
                     questions.append(_question(scope_ref, "floor_geometry_not_ready", "dependency", "No ceiling drawing is available. Confirm Floor geometry first so Ceiling can use the planned fallback.", effect="halt_scope"))
@@ -642,7 +662,9 @@ def compute_scope(project_id: str, element: str) -> dict[str, Any]:
                     "message": f"{fact['fact_type']} from {fact['publisher_element']} is not ready. Affected downstream facts must wait.",
                 })
 
-    # Ceiling explicitly consumes confirmed floor geometry only on levels where no RCP exists.
+    # Ceiling consumes Floor geometry only on levels where no RCP exists. A
+    # pending source produces review candidates; only confirmed Ceiling output
+    # can pass the later BOQ gate.
     if spec.floor_geometry_fallback:
         for level_scope in level_scopes:
             if level_scope["geometry_route"] == "floor_geometry_fallback":
@@ -684,10 +706,11 @@ def run_scope(project_id: str, element: str, *, force: bool = False) -> dict[str
     if not force:
         existing = fetch_one(
             """SELECT * FROM takeoff_scope_manifest
-               WHERE project_id=%s AND element=%s AND frame_version=%s""",
+               WHERE project_id=%s AND element=%s AND frame_version=%s AND is_stale=false
+               ORDER BY run_revision DESC, created_at DESC LIMIT 1""",
             (project_id, element, frame_version),
         )
-        if existing:
+        if existing and (existing.get("manifest_json") or {}).get("schema_version") == SCOPE_SCHEMA_VERSION:
             manifest = existing["manifest_json"]
             return {**manifest, "manifest_id": str(existing["id"]), "run_revision": int(existing["run_revision"]), "stale": False, "questions": list_questions(project_id, element, frame_version)}
 
@@ -695,14 +718,33 @@ def run_scope(project_id: str, element: str, *, force: bool = False) -> dict[str
     manifest = computed["manifest"]
     content_hash = _hash(manifest)
     with transaction() as conn:
+        current = conn.execute(
+            """SELECT id,frame_version,run_revision FROM takeoff_scope_manifest
+               WHERE project_id=%s AND element=%s AND is_stale=false
+               ORDER BY frame_version DESC,run_revision DESC,created_at DESC
+               LIMIT 1 FOR UPDATE""",
+            (project_id, element),
+        ).fetchone()
+        previous_for_frame = conn.execute(
+            """SELECT COALESCE(max(run_revision),0) AS revision
+               FROM takeoff_scope_manifest
+               WHERE project_id=%s AND element=%s AND frame_version=%s""",
+            (project_id, element, frame_version),
+        ).fetchone()
+        next_revision = int(previous_for_frame["revision"] or 0) + 1
+        if current:
+            conn.execute(
+                """UPDATE takeoff_scope_manifest
+                   SET is_stale=true,superseded_at=COALESCE(superseded_at,now()),updated_at=now()
+                   WHERE id=%s""",
+                (str(current["id"]),),
+            )
         row = conn.execute(
-            """INSERT INTO takeoff_scope_manifest(project_id,element,frame_version,status,manifest_json,content_hash)
-               VALUES (%s,%s,%s,%s,%s,%s)
-               ON CONFLICT(project_id,element,frame_version) DO UPDATE SET
-                 status=excluded.status,manifest_json=excluded.manifest_json,content_hash=excluded.content_hash,
-                 run_revision=takeoff_scope_manifest.run_revision+1,updated_at=now()
+            """INSERT INTO takeoff_scope_manifest(
+                   project_id,element,frame_version,status,manifest_json,content_hash,run_revision,is_stale
+               ) VALUES (%s,%s,%s,%s,%s,%s,%s,false)
                RETURNING *""",
-            (project_id, element, frame_version, manifest["status"], Jsonb(manifest), content_hash),
+            (project_id, element, frame_version, manifest["status"], Jsonb(manifest), content_hash, next_revision),
         ).fetchone()
     questions = sync_questions(project_id, element, frame_version, computed["questions"])
     return {**manifest, "manifest_id": str(row["id"]), "run_revision": int(row["run_revision"]), "stale": False, "questions": questions}
@@ -713,10 +755,12 @@ def get_scope(project_id: str, element: str, *, auto_run: bool = True) -> dict[s
     _, frame_version = _load_frame(project_id)
     row = fetch_one(
         """SELECT * FROM takeoff_scope_manifest
-           WHERE project_id=%s AND element=%s ORDER BY frame_version DESC, updated_at DESC LIMIT 1""",
+           WHERE project_id=%s AND element=%s AND is_stale=false
+           ORDER BY frame_version DESC, run_revision DESC, updated_at DESC LIMIT 1""",
         (project_id, element),
     )
-    if not row or int(row["frame_version"]) != frame_version:
+    schema_is_current = bool(row and (row.get("manifest_json") or {}).get("schema_version") == SCOPE_SCHEMA_VERSION)
+    if not row or int(row["frame_version"]) != frame_version or not schema_is_current:
         if auto_run:
             return run_scope(project_id, element, force=True)
         if row:

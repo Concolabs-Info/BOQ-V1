@@ -95,6 +95,19 @@ export function confirmFinishAssignments(
   });
 }
 
+export function updateFloorRoomBoundary(
+  projectId: string,
+  floorId: string,
+  roomId: string,
+  points: Array<{ x: number; y: number }>,
+  reason?: string,
+) {
+  return requestJson(`/api/v1/projects/${projectId}/floor-boundaries/floors/${floorId}/rooms/${roomId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ points, reason: reason || "Boundary aligned to visible inner wall faces" }),
+  });
+}
+
 export function createCanonicalFinishZone(
   projectId: string,
   floorId: string,

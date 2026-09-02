@@ -17,11 +17,13 @@ import {
   type ElementFormValues,
 } from "./components/ElementEditorDialog";
 import {
+  FloorReviewRegionOverlays,
   OpeningOverlays,
   RoofOverlays,
   WallOverlays,
   ZoneOverlays,
 } from "./components/ElementOverlays";
+import { friendlyRoomLabel } from "./friendlyLabels";
 import { useDemoStore } from "@/features/demo/store";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import type {
@@ -38,6 +40,10 @@ import {
   wallNetAreaM2,
   wallOpeningDeductM2,
   wallFinishAreaM2,
+  wallHasFinish,
+  wallFinishFaceCount,
+  isInSituConcreteWallFamily,
+  wallConstructionSection,
   zoneNetAreaM2,
   floorFactor,
   floorName,
@@ -58,16 +64,27 @@ import {
 import type { MeasurementKind } from "./measurements/measurementStore";
 import { beginLiveEdit } from "./editing/editSessionStore";
 import { useRealFloorCeilingTakeoff } from "@/features/takeoff/shared/useRealFloorCeilingTakeoff";
+import { useRealWallTakeoff } from "@/features/takeoff/shared/useRealWallTakeoff";
+import { useRealStairsRampsTakeoff } from "@/features/takeoff/shared/useRealStairsRampsTakeoff";
+import { useRealDoorsWindowsTakeoff } from "@/features/takeoff/shared/useRealDoorsWindowsTakeoff";
+import { useRealColumnTakeoff } from "@/features/takeoff/shared/useRealColumnTakeoff";
+import { HarnessRunPanel } from "@/features/takeoff/shared/HarnessRunPanel";
 import { ScopeStatus } from "@/features/scope/components/ScopeStatus";
 import { TakeoffStatusBar } from "./components/TakeoffProductionPanels";
 import { TakeoffOfficeRibbon, TakeoffOfficeStatusBar } from "./components/TakeoffOfficeRibbon";
+import {
+  FloorSubelement3DNotice,
+  FloorSubelementSelector,
+  FloorSubelementWorkbook,
+  normalizeFloorPart,
+} from "./components/FloorSubelementWorkspace";
+import { FloorLayerDrawingWorkspace } from "./components/FloorLayerDrawingWorkspace";
 import { dispatchTakeoffStatus, useTakeoffCommand } from "./takeoffCommands";
 import { findPdfVectorSnap, usePdfSnapModes, usePdfVectorSource } from "./snapping/pdfVectorSnap";
 import { exportTakeoffCsv, type ExportRow } from "./takeoffExport";
 import {
   MATTEGODA_FLOOR_AREAS,
   MATTEGODA_MASONRY,
-  MATTEGODA_OPENING_SCHEDULE,
   type WorkbookSourceStatus,
 } from "@/features/demo/mattegodaWorkbookData";
 
@@ -123,7 +140,7 @@ const viewportsByElement: Record<string, string[]> = {
 function allowedViewportsFor(element: string, viewports: Array<{ id: string; category: string }>) {
   const configured = viewportsByElement[element] || [];
   const hasDemoIds = viewports.some((viewport) => configured.includes(viewport.id));
-  if ((element === "floor" || element === "ceiling" || element === "roof") && !hasDemoIds) {
+  if ((element === "floor" || element === "ceiling" || element === "roof" || element === "walls" || element === "stairs-ramps" || element === "columns" || isOpeningElement(element)) && !hasDemoIds) {
     return viewports.filter((viewport) => viewport.category === "plan").map((viewport) => viewport.id);
   }
   return configured;
@@ -139,7 +156,22 @@ export function TakeoffPage({
   view: string;
 }) {
   const name = elementNames[element] || element;
-  const runtime = useRealFloorCeilingTakeoff(projectId, element);
+  const pageSearch = useSearchParams();
+  const floorPart = normalizeFloorPart(pageSearch.get("floorPart"));
+  const floorReviewRegionCount = useDemoStore((state) => state.floorReviewRegions.length);
+  const areaRuntime = useRealFloorCeilingTakeoff(projectId, element);
+  const wallRuntime = useRealWallTakeoff(projectId, element);
+  const stairRampRuntime = useRealStairsRampsTakeoff(projectId, element);
+  const openingRuntime = useRealDoorsWindowsTakeoff(projectId, element);
+  const columnRuntime = useRealColumnTakeoff(projectId, element);
+  const runtime = columnRuntime.module ? columnRuntime : wallRuntime.module ? wallRuntime : stairRampRuntime.module ? stairRampRuntime : openingRuntime.module ? openingRuntime : areaRuntime;
+  // Zustand's persisted demo/editor state is browser-only. Rendering that state
+  // during SSR can produce one set of SVG room labels on the server and a
+  // different saved-project set on the browser's very first render. Keep the
+  // route deterministic until React has attached, then show the real workspace.
+  const [clientReady, setClientReady] = useState(false);
+  useEffect(() => setClientReady(true), []);
+  if (!clientReady) return <div className="min-h-screen bg-[#e8edf3]" aria-label="Loading takeoff workspace" />;
   return (
     <QuantoPageShell
       projectId={projectId}
@@ -153,26 +185,102 @@ export function TakeoffPage({
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <TakeoffOfficeRibbon projectId={projectId} element={element} view={view} elementName={name} />
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#e8edf3] p-2">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#e8edf3] px-2 pb-2 pt-1.5">
+      {element === "floor" ? <FloorSubelementSelector
+        projectId={projectId}
+        view={view}
+        part={floorPart}
+        detectionStatus={runtime.analysis?.harness_status || runtime.analysis?.status || null}
+        cached={areaRuntime.isShowingCachedResult}
+        retrying={runtime.retrying}
+        onRunFresh={() => void runtime.retryAnalysis()}
+      /> : null}
       {planned.has(element) && element !== "beams" ? <ScopeStatus projectId={projectId} element={element} /> : null}
+      {runtime.module && element !== "columns" && element !== "floor" ? <HarnessRunPanel projectId={projectId} element={element} /> : null}
+      {(element === "floor" || element === "ceiling" || element === "roof" || element === "walls" || element === "stairs-ramps" || element === "columns" || isOpeningElement(element)) && runtime.accountAuth && !runtime.accountAuth.authenticated && !runtime.hasSavedModuleData ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm">
+          <div>
+            <span className="font-semibold text-sky-950">Connect ChatGPT for {name} detection</span>
+            {runtime.accountAuth.status === "waiting" ? (
+              <span className="ml-2 text-sky-800">Use code <strong className="font-mono">{runtime.accountAuth.user_code}</strong> in the sign-in page. Detection starts automatically after sign-in.</span>
+            ) : runtime.accountAuth.available ? (
+              <span className="ml-2 text-sky-800">{name} detection uses your signed-in ChatGPT/Codex account and reuses saved results instead of making repeated API-key calls.</span>
+            ) : (
+              <span className="ml-2 text-sky-800">{runtime.accountAuth.error || "Install the updated backend dependencies to enable account detection."}</span>
+            )}
+          </div>
+          {runtime.accountAuth.available ? (
+            runtime.accountAuth.status === "waiting" && runtime.accountAuth.verification_url ? (
+              <button type="button" onClick={() => window.open(runtime.accountAuth?.verification_url || "", "_blank", "noopener,noreferrer")} className="shrink-0 rounded-lg border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-950">
+                Open sign-in
+              </button>
+            ) : (
+              <button type="button" disabled={runtime.authConnecting} onClick={() => void runtime.connectTakeoffAccount()} className="shrink-0 rounded-lg border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-950 disabled:opacity-50">
+                {runtime.authConnecting ? "Connecting…" : "Connect ChatGPT"}
+              </button>
+            )
+          ) : null}
+        </div>
+      ) : null}
       {runtime.module && runtime.analysis?.status === "running" ? (
         <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-          <span className="font-semibold">Finding {name.toLowerCase()} areas…</span>
+          <span className="font-semibold">Finding {name.toLowerCase()}{element === "walls" || element === "stairs-ramps" || element === "columns" || isOpeningElement(element) ? "…" : " areas…"}</span>
           <span className="ml-2">You can continue reviewing the drawings while this finishes.</span>
+        </div>
+      ) : null}
+      {element !== "floor" && runtime.module && runtime.analysis?.status === "completed" && runtime.analysis?.harness_status && runtime.analysis.harness_status !== "pass" ? (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span className="font-semibold">{name} completed with items to review.</span>
+          <span className="ml-2">{runtime.analysis.harness_issues?.[0]?.message || "Detection is saved, but the harness found evidence or completeness checks that need your review before final BOQ use."}</span>
+          {(runtime.analysis.harness_issues?.length || 0) > 1 ? <span className="ml-2 font-medium">+{(runtime.analysis.harness_issues?.length || 1) - 1} more.</span> : null}
         </div>
       ) : null}
       {runtime.module && runtime.analysis?.status === "failed" ? (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
           <div>
-            <span className="font-semibold text-amber-900">{name} areas need review</span>
-            <span className="ml-2 text-amber-800">We could not separate every area safely, so uncertain measurements were not saved. Draw the areas manually or try detection again.</span>
+            <span className="font-semibold text-amber-900">{name}{element === "walls" || element === "stairs-ramps" || element === "columns" || isOpeningElement(element) ? " need" : " areas need"} review</span>
+            <span className="ml-2 text-amber-800">{runtime.analysis.error_message || (element === "walls" ? "Some wall geometry or quantity evidence could not be resolved safely. Uncertain type, height, opening or finish data was left for review rather than guessed." : element === "stairs-ramps" ? "Some stair/ramp geometry, rise, slope, construction, finish or balustrade evidence could not be resolved safely. The item remains editable and reviewable; unsupported quantities were not guessed." : element === "columns" ? "Some column positions, family assignments, section sizes, heights or reinforcement evidence could not be resolved safely. The detected columns remain editable; unsupported quantities were left for review rather than guessed." : isOpeningElement(element) ? "Some opening locations, tags, schedule assignments, sizes or host-wall links could not be resolved safely. Uncertain data was left for review rather than guessed." : "We could not separate every area safely, so uncertain measurements were not saved. Draw the areas manually or try detection again.")}</span>
           </div>
-          <button type="button" disabled={runtime.retrying} onClick={() => void runtime.retryAnalysis()} className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 disabled:opacity-50">
-            {runtime.retrying ? "Trying again…" : "Try detection again"}
+          <div className="flex shrink-0 gap-2">
+            {element === "ceiling" && runtime.analysis.error_message?.toLowerCase().includes("floor") ? <Link href={appRoutes.takeoff(projectId, "floor", "dimension")} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900">Review Floor</Link> : null}
+            <button type="button" disabled={runtime.retrying} onClick={() => void runtime.retryAnalysis()} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 disabled:opacity-50">
+              {runtime.retrying ? "Trying again…" : "Try detection again"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {element !== "floor" && areaRuntime.module && areaRuntime.isShowingCachedResult ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
+          <div>
+            <span className="font-semibold text-blue-950">Showing saved {name} detection.</span>
+            <span className="ml-2 text-blue-800">The source drawings were unchanged, so the last completed result was loaded instead of running detection again.</span>
+          </div>
+          <button type="button" disabled={runtime.retrying} onClick={() => void runtime.retryAnalysis()} className="shrink-0 rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-semibold text-blue-950 disabled:opacity-50">
+            {runtime.retrying ? "Running fresh detection…" : "Run fresh detection"}
           </button>
         </div>
       ) : null}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{isStructuralElement(element) ? (
+      {element === "floor" && floorPart === "areas" && floorReviewRegionCount > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+          <span className="font-semibold text-slate-900">Canvas key</span>
+          <span><i className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm bg-blue-500 align-middle" />Detected room + finish area</span>
+          <span><i className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-slate-500 bg-slate-100 align-middle" />Excluded opening / service area</span>
+          <span><i className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-amber-600 bg-amber-100 align-middle" />Special slab for review</span>
+          <span><i className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-red-600 bg-red-50 align-middle" />Obstruction</span>
+        </div>
+      ) : null}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{element === "floor" && floorPart !== "areas" ? (
+        view === "workbook" ? (
+          <FloorSubelementWorkbook projectId={projectId} part={floorPart} />
+        ) : view === "3d" ? (
+          <>
+            <FloorSubelement3DNotice part={floorPart} />
+            <SceneView projectId={projectId} element={element} />
+          </>
+        ) : (
+          <FloorLayerDrawingWorkspace projectId={projectId} part={floorPart} />
+        )
+      ) : isStructuralElement(element) ? (
         <StructuralTakeoff
           projectId={projectId}
           element={element}
@@ -1062,11 +1170,14 @@ function DimensionView({
                   hiddenFamilies={hidden}
                 />
               ) : element === "floor" ? (
-                <ZoneOverlays
-                  kind="floor"
-                  viewportId={viewport.id}
-                  hiddenFamilies={hidden}
-                />
+                <>
+                  <FloorReviewRegionOverlays viewportId={viewport.id} />
+                  <ZoneOverlays
+                    kind="floor"
+                    viewportId={viewport.id}
+                    hiddenFamilies={hidden}
+                  />
+                </>
               ) : element === "walls" ? (
                 <>
                   <WallOverlays
@@ -1537,7 +1648,18 @@ function FamilyList({
         heightMm: 2100,
         thicknessMm: 40,
         material: "To be confirmed",
+        frameMaterial: null,
+        leafMaterial: null,
+        glazing: null,
+        operation: null,
+        fireRating: null,
+        acousticRating: null,
+        finish: null,
         fittings: "To be confirmed",
+        sillHeightMm: null,
+        headHeightMm: null,
+        scheduledQuantity: null,
+        locationText: null,
         source: "User created",
         color: parent === "door" ? "#6366f1" : "#14b8a6",
       });
@@ -1821,6 +1943,27 @@ function StandardFamilyEditor({
               onChange={(v) => setDraft({ ...draft, material: v })}
             />
           ) : null}
+          {"frameMaterial" in draft ? (
+            <MiniInput label="Frame" value={draft.frameMaterial || ""} onChange={(v) => setDraft({ ...draft, frameMaterial: v || null })} />
+          ) : null}
+          {"leafMaterial" in draft ? (
+            <MiniInput label="Leaf / panel" value={draft.leafMaterial || ""} onChange={(v) => setDraft({ ...draft, leafMaterial: v || null })} />
+          ) : null}
+          {"glazing" in draft ? (
+            <MiniInput label="Glazing" value={draft.glazing || ""} onChange={(v) => setDraft({ ...draft, glazing: v || null })} />
+          ) : null}
+          {"operation" in draft ? (
+            <MiniInput label="Operation" value={draft.operation || ""} onChange={(v) => setDraft({ ...draft, operation: v || null })} />
+          ) : null}
+          {"fireRating" in draft ? (
+            <MiniInput label="Fire rating" value={draft.fireRating || ""} onChange={(v) => setDraft({ ...draft, fireRating: v || null })} />
+          ) : null}
+          {"acousticRating" in draft ? (
+            <MiniInput label="Acoustic" value={draft.acousticRating || ""} onChange={(v) => setDraft({ ...draft, acousticRating: v || null })} />
+          ) : null}
+          {"finish" in draft ? (
+            <MiniInput label="Finish" value={draft.finish || ""} onChange={(v) => setDraft({ ...draft, finish: v || null })} />
+          ) : null}
           {"classification" in draft ? (
             <label className="grid grid-cols-[88px_minmax(0,1fr)] items-center gap-2 text-[11px] font-medium text-slate-500">
               <span>Classification</span>
@@ -1833,6 +1976,8 @@ function StandardFamilyEditor({
               >
                 <option>External</option>
                 <option>Internal</option>
+                <option>Both</option>
+                <option>Unknown</option>
               </select>
             </label>
           ) : null}
@@ -1863,6 +2008,18 @@ function StandardFamilyEditor({
               value={draft.fittings || ""}
               onChange={(v) => setDraft({ ...draft, fittings: v })}
             />
+          ) : null}
+          {"sillHeightMm" in draft ? (
+            <MiniInput label="Sill (mm)" type="number" value={String(draft.sillHeightMm ?? "")} onChange={(v) => setDraft({ ...draft, sillHeightMm: v === "" ? null : Number(v) })} />
+          ) : null}
+          {"headHeightMm" in draft ? (
+            <MiniInput label="Head (mm)" type="number" value={String(draft.headHeightMm ?? "")} onChange={(v) => setDraft({ ...draft, headHeightMm: v === "" ? null : Number(v) })} />
+          ) : null}
+          {"scheduledQuantity" in draft ? (
+            <MiniInput label="Schedule qty" type="number" value={String(draft.scheduledQuantity ?? "")} onChange={(v) => setDraft({ ...draft, scheduledQuantity: v === "" ? null : Number(v) })} />
+          ) : null}
+          {"locationText" in draft ? (
+            <MiniInput label="Schedule scope" value={draft.locationText || ""} onChange={(v) => setDraft({ ...draft, locationText: v || null })} />
           ) : null}
           {"source" in draft ? (
             <MiniInput
@@ -2456,8 +2613,17 @@ function OpeningInspector({ id, element }: { id: string; element: string }) {
             ))}
         </select>
       </Field>
-      <InfoRow label="Size" value={`${f.widthMm} × ${f.heightMm} mm`} />
-      <InfoRow label="Material" value={f.material} />
+      <InfoRow label="Size" value={f.widthMm > 0 && f.heightMm > 0 ? `${f.widthMm} × ${f.heightMm} mm` : "Information required"} />
+      <InfoRow label="Material" value={f.material || "Information required"} />
+      {f.frameMaterial ? <InfoRow label="Frame" value={f.frameMaterial} /> : null}
+      {f.leafMaterial ? <InfoRow label="Leaf" value={f.leafMaterial} /> : null}
+      {f.glazing ? <InfoRow label="Glazing" value={f.glazing} /> : null}
+      {f.operation ? <InfoRow label="Operation" value={f.operation} /> : null}
+      {f.fireRating ? <InfoRow label="Fire rating" value={f.fireRating} /> : null}
+      {f.acousticRating ? <InfoRow label="Acoustic rating" value={f.acousticRating} /> : null}
+      {f.fittings ? <InfoRow label="Ironmongery" value={f.fittings} /> : null}
+      {opening.openingTag ? <InfoRow label="Plan tag" value={opening.openingTag} /> : null}
+      {opening.confidence != null ? <InfoRow label="Detection confidence" value={`${Math.round(opening.confidence * 100)}%`} /> : null}
       <SavedState />
     </Inspector>
   );
@@ -2507,8 +2673,8 @@ function ZoneInspector({
   const preview = fam.find((x) => x.id === draft.familyId) || fam[0];
   return (
     <Inspector
-      title={zone.id}
-      subtitle={`${preview.mark} · ${draft.room}`}
+      title={friendlyRoomLabel(draft.room)}
+      subtitle={`${kind === "floor" ? "Floor" : "Ceiling"} area · ${preview?.mark || "Unassigned finish"}`}
       onDelete={() => {
         st.captureGeometryUndo();
         st.deleteZone(kind, zone.id);
@@ -2542,9 +2708,9 @@ function ZoneInspector({
         onChange={apply}
       />
       <InfoRow label="Area" value={`${zoneNetAreaM2(zone).toFixed(2)} m²`} />
-      <InfoRow label="Material" value={preview.material} />
+      <InfoRow label="Material" value={preview?.material || "Information required"} />
       {kind === "floor" ? (
-        <InfoRow label="Screed" value={preview.screed || "None"} />
+        <InfoRow label="Screed" value={preview?.screed || "None"} />
       ) : (
         <InfoRow
           label="Height band"
@@ -3399,27 +3565,34 @@ function useWorkbookRows(element: string) {
   return useMemo<WorkbookRow[]>(() => {
     const rows: WorkbookRow[] = [];
     if (isOpeningElement(element)) {
-      const schedule = MATTEGODA_OPENING_SCHEDULE.filter((item) =>
-        element === "doors-windows" || item.kind === (element === "doors" ? "door" : "window"),
+      const families = st.openingFamilies.filter((family) =>
+        element === "doors-windows" || family.parent === (element === "doors" ? "door" : "window"),
       );
-      for (const item of schedule) {
+      for (const family of families) {
         const measured = st.openings
-          .filter((opening) => opening.familyId === item.ref)
+          .filter((opening) => opening.familyId === family.id)
           .reduce((total, opening) => total + floorFactor(opening.floorId), 0);
+        const scheduled = family.scheduledQuantity == null ? undefined : Number(family.scheduledQuantity);
+        if (measured <= 0 && scheduled == null) continue;
+        const size = family.widthMm > 0 && family.heightMm > 0
+          ? `${Math.round(family.widthMm)} × ${Math.round(family.heightMm)} mm`
+          : "size information required";
+        const detail = [family.material, family.frameMaterial ? `frame ${family.frameMaterial}` : "", family.glazing ? `glazing ${family.glazing}` : ""]
+          .filter(Boolean).join(" · ");
+        const variance = scheduled == null ? "" : ` · schedule ${scheduled}${measured !== scheduled ? ` · variance ${measured - scheduled > 0 ? "+" : ""}${measured - scheduled}` : " · matched"}`;
         rows.push({
-          key: `import:opening:${item.ref}`,
-          parent: item.kind === "door" ? "Doors" : "Windows",
-          familyId: item.ref,
-          familyLabel: item.description,
-          scope: item.location,
-          calc: `${measured} drawing instances after storey repetition`,
+          key: `opening:${family.id}`,
+          parent: family.parent === "door" ? "Doors" : "Windows",
+          familyId: family.id,
+          familyLabel: `${family.mark} · ${family.description}`,
+          scope: family.locationText || "Detected project openings",
+          calc: `${measured} drawing instances after storey repetition${variance}`,
           qty: measured,
-          importedQty: item.scheduledQty,
-          importedStatus: item.status,
+          importedQty: scheduled,
           unit: "nr",
-          source: "Mattegoda Preliminary Partial BOQ · Openings",
-          extra: `${Math.round(item.widthMm)} × ${Math.round(item.heightMm)} mm · host ${item.provisionalHost}`,
-          note: item.note,
+          source: family.source || "Project door/window evidence",
+          extra: `${size}${detail ? ` · ${detail}` : ""}`,
+          note: family.mark.startsWith("UNASSIGNED-") ? "Opening type/size requires schedule or user assignment before final BOQ confirmation." : undefined,
         });
       }
     } else if (element === "floor") {
@@ -3481,45 +3654,103 @@ function useWorkbookRows(element: string) {
         }
       }
     } else if (element === "walls") {
-      for (const item of MATTEGODA_MASONRY) {
-        const familyIds = st.wallFamilies.filter((family) => family.thicknessMm === item.thicknessMm).map((family) => family.id);
-        const measured = st.walls
-          .filter((wall) => wall.floorId === item.floorId && familyIds.includes(wall.familyId))
-          .reduce((total, wall) => total + wallNetAreaM2(wall), 0) * floorFactor(item.floorId);
-        rows.push({
-          key: item.key,
-          parent: "Masonry",
-          familyId: item.familyLabel,
-          familyLabel: `${item.thicknessMm} mm masonry`,
-          scope: item.scope,
-          floorId: item.floorId,
-          calc: `${item.centrelineM.toFixed(3)} m × ${item.heightM.toFixed(4)} m × ${item.repetition} − ${item.deductionM2.toFixed(2)} m²`,
-          qty: measured,
-          importedQty: item.netM2,
-          importedStatus: item.status,
-          unit: "m²",
-          source: "Mattegoda Preliminary Partial BOQ · Masonry Take-off",
-          extra: `Imported gross ${item.grossM2.toFixed(2)} m²; deductions ${item.deductionM2.toFixed(2)} m²`,
-          note: item.note,
-        });
+      // Production wall construction rows come directly from the persisted Wall entities.
+      for (const family of st.wallFamilies) {
+        const familyWalls = st.walls.filter((wall) => wall.familyId === family.id);
+        for (const floorId of [...new Set(familyWalls.map((wall) => wall.floorId))]) {
+          const floorWalls = familyWalls.filter((wall) => wall.floorId === floorId);
+          if (!floorWalls.length) continue;
+          const base = floorWalls.reduce((total, wall) => total + wallNetAreaM2(wall), 0);
+          const factor = floorFactor(floorId);
+          const gross = floorWalls.reduce((total, wall) => total + wallGrossAreaM2(wall), 0);
+          const deduct = floorWalls.reduce((total, wall) => total + wallOpeningDeductM2(wall), 0);
+          if (isInSituConcreteWallFamily(family) && family.thicknessMm <= 0) {
+            rows.push({
+              key: `wall-concrete-info:${family.id}:${floorId}`,
+              parent: "Concrete wall geometry — information required",
+              familyId: family.id,
+              familyLabel: `${family.mark} · ${family.description}`,
+              scope: floorName(floorId),
+              floorId,
+              calc: `${base.toFixed(2)} m² measured wall face`,
+              qty: base * factor,
+              unit: "m²",
+              source: "Quanto Wall detection / confirmed edits",
+              extra: "Wall thickness is required before concrete volume can be generated; reinforcement remains information required unless supported by project evidence.",
+            });
+          } else if (isInSituConcreteWallFamily(family) && family.thicknessMm > 0) {
+            rows.push({
+              key: `wall-concrete:${family.id}:${floorId}`,
+              parent: "Concrete walls",
+              familyId: family.id,
+              familyLabel: `${family.mark} · ${family.description}`,
+              scope: floorName(floorId),
+              floorId,
+              calc: `${base.toFixed(2)} m² × ${(family.thicknessMm / 1000).toFixed(3)} m${factor > 1 ? ` × ${factor}` : ""}`,
+              qty: base * (family.thicknessMm / 1000) * factor,
+              unit: "m³",
+              source: "Quanto Wall detection / confirmed edits",
+              extra: `${family.thicknessMm} mm · ${family.classification} · reinforcement requires supported schedule/rate`,
+            });
+            rows.push({
+              key: `wall-formwork:${family.id}:${floorId}`,
+              parent: "Concrete wall formwork",
+              familyId: family.id,
+              familyLabel: `${family.mark} · ${family.description}`,
+              scope: floorName(floorId),
+              floorId,
+              calc: `2 × ${base.toFixed(2)} m²${factor > 1 ? ` × ${factor}` : ""}`,
+              qty: 2 * base * factor,
+              unit: "m²",
+              source: "Quanto Wall detection / confirmed edits",
+              extra: "Two main faces; opening reveals/free ends require separate supported geometry",
+            });
+          } else {
+            rows.push({
+              key: `wall:${family.id}:${floorId}`,
+              parent: wallConstructionSection(family),
+              familyId: family.id,
+              familyLabel: `${family.mark} · ${family.description}`,
+              scope: floorName(floorId),
+              floorId,
+              calc: `${gross.toFixed(2)} m² − ${deduct.toFixed(2)} m²${factor > 1 ? ` × ${factor}` : ""}`,
+              qty: base * factor,
+              unit: "m²",
+              source: "Quanto Wall detection / confirmed edits",
+              extra: `${family.thicknessMm || 0} mm · ${family.classification} · ${floorWalls.length} wall segment${floorWalls.length === 1 ? "" : "s"}`,
+            });
+          }
+        }
+      }
+
+      // Keep the supplied Mattegoda control comparison only for the original demo dataset.
+      const legacyWallIds = new Set(["GF", "FF", "TYP", "RF"]);
+      const isLegacyWallDemo = st.storeys.length > 0 && st.storeys.every((storey) => legacyWallIds.has(storey.id));
+      if (isLegacyWallDemo) {
+        for (const item of MATTEGODA_MASONRY) {
+          const familyIds = st.wallFamilies.filter((family) => family.thicknessMm === item.thicknessMm).map((family) => family.id);
+          const measured = st.walls
+            .filter((wall) => wall.floorId === item.floorId && familyIds.includes(wall.familyId))
+            .reduce((total, wall) => total + wallNetAreaM2(wall), 0) * floorFactor(item.floorId);
+          rows.push({
+            key: item.key, parent: "Masonry control", familyId: item.familyLabel,
+            familyLabel: `${item.thicknessMm} mm masonry`, scope: item.scope, floorId: item.floorId,
+            calc: `${item.centrelineM.toFixed(3)} m × ${item.heightM.toFixed(4)} m × ${item.repetition} − ${item.deductionM2.toFixed(2)} m²`,
+            qty: measured, importedQty: item.netM2, importedStatus: item.status, unit: "m²",
+            source: "Mattegoda Preliminary Partial BOQ · Masonry Take-off",
+            extra: `Imported gross ${item.grossM2.toFixed(2)} m²; deductions ${item.deductionM2.toFixed(2)} m²`, note: item.note,
+          });
+        }
       }
       for (const f of st.wallFinishFamilies) {
-        const ws = st.walls.filter(
-          (w) => w.side1Finish === f.id || w.side2Finish === f.id,
-        );
+        const ws = st.walls.filter((w) => wallHasFinish(w, f.id));
         for (const fid of [...new Set(ws.map((w) => w.floorId))]) {
           const base = wallFinishAreaM2(f.id, fid),
             factor = floorFactor(fid),
             qty = base * factor;
           const faces = ws
             .filter((w) => w.floorId === fid)
-            .reduce(
-              (n, w) =>
-                n +
-                (w.side1Finish === f.id ? 1 : 0) +
-                (w.side2Finish === f.id ? 1 : 0),
-              0,
-            );
+            .reduce((n, w) => n + wallFinishFaceCount(w, f.id), 0);
           rows.push({
             key: `wall-finish:${f.id}:${fid}`,
             parent: "Finishes",
@@ -3918,7 +4149,7 @@ function SceneView({
   );
 }
 function usesRealTakeoffStoreys(element: string, storeys: Array<{ id: string }>) {
-  if (element !== "floor" && element !== "ceiling") return false;
+  if (element !== "floor" && element !== "ceiling" && element !== "walls") return false;
   const legacy = new Set(["GF", "FF", "TYP", "RF"]);
   return storeys.some((storey) => !legacy.has(storey.id));
 }

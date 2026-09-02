@@ -101,7 +101,9 @@ export function StructuralTakeoff({ projectId, element, view }: { projectId: str
 }
 
 function ScopedStructuralTakeoff({ projectId, element, view }: { projectId: string; element: Exclude<StructuralElement, "beams">; view: string }) {
-  useRealStructuralScopeTakeoff(projectId, element);
+  // Production Columns hydrates the exact approved viewport crop through useRealColumnTakeoff.
+  // Slab still uses the generic structural Scope loader.
+  useRealStructuralScopeTakeoff(projectId, element === "slab" ? element : "__production_columns__");
   if (view === "workbook") return <StructuralWorkbook projectId={projectId} element={element} />;
   if (view === "3d") return <Structural3D projectId={projectId} element={element} />;
   return <StructuralDimension projectId={projectId} element={element} />;
@@ -1697,6 +1699,12 @@ function effectiveColumnSection(item: ColumnInstance, family: ColumnFamily) {
         : (item.depthOverrideMm ?? family.depthMm),
     diameterMm,
   };
+}
+
+function columnFamilyHasConcreteBasis(family: ColumnFamily | undefined) {
+  if (!family) return false;
+  const text = `${family.material || ""} ${family.concreteGrade || ""} ${family.description || ""}`.toLowerCase();
+  return /reinforced\s+concrete|in[ -]?situ\s+concrete|(?:^|[^a-z])r\.?c\.?(?:[^a-z]|$)|\brcc\b|\bconcrete\b/.test(text);
 }
 
 function columnDrawingBox(item: ColumnInstance, family: ColumnFamily): BBox {
@@ -4153,22 +4161,31 @@ function useStructuralRows(element: StructuralElement) {
           const group = items.filter((x) => x.floorId === floorId),
             factor = floorFactor(floorId),
             count = group.length * factor;
+          const canFallbackToConcrete =
+            store.columnDataSource !== "production" || columnFamilyHasConcreteBasis(f);
           const volume =
-            group.reduce(
-              (s, x) =>
-                s +
-                (f.shape === "Circular"
-                  ? Math.PI * ((f.diameterMm || f.widthMm) / 2000) ** 2
-                  : (f.widthMm / 1000) * (f.depthMm / 1000)) *
-                  x.heightM,
-              0,
-            ) * factor;
-          const girth =
-            f.shape === "Circular"
-              ? (Math.PI * (f.diameterMm || f.widthMm)) / 1000
-              : (2 * (f.widthMm + f.depthMm)) / 1000;
+            group.reduce((sum, item) => {
+              if (item.concreteVolumeM3 != null) return sum + item.concreteVolumeM3;
+              if (!canFallbackToConcrete) return sum;
+              const section = effectiveColumnSection(item, f);
+              const area = f.shape === "Circular"
+                ? Math.PI * ((section.diameterMm || 0) / 2000) ** 2
+                : (section.widthMm / 1000) * (section.depthMm / 1000);
+              return sum + area * item.heightM;
+            }, 0) * factor;
           const formwork =
-            group.reduce((s, x) => s + girth * x.heightM, 0) * factor;
+            group.reduce((sum, item) => {
+              if (item.formworkAreaM2 != null) return sum + item.formworkAreaM2;
+              if (!canFallbackToConcrete) return sum;
+              const section = effectiveColumnSection(item, f);
+              const girth = f.shape === "Circular"
+                ? (Math.PI * (section.diameterMm || 0)) / 1000
+                : (2 * (section.widthMm + section.depthMm)) / 1000;
+              return sum + girth * item.heightM;
+            }, 0) * factor;
+          const hasSupportedConstructionQuantity = canFallbackToConcrete || group.some((item) => item.concreteVolumeM3 != null || item.formworkAreaM2 != null);
+          const reinforcement = group.reduce((sum, item) => sum + (item.reinforcementKg || 0), 0) * factor;
+          const reinforcementMissing = group.some((item) => item.reinforcementKg == null);
           rows.push({
             key: `columns:${f.id}:${floorId}`,
             familyId: f.id,
@@ -4181,7 +4198,9 @@ function useStructuralRows(element: StructuralElement) {
                 : `${count}`,
             qty: count,
             unit: "nr",
-            extra: `${volume.toFixed(2)} m³ · ${formwork.toFixed(2)} m² formwork`,
+            extra: hasSupportedConstructionQuantity
+              ? `${volume.toFixed(2)} m³ · ${formwork.toFixed(2)} m² formwork${reinforcement > 0 ? ` · ${reinforcement.toFixed(1)} kg reinforcement` : reinforcementMissing ? " · reinforcement: information required" : ""}`
+              : `construction quantity: information required${reinforcement > 0 ? ` · ${reinforcement.toFixed(1)} kg supported reinforcement` : ""}`,
             source: f.source,
             entityId: group[0].id,
           });
@@ -4649,16 +4668,21 @@ function selectionMetric(
 ) {
   const store = useStructuralStore.getState();
   if (element === "columns") {
+    let supported = 0;
     const volume = (items as ColumnInstance[]).reduce((total, item) => {
+      if (item.concreteVolumeM3 != null) { supported += 1; return total + item.concreteVolumeM3; }
       const family = store.columnFamilies.find((x) => x.id === item.familyId);
-      if (!family) return total;
-      const area =
-        family.shape === "Circular"
-          ? Math.PI * ((family.diameterMm || family.widthMm) / 2000) ** 2
-          : (family.widthMm / 1000) * (family.depthMm / 1000);
+      if (!family || (store.columnDataSource === "production" && !columnFamilyHasConcreteBasis(family))) return total;
+      const section = effectiveColumnSection(item, family);
+      const area = family.shape === "Circular"
+        ? Math.PI * ((section.diameterMm || 0) / 2000) ** 2
+        : (section.widthMm / 1000) * (section.depthMm / 1000);
+      supported += 1;
       return total + area * item.heightM;
     }, 0);
-    return { label: "Combined volume", value: `${volume.toFixed(3)} m³` };
+    return supported > 0
+      ? { label: "Supported concrete volume", value: `${volume.toFixed(3)} m³` }
+      : { label: "Selected columns", value: `${items.length} nr` };
   }
   if (element === "beams") {
     const length = (items as BeamRun[]).reduce(
@@ -4817,12 +4841,15 @@ function Structural3DItemDetails({
         (family?.shape === "Circular"
           ? section?.diameterMm || 0
           : section?.depthMm || 0) / 1000;
-    const volume =
+    const calculatedVolume =
       family?.shape === "Circular"
         ? Math.PI * (width / 2) ** 2 * column.heightM
         : width * depth * column.heightM;
     const girth =
       family?.shape === "Circular" ? Math.PI * width : 2 * (width + depth);
+    const canFallbackToConcrete = store.columnDataSource !== "production" || columnFamilyHasConcreteBasis(family);
+    const volume = column.concreteVolumeM3 ?? (canFallbackToConcrete ? calculatedVolume : null);
+    const formwork = column.formworkAreaM2 ?? (canFallbackToConcrete ? girth * column.heightM : null);
     return (
       <div className="space-y-2">
         <Info
@@ -4838,11 +4865,14 @@ function Structural3DItemDetails({
           }
         />
         <Info label="Height" value={`${column.heightM.toFixed(2)} m`} />
-        <Info label="Concrete volume" value={`${volume.toFixed(3)} m³`} />
+        <Info label="Concrete volume" value={volume != null ? `${volume.toFixed(3)} m³` : "Not quantified"} />
         <Info
           label="Formwork"
-          value={`${(girth * column.heightM).toFixed(2)} m²`}
+          value={formwork != null ? `${formwork.toFixed(2)} m²` : "Not quantified"}
         />
+        {column.reinforcementKg != null ? <Info label="Reinforcement" value={`${column.reinforcementKg.toFixed(1)} kg`} /> : <Info label="Reinforcement" value="Information required" />}
+        {column.sectionSource ? <Info label="Section source" value={column.sectionSource} /> : null}
+        {column.heightSource ? <Info label="Height source" value={column.heightSource} /> : null}
         <Info label="Storey" value={structuralFloorLabel(column.floorId)} />
         <Info label="Drawing" value={family?.source || column.viewportId} />
         <Info label="Status" value={column.status} />
