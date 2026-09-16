@@ -42,7 +42,7 @@ export async function createOnboardingProject(payload: {
 
 export type InviteFailure = { email: string; reason: string };
 
-export function sendInvites(invites: { email: string; role: string }[]) {
+export function sendInvites(invites: { email: string; role: string; workspace_ids?: string[] }[]) {
   return requestJson<{ sent: number; failures: InviteFailure[] }>("/api/v1/platform/invitations", {
     method: "POST",
     body: JSON.stringify({ invites }),

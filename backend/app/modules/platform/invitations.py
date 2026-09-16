@@ -231,7 +231,7 @@ def claim_invitation(user: CurrentUser, *, token: str | None = None) -> ClaimRes
 
 def list_pending_invitations(company_id: str) -> list[dict]:
     rows = fetch_all(
-        "SELECT id, email, role, workspace_ids, expires_at, created_at, clerk_invitation_id "
+        "SELECT id, email, role, workspace_ids, expires_at, created_at "
         "FROM invitation WHERE company_id = %s AND status = 'pending' AND expires_at > now() "
         "ORDER BY created_at DESC",
         (company_id,),

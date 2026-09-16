@@ -24,6 +24,9 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
   const nav = [
     { title: "Projects", href: appRoutes.projects },
     ...(projectId ? [{ title: "Project workspace", href: appRoutes.pre(projectId, "upload") }] : []),
+    { title: "Company", href: appRoutes.organizationSettings },
+    { title: "Members", href: appRoutes.organizationMembers },
+    { title: "Account", href: appRoutes.accountProfile },
   ];
 
   const navigation = <>
