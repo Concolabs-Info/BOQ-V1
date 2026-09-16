@@ -54,3 +54,52 @@ def test_fetch_clerk_user_raises_on_non_200(monkeypatch):
         assert False, "expected ClerkApiError"
     except ClerkApiError:
         pass
+
+
+def test_create_invitation_posts_application_invite(monkeypatch):
+    monkeypatch.setattr(clerk_client, "get_settings", lambda: FakeSettings())
+    seen = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        seen["url"] = url
+        seen["headers"] = headers
+        seen["json"] = json
+        return FakeResponse(200, {"id": "inv_123"})
+
+    monkeypatch.setattr(clerk_client.httpx, "post", fake_post)
+    created = clerk_client.create_invitation(
+        "join@acme.com",
+        redirect_url="http://localhost:3000/sign-up",
+        public_metadata={"quanto_invitation_id": "c1"},
+    )
+    assert created.id == "inv_123"
+    assert seen["url"] == "https://api.clerk.com/v1/invitations"
+    assert seen["headers"]["Authorization"] == "Bearer sk_test_123"
+    assert seen["json"]["email_address"] == "join@acme.com"
+    assert seen["json"]["redirect_url"] == "http://localhost:3000/sign-up"
+    assert seen["json"]["ignore_existing"] is True
+    assert seen["json"]["notify"] is True
+    assert seen["json"]["public_metadata"]["quanto_invitation_id"] == "c1"
+
+
+def test_create_invitation_surfaces_clerk_error_message(monkeypatch):
+    monkeypatch.setattr(clerk_client, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(
+        clerk_client.httpx,
+        "post",
+        lambda *a, **k: FakeResponse(422, {"errors": [{"long_message": "already invited"}]}),
+    )
+    try:
+        clerk_client.create_invitation("join@acme.com", redirect_url="http://localhost:3000/sign-up")
+        assert False, "expected ClerkApiError"
+    except ClerkApiError as exc:
+        assert "already invited" in str(exc)
+
+
+def test_create_invitation_raises_without_a_secret_key(monkeypatch):
+    monkeypatch.setattr(clerk_client, "get_settings", lambda: FakeSettings(clerk_secret_key=None))
+    try:
+        clerk_client.create_invitation("join@acme.com", redirect_url="http://localhost:3000/sign-up")
+        assert False, "expected ClerkApiError"
+    except ClerkApiError:
+        pass

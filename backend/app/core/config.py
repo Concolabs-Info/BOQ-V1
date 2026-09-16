@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     clerk_jwt_key: str | None = None
     clerk_issuer: str | None = None
     clerk_secret_key: str | None = None
+    app_origin: str = "http://localhost:3000"
     resend_api_key: str | None = None
     resend_from_email: str | None = None
 
