@@ -3,15 +3,24 @@ import { bearerHeader } from "./bearerHeader";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const CACHE_PREFIX = "cpe_cache:";
 
+export type ApiErrorDetails = {
+  code?: string;
+  message?: string;
+  field?: string;
+  existing_company?: { id: string; name: string; domain?: string | null };
+};
+
 export class ApiRequestError extends Error {
   status: number;
   rawMessage?: string;
+  details?: ApiErrorDetails;
 
-  constructor(status: number, message: string, rawMessage?: string) {
+  constructor(status: number, message: string, rawMessage?: string, details?: ApiErrorDetails) {
     super(message);
     this.name = "ApiRequestError";
     this.status = status;
     this.rawMessage = rawMessage;
+    this.details = details;
   }
 }
 
@@ -95,15 +104,19 @@ export function userFacingApiError(status: number, rawMessage: string): string {
   return rawMessage || "This action could not be completed.";
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+async function readErrorPayload(response: Response): Promise<{ message: string; details?: ApiErrorDetails }> {
   try {
     const payload = await response.json();
-    if (typeof payload?.detail === "string") return payload.detail;
-    if (typeof payload?.message === "string") return payload.message;
+    if (typeof payload?.detail === "string") return { message: payload.detail };
+    if (payload?.detail && typeof payload.detail === "object" && !Array.isArray(payload.detail)) {
+      const detail = payload.detail as ApiErrorDetails;
+      return { message: detail.message || response.statusText || "Request failed.", details: detail };
+    }
+    if (typeof payload?.message === "string") return { message: payload.message };
   } catch {
     // use status text below
   }
-  return response.statusText || "Request failed.";
+  return { message: response.statusText || "Request failed." };
 }
 
 function downloadFileName(response: Response, fallbackFileName: string): string {
@@ -135,8 +148,8 @@ export async function downloadApiFile(path: string, fallbackFileName: string): P
     });
 
     if (!response.ok) {
-      const rawMessage = await readErrorMessage(response);
-      throw new ApiRequestError(response.status, userFacingApiError(response.status, rawMessage), rawMessage);
+      const { message: rawMessage, details } = await readErrorPayload(response);
+      throw new ApiRequestError(response.status, userFacingApiError(response.status, rawMessage), rawMessage, details);
     }
 
     const blob = await response.blob();
@@ -166,24 +179,29 @@ async function readResponse<T>(response: Response): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-export async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
-  const useCache = requestCanUseCache(path, options);
+type JsonRequestOptions = RequestInit & { skipCache?: boolean };
+
+export async function requestJson<T>(path: string, options?: JsonRequestOptions): Promise<T> {
+  const skipCache = options?.skipCache === true;
+  const fetchOptions: RequestInit = { ...options };
+  delete (fetchOptions as JsonRequestOptions).skipCache;
+  const useCache = !skipCache && requestCanUseCache(path, fetchOptions);
 
   try {
     const response = await fetch(apiUrl(path), {
-      ...options,
+      ...fetchOptions,
       headers: {
-        ...(options?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+        ...(fetchOptions.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
         ...(await apiRequestHeaders()),
-        ...(options?.headers || {}),
+        ...(fetchOptions.headers || {}),
       },
     });
 
     if (!response.ok) {
-      const rawMessage = await readErrorMessage(response);
+      const { message: rawMessage, details } = await readErrorPayload(response);
       const cached = useCache ? getCachedJson<T>(path) : null;
       if (cached) return cached;
-      throw new ApiRequestError(response.status, userFacingApiError(response.status, rawMessage), rawMessage);
+      throw new ApiRequestError(response.status, userFacingApiError(response.status, rawMessage), rawMessage, details);
     }
 
     const data = await readResponse<T>(response);

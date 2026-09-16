@@ -3,6 +3,7 @@ export const appRoutes = {
   forgotPassword: "/sign-in",
   resetPassword: "/sign-in",
   dashboard: "/projects",
+  onboarding: "/onboarding",
   createProject: "/projects/new",
   upload: "/projects",
   projects: "/projects",
