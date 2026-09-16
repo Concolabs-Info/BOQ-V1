@@ -15,7 +15,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up" afterSignOutUrl="/sign-in">
+        <ClerkProvider
+          signInUrl="/sign-in"
+          signUpUrl="/sign-up"
+          afterSignOutUrl="/sign-in"
+          signInFallbackRedirectUrl="/projects"
+          signUpFallbackRedirectUrl="/onboarding"
+        >
           <ClerkSessionBridge>
             <QueryProvider>
               <CompanyGate>{children}</CompanyGate>

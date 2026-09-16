@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { AuthField } from "@/features/auth/components/AuthField";
 import { Button } from "@/shared/components/Button";
 import { ApiRequestError } from "@/shared/services/apiClient";
+import { cn } from "@/shared/lib/cn";
 import { createOnboardingCompany } from "../api";
 import { currencyForCountry } from "../countries";
 import { CountrySelect } from "./CountrySelect";
-import { FieldError, FieldLabel } from "./formBits";
+import { FieldError } from "./formBits";
 
 type RegType = "PV" | "BR" | "NONE";
 
@@ -63,30 +65,28 @@ export function CreateCompanyManual({ onCreated }: { onCreated: () => void }) {
         void submit();
       }}
     >
-      <div>
-        <FieldLabel htmlFor="company-name" required>
-          Company name
-        </FieldLabel>
-        <input
-          id="company-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          autoFocus
-          className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-        />
-        <FieldError message={errors.name} />
-      </div>
+      <AuthField
+        id="company-name"
+        label="Company name"
+        required
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        autoFocus
+        error={errors.name}
+      />
 
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-          Registration type <span className="text-blue-600">*</span>
+        <legend className="mb-1 flex items-center gap-1 text-sm font-medium text-slate-950">
+          Registration type
+          <span className="text-red-600">*</span>
         </legend>
         {REG_OPTIONS.map((option) => (
           <label
             key={option.value}
-            className={`flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm ${
-              regType === option.value ? "border-blue-600 bg-blue-50 text-slate-950" : "border-slate-200 text-slate-700"
-            }`}
+            className={cn(
+              "flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm",
+              regType === option.value ? "border-blue-600 bg-blue-50 text-slate-950" : "border-slate-200 text-slate-700",
+            )}
           >
             <input
               type="radio"
@@ -103,32 +103,29 @@ export function CreateCompanyManual({ onCreated }: { onCreated: () => void }) {
       </fieldset>
 
       {showNumber ? (
-        <div>
-          <FieldLabel htmlFor="reg-number" required>
-            Registration number
-          </FieldLabel>
-          <input
-            id="reg-number"
-            value={regNumber}
-            placeholder={placeholder}
-            onChange={(event) => setRegNumber(event.target.value)}
-            className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-          />
-          <FieldError message={errors.registrationNumber} />
-        </div>
+        <AuthField
+          id="reg-number"
+          label="Registration number"
+          required
+          value={regNumber}
+          placeholder={placeholder}
+          onChange={(event) => setRegNumber(event.target.value)}
+          error={errors.registrationNumber}
+        />
       ) : null}
 
-      <div>
-        <FieldLabel htmlFor="country" required>
+      <div className="flex flex-col gap-2">
+        <label htmlFor="country" className="flex items-center gap-1 text-sm font-medium text-slate-950">
           Country
-        </FieldLabel>
+          <span className="text-red-600">*</span>
+        </label>
         <CountrySelect id="country" value={country} onChange={setCountry} />
-        <p className="mt-2 text-xs text-slate-500">Currency: {currencyForCountry(country)}</p>
+        <p className="text-xs text-slate-500">Currency: {currencyForCountry(country)}</p>
       </div>
 
       {formError ? <p className="text-sm text-red-600">{formError}</p> : null}
 
-      <Button type="submit" disabled={pending} className="h-11 rounded-xl">
+      <Button type="submit" disabled={pending} className="h-11 w-full rounded-xl">
         {pending ? "Creating…" : "Create company"}
       </Button>
     </form>

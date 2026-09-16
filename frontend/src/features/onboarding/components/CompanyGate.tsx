@@ -8,7 +8,7 @@ import { getPlatformContext } from "@/features/platform/services/platformService
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { removeCachedJson, setSessionTokenGetter } from "@/shared/services/apiClient";
 
-const PUBLIC_PREFIXES = ["/sign-in", "/sign-up", "/login", "/forgot-password"];
+const PUBLIC_PREFIXES = ["/sign-in", "/sign-up", "/login", "/forgot-password", "/help", "/legal"];
 const ME_PATH = "/api/v1/platform/me";
 
 function isPublicPath(pathname: string) {

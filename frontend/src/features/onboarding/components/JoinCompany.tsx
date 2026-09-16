@@ -18,7 +18,7 @@ export function JoinCompany({
 
   return (
     <div className="flex flex-col gap-4">
-      <Button type="button" className="h-11 rounded-xl" onClick={() => router.push(`${appRoutes.onboarding}/pending`)}>
+      <Button type="button" className="h-11 w-full rounded-xl" onClick={() => router.push(`${appRoutes.onboarding}/pending`)}>
         Request to join
       </Button>
       <p className="text-sm leading-6 text-slate-500">

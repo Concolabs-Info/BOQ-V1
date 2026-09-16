@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { AuthField } from "@/features/auth/components/AuthField";
 import { Button } from "@/shared/components/Button";
 import { ApiRequestError } from "@/shared/services/apiClient";
 import { createOnboardingCompany } from "../api";
 import { currencyForCountry } from "../countries";
 import { CountrySelect } from "./CountrySelect";
-import { FieldError, FieldLabel } from "./formBits";
 
 export function CreateCompanyLocked({
   suggestedName,
@@ -47,31 +47,28 @@ export function CreateCompanyLocked({
         void submit();
       }}
     >
-      <div>
-        <FieldLabel htmlFor="company-name" required>
-          Company name
-        </FieldLabel>
-        <input
-          id="company-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          autoFocus
-          className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-        />
-        <FieldError message={errors.name} />
-      </div>
+      <AuthField
+        id="company-name"
+        label="Company name"
+        required
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        autoFocus
+        error={errors.name}
+      />
 
-      <div>
-        <FieldLabel htmlFor="country" required>
+      <div className="flex flex-col gap-2">
+        <label htmlFor="country" className="flex items-center gap-1 text-sm font-medium text-slate-950">
           Country
-        </FieldLabel>
+          <span className="text-red-600">*</span>
+        </label>
         <CountrySelect id="country" value={country} onChange={setCountry} />
-        <p className="mt-2 text-xs text-slate-500">Currency: {currencyForCountry(country)}</p>
+        <p className="text-xs text-slate-500">Currency: {currencyForCountry(country)}</p>
       </div>
 
       {formError ? <p className="text-sm text-red-600">{formError}</p> : null}
 
-      <Button type="submit" disabled={pending} className="h-11 rounded-xl">
+      <Button type="submit" disabled={pending} className="h-11 w-full rounded-xl">
         {pending ? "Creating…" : "Create company"}
       </Button>
     </form>

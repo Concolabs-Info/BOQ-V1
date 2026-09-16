@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { AuthField } from "@/features/auth/components/AuthField";
 import { Button } from "@/shared/components/Button";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { ApiRequestError } from "@/shared/services/apiClient";
 import { createOnboardingProject } from "../api";
-import { FieldError, FieldLabel } from "./formBits";
 
 export function FirstProjectStep() {
   const router = useRouter();
@@ -39,22 +39,18 @@ export function FirstProjectStep() {
         void submit();
       }}
     >
-      <div>
-        <FieldLabel htmlFor="workspace-name" required>
-          Project workspace name
-        </FieldLabel>
-        <input
-          id="workspace-name"
-          value={name}
-          placeholder="e.g. Riverside Tower"
-          onChange={(event) => setName(event.target.value)}
-          autoFocus
-          className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-        />
-        <FieldError message={error ?? undefined} />
-      </div>
+      <AuthField
+        id="workspace-name"
+        label="Project workspace name"
+        required
+        value={name}
+        placeholder="e.g. Riverside Tower"
+        onChange={(event) => setName(event.target.value)}
+        autoFocus
+        error={error ?? undefined}
+      />
       <div className="flex flex-col gap-3 sm:flex-row">
-        <Button type="submit" disabled={pending} className="h-11 rounded-xl">
+        <Button type="submit" disabled={pending} className="h-11 rounded-xl sm:flex-1">
           {pending ? "Creating…" : "Create project workspace"}
         </Button>
         <Button
