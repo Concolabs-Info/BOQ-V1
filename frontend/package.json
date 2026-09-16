@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:syntax": "node scripts/check-syntax.mjs"
+    "test:syntax": "node scripts/check-syntax.mjs",
+    "test:auth": "node scripts/test-bearer-header.mjs"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.4",
