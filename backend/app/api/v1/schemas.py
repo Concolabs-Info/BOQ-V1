@@ -169,6 +169,48 @@ class PlatformContext(ApiModel):
     permissions: list[str]
     is_super_admin: bool = False
 
+
+class OnboardingCompanyIn(ApiModel):
+    name: str = Field(min_length=1, max_length=160)
+    country: str = Field(default="Sri Lanka", max_length=80)
+    registration_type: Literal["PV", "BR", "NONE"] | None = None
+    registration_number: str | None = Field(default=None, max_length=80)
+    lock_domain: bool = False
+
+
+class OnboardingProjectIn(ApiModel):
+    name: str = Field(min_length=1, max_length=160)
+    client_name: str | None = Field(default=None, max_length=160)
+    location: str | None = Field(default=None, max_length=240)
+    project_number: str | None = Field(default=None, max_length=80)
+
+
+class OnboardingCompanyOut(ApiModel):
+    id: str
+    name: str
+    role: str = "admin"
+
+
+class OnboardingProjectOut(ApiModel):
+    id: str
+    name: str
+
+
+class OnboardingExistingCompany(ApiModel):
+    id: str
+    name: str
+    domain: str | None = None
+
+
+class OnboardingStatusOut(ApiModel):
+    path: str
+    domain: str | None = None
+    suggested_name: str = ""
+    existing_company: OnboardingExistingCompany | None = None
+    former_company_name: str | None = None
+    has_company: bool
+    has_project: bool
+
 class ScopeAnswer(ApiModel):
     choice: str | None = None
     value: str | None = None
