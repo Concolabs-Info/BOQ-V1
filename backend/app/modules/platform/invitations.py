@@ -8,10 +8,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from ...core.auth import CurrentUser
-from ...core.clerk_client import ClerkApiError, create_invitation
+from ...core.clerk_client import ClerkApiError, create_invitation, pending_invitation_id_for_email, revoke_invitation
 from ...core.config import get_settings
 from ...core.rbac import ASSIGNABLE_ROLES, DEFAULT_INVITE_ROLE
-from ...database.connection import execute, fetch_one, transaction
+from ...database.connection import execute, fetch_all, fetch_one, transaction
 from .membership import CompanyMembership, get_company_membership
 
 INVITE_TTL_DAYS = 14
@@ -129,7 +129,7 @@ def send_invites(
                         expires_at,
                     ),
                 ).fetchone()
-                create_invitation(
+                clerk_invite = create_invitation(
                     email,
                     redirect_url=redirect_url,
                     public_metadata={
@@ -139,6 +139,11 @@ def send_invites(
                     },
                     expires_in_days=INVITE_TTL_DAYS,
                 )
+                if clerk_invite.id:
+                    conn.execute(
+                        "UPDATE invitation SET clerk_invitation_id = %s WHERE id = %s",
+                        (clerk_invite.id, created["id"]),
+                    )
         except ClerkApiError as exc:
             result.failures.append(InviteFailure(email=email, reason=str(exc)))
             continue
@@ -221,4 +226,72 @@ def claim_invitation(user: CurrentUser, *, token: str | None = None) -> ClaimRes
         company_id=str(company["id"]),
         company_name=company["name"],
         role=row["role"],
+    )
+
+
+def list_pending_invitations(company_id: str) -> list[dict]:
+    rows = fetch_all(
+        "SELECT id, email, role, workspace_ids, expires_at, created_at, clerk_invitation_id "
+        "FROM invitation WHERE company_id = %s AND status = 'pending' AND expires_at > now() "
+        "ORDER BY created_at DESC",
+        (company_id,),
+    )
+    pending = []
+    for row in rows:
+        pending.append({
+            "id": str(row["id"]),
+            "email": row["email"],
+            "role": row["role"],
+            "workspace_ids": [str(item) for item in (row.get("workspace_ids") or [])],
+            "expires_at": row["expires_at"].isoformat() if row.get("expires_at") else None,
+            "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+        })
+    return pending
+
+
+def _revoke_clerk_invite(row: dict) -> None:
+    clerk_id = (row.get("clerk_invitation_id") or "").strip()
+    if not clerk_id:
+        try:
+            clerk_id = pending_invitation_id_for_email(row["email"]) or ""
+        except ClerkApiError:
+            clerk_id = ""
+    if not clerk_id:
+        return
+    try:
+        revoke_invitation(clerk_id)
+    except ClerkApiError:
+        # Local revoke still stands; the email link may already be dead.
+        pass
+
+
+def revoke_invite(membership: CompanyMembership, invitation_id: str) -> None:
+    row = fetch_one(
+        "SELECT id, email, clerk_invitation_id, status FROM invitation WHERE id = %s AND company_id = %s",
+        (invitation_id, membership.company_id),
+    )
+    if not row or row["status"] != "pending":
+        raise InvitationError("invalid", "That invite is no longer pending.")
+    _revoke_clerk_invite(row)
+    execute(
+        "UPDATE invitation SET status = 'revoked' WHERE id = %s AND company_id = %s",
+        (invitation_id, membership.company_id),
+    )
+
+
+def resend_invite(user: CurrentUser, membership: CompanyMembership, invitation_id: str) -> SendInvitesResult:
+    row = fetch_one(
+        "SELECT id, email, role, workspace_ids, status FROM invitation WHERE id = %s AND company_id = %s",
+        (invitation_id, membership.company_id),
+    )
+    if not row or row["status"] != "pending":
+        raise InvitationError("invalid", "That invite is no longer pending.")
+    _revoke_clerk_invite(row)
+    workspace_ids = row.get("workspace_ids") or []
+    if isinstance(workspace_ids, str):
+        workspace_ids = json.loads(workspace_ids)
+    return send_invites(
+        user,
+        membership,
+        [{"email": row["email"], "role": row["role"], "workspace_ids": workspace_ids}],
     )

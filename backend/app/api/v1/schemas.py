@@ -244,6 +244,54 @@ class InviteClaimOut(ApiModel):
     role: str | None = None
 
 
+class CompanyOut(ApiModel):
+    id: str
+    name: str
+    domain: str | None = None
+    registration_type: str | None = None
+    registration_number: str | None = None
+    tax_id: str | None = None
+    country: str
+    currency: str
+    phone: str | None = None
+    role: str
+    permissions: list[str]
+
+
+class CompanyPatchIn(ApiModel):
+    name: str = Field(min_length=1, max_length=160)
+    country: str = Field(default="Sri Lanka", max_length=80)
+    tax_id: str | None = Field(default=None, max_length=80)
+    phone: str | None = Field(default=None, max_length=40)
+
+
+class MemberOut(ApiModel):
+    id: str
+    email: str
+    full_name: str | None = None
+    role: str
+    role_label: str
+    created_at: str | None = None
+
+
+class PendingInviteOut(ApiModel):
+    id: str
+    email: str
+    role: str
+    workspace_ids: list[str] = Field(default_factory=list)
+    expires_at: str | None = None
+    created_at: str | None = None
+
+
+class MemberDirectoryOut(ApiModel):
+    members: list[MemberOut]
+    invitations: list[PendingInviteOut]
+
+
+class MemberRoleIn(ApiModel):
+    role: str = Field(min_length=1, max_length=40)
+
+
 class ScopeAnswer(ApiModel):
     choice: str | None = None
     value: str | None = None

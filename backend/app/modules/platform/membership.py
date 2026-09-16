@@ -31,6 +31,13 @@ def get_company_membership(user_id: str) -> CompanyMembership | None:
     return CompanyMembership(company_id=str(row["company_id"]), company_name=row["company_name"], role=row["role"])
 
 
+def require_company(current_user: CurrentUser = Depends(get_current_user)) -> CompanyMembership:
+    found = get_company_membership(current_user.id)
+    if found is None:
+        raise HTTPException(status_code=409, detail="onboarding_incomplete")
+    return found
+
+
 def require_permission(permission: str) -> Callable[[CurrentUser], CompanyMembership]:
     def dependency(current_user: CurrentUser = Depends(get_current_user)) -> CompanyMembership:
         found = get_company_membership(current_user.id)

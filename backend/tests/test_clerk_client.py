@@ -103,3 +103,22 @@ def test_create_invitation_raises_without_a_secret_key(monkeypatch):
         assert False, "expected ClerkApiError"
     except ClerkApiError:
         pass
+
+
+def test_revoke_invitation_posts_clerk_revoke(monkeypatch):
+    monkeypatch.setattr(clerk_client, "get_settings", lambda: FakeSettings())
+    seen = {}
+
+    def fake_post(url, headers=None, timeout=None, json=None):
+        seen["url"] = url
+        return FakeResponse(200, {"id": "inv_123"})
+
+    monkeypatch.setattr(clerk_client.httpx, "post", fake_post)
+    clerk_client.revoke_invitation("inv_123")
+    assert seen["url"] == "https://api.clerk.com/v1/invitations/inv_123/revoke"
+
+
+def test_revoke_invitation_ignores_404(monkeypatch):
+    monkeypatch.setattr(clerk_client, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(clerk_client.httpx, "post", lambda *a, **k: FakeResponse(404, {}))
+    clerk_client.revoke_invitation("inv_123")

@@ -4,12 +4,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ....core.auth import CurrentUser, get_current_user
 from ....core.rbac import permissions_for_role
+from ....modules.platform.company import get_company, update_company
 from ....modules.platform.invitations import (
     InvitationError,
     claim_invitation,
+    list_pending_invitations,
+    resend_invite,
+    revoke_invite,
     send_invites,
 )
-from ....modules.platform.membership import get_company_membership, require_permission
+from ....modules.platform.members import list_members, remove_member, update_member_role
+from ....modules.platform.membership import CompanyMembership, get_company_membership, require_company, require_permission
 from ....modules.platform.onboarding import (
     OnboardingError,
     OnboardingStatus,
@@ -18,17 +23,23 @@ from ....modules.platform.onboarding import (
     onboarding_status,
 )
 from ..schemas import (
+    CompanyOut,
+    CompanyPatchIn,
     InviteBatchIn,
     InviteBatchOut,
     InviteClaimIn,
     InviteClaimOut,
     InviteFailureOut,
+    MemberDirectoryOut,
+    MemberOut,
+    MemberRoleIn,
     OnboardingCompanyIn,
     OnboardingCompanyOut,
     OnboardingExistingCompany,
     OnboardingProjectIn,
     OnboardingProjectOut,
     OnboardingStatusOut,
+    PendingInviteOut,
     PlatformContext,
     PlatformOrganization,
     PlatformUser,
@@ -172,4 +183,92 @@ def post_invitation_claim(
         company_id=result.company_id,
         company_name=result.company_name,
         role=result.role,
+    )
+
+
+def _invite_http(exc: InvitationError) -> HTTPException:
+    return HTTPException(
+        status_code={"expired": 410, "already_member": 409}.get(exc.code, 400),
+        detail={"code": exc.code, "message": exc.message},
+    )
+
+
+@router.get("/platform/company", response_model=CompanyOut)
+def get_company_settings(membership: CompanyMembership = Depends(require_company)) -> CompanyOut:
+    return CompanyOut(**get_company(membership))
+
+
+@router.patch("/platform/company", response_model=CompanyOut)
+def patch_company_settings(
+    body: CompanyPatchIn,
+    membership: CompanyMembership = Depends(require_permission("company:manage")),
+) -> CompanyOut:
+    try:
+        return CompanyOut(**update_company(membership, name=body.name, country=body.country, tax_id=body.tax_id, phone=body.phone))
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
+@router.get("/platform/company/members", response_model=MemberDirectoryOut)
+def get_company_members(membership: CompanyMembership = Depends(require_company)) -> MemberDirectoryOut:
+    return MemberDirectoryOut(
+        members=[MemberOut(**row) for row in list_members(membership.company_id)],
+        invitations=[PendingInviteOut(**row) for row in list_pending_invitations(membership.company_id)],
+    )
+
+
+@router.patch("/platform/company/members/{user_id}")
+def patch_company_member(
+    user_id: str,
+    body: MemberRoleIn,
+    current_user: CurrentUser = Depends(get_current_user),
+    membership: CompanyMembership = Depends(require_permission("members:manage")),
+):
+    try:
+        return update_member_role(current_user, membership, user_id, body.role)
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
+@router.delete("/platform/company/members/{user_id}", status_code=204)
+def delete_company_member(
+    user_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    membership: CompanyMembership = Depends(require_permission("members:manage")),
+) -> None:
+    try:
+        remove_member(current_user, membership, user_id)
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
+@router.get("/platform/invitations")
+def get_invitations(membership: CompanyMembership = Depends(require_permission("members:manage"))):
+    return {"invitations": list_pending_invitations(membership.company_id)}
+
+
+@router.post("/platform/invitations/{invitation_id}/revoke", status_code=204)
+def post_revoke_invitation(
+    invitation_id: str,
+    membership: CompanyMembership = Depends(require_permission("members:manage")),
+) -> None:
+    try:
+        revoke_invite(membership, invitation_id)
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
+@router.post("/platform/invitations/{invitation_id}/resend", response_model=InviteBatchOut)
+def post_resend_invitation(
+    invitation_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    membership: CompanyMembership = Depends(require_permission("members:manage")),
+) -> InviteBatchOut:
+    try:
+        result = resend_invite(current_user, membership, invitation_id)
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+    return InviteBatchOut(
+        sent=result.sent,
+        failures=[InviteFailureOut(email=item.email, reason=item.reason) for item in result.failures],
     )

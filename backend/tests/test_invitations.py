@@ -88,6 +88,7 @@ def test_send_invites_inserts_hashed_token_and_calls_clerk(monkeypatch):
         seen["redirect_url"] = redirect_url
         seen["public_metadata"] = public_metadata
         seen["expires_in_days"] = expires_in_days
+        return type("Invite", (), {"id": "clerk_inv_9", "email": email})()
 
     monkeypatch.setattr(invitations, "create_invitation", fake_create)
     conn = FakeConn(insert_id="inv-9")
@@ -102,6 +103,7 @@ def test_send_invites_inserts_hashed_token_and_calls_clerk(monkeypatch):
     assert seen["email"] == "join@acme.com"
     assert seen["public_metadata"]["quanto_invitation_id"] == "inv-9"
     assert seen["redirect_url"] == "http://localhost:3000/sign-up"
+    assert any("clerk_invitation_id" in sql for sql, _params in conn.calls)
 
 
 def test_send_invites_records_clerk_failure(monkeypatch):
@@ -185,3 +187,40 @@ def test_claim_expired_invitation(monkeypatch):
     with pytest.raises(invitations.InvitationError) as excinfo:
         invitations.claim_invitation(GUEST)
     assert excinfo.value.code == "expired"
+
+
+def test_revoke_invite_marks_row_and_calls_clerk(monkeypatch):
+    monkeypatch.setattr(
+        invitations,
+        "fetch_one",
+        lambda sql, params=(): {"id": "inv-1", "email": "join@acme.com", "clerk_invitation_id": "clerk_1", "status": "pending"},
+    )
+    seen = {}
+    monkeypatch.setattr(invitations, "revoke_invitation", lambda invitation_id: seen.setdefault("id", invitation_id))
+    monkeypatch.setattr(invitations, "execute", lambda sql, params=(): seen.setdefault("sql", sql))
+    invitations.revoke_invite(MEMBERSHIP, "inv-1")
+    assert seen["id"] == "clerk_1"
+    assert "revoked" in seen["sql"]
+
+
+def test_resend_invite_sends_again(monkeypatch):
+    monkeypatch.setattr(
+        invitations,
+        "fetch_one",
+        lambda sql, params=(): {
+            "id": "inv-1",
+            "email": "join@acme.com",
+            "role": "qs",
+            "workspace_ids": [],
+            "status": "pending",
+            "clerk_invitation_id": "clerk_1",
+        },
+    )
+    monkeypatch.setattr(invitations, "_revoke_clerk_invite", lambda row: None)
+    monkeypatch.setattr(
+        invitations,
+        "send_invites",
+        lambda user, membership, rows: invitations.SendInvitesResult(sent=1, failures=[]),
+    )
+    result = invitations.resend_invite(ADMIN, MEMBERSHIP, "inv-1")
+    assert result.sent == 1

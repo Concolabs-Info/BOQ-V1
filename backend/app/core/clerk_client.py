@@ -93,3 +93,39 @@ def create_invitation(
         raise ClerkApiError(_error_message(response))
     data = response.json()
     return ClerkInvitation(id=str(data.get("id") or ""), email=email)
+
+
+def revoke_invitation(invitation_id: str) -> None:
+    """Revoke a Clerk application invitation. 404 means it is already gone."""
+    if not invitation_id:
+        return
+    response = httpx.post(
+        f"https://api.clerk.com/v1/invitations/{invitation_id}/revoke",
+        headers={"Authorization": f"Bearer {_secret_key()}"},
+        timeout=10.0,
+    )
+    if response.status_code in {200, 201, 404}:
+        return
+    raise ClerkApiError(_error_message(response))
+
+
+def pending_invitation_id_for_email(email: str) -> str | None:
+    response = httpx.get(
+        "https://api.clerk.com/v1/invitations",
+        headers={"Authorization": f"Bearer {_secret_key()}"},
+        params={"status": "pending", "limit": 100},
+        timeout=10.0,
+    )
+    if response.status_code != 200:
+        raise ClerkApiError(_error_message(response))
+    payload = response.json()
+    rows = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return None
+    needle = email.strip().lower()
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("email_address") or "").strip().lower() == needle:
+            return str(item.get("id") or "") or None
+    return None
