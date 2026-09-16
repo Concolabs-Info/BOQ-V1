@@ -74,3 +74,6 @@ htmlcov/
 *.bak
 *~
 .ipynb_checkpoints/
+
+# Local planning docs (specs/plans) - our own use, not committed
+docs/superpowers/
