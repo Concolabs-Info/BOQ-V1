@@ -3,7 +3,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { BrandLockup } from "./BrandLockup";
-import { DitherBackground } from "./DitherBackground";
 
 export function SplitPane({
   rail,
@@ -23,14 +22,10 @@ export function SplitPane({
   const query = from ? `?from=${from}` : "";
   return (
     <div className="flex h-dvh min-h-0 w-full flex-col overflow-y-auto bg-[#eef3f8] font-[var(--autoboq-font-sans)] md:flex-row md:gap-2 md:p-2">
-      <aside className="relative hidden w-full shrink-0 flex-col overflow-hidden rounded-2xl bg-slate-950 px-8 py-9 text-white md:flex md:w-[340px] lg:w-[376px]">
-        <DitherBackground className="pointer-events-none absolute inset-0 size-full" />
-        <div aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/55 to-transparent" />
-        <div className="relative">
-          <BrandLockup dark />
-        </div>
-        <div className="relative mt-16 flex-1">{rail}</div>
-        <div className="relative flex items-center justify-between text-xs text-slate-500">
+      <aside className="hidden w-full shrink-0 flex-col overflow-hidden rounded-2xl bg-slate-950 px-8 py-9 text-white md:flex md:w-[340px] lg:w-[376px]">
+        <BrandLockup dark />
+        <div className="mt-16 flex-1">{rail}</div>
+        <div className="flex items-center justify-between text-xs text-slate-500">
           <Link href={`/legal/terms${query}`} className="hover:text-slate-300">
             Terms of Service
           </Link>
