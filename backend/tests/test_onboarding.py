@@ -1,0 +1,210 @@
+from contextlib import contextmanager
+
+import pytest
+
+from app.core.auth import CurrentUser
+from app.modules.platform import onboarding
+from app.modules.platform.membership import CompanyMembership
+
+USER = CurrentUser(id="user_1", email="tharu@acme.com", full_name="Tharu")
+GMAIL = CurrentUser(id="user_2", email="tharu@gmail.com", full_name="Tharu")
+
+
+class FakeResult:
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
+class FakeConn:
+    def __init__(self, *, company=None, project=None, fail=None):
+        self.calls = []
+        self.company = company or {"id": "c1", "name": "Acme"}
+        self.project = project or {"id": "p1", "name": "Tower"}
+        self.fail = fail
+
+    def execute(self, sql, params):
+        self.calls.append((sql, params))
+        if self.fail:
+            raise self.fail
+        if "INSERT INTO company" in sql:
+            return FakeResult(self.company)
+        if "INSERT INTO project" in sql:
+            return FakeResult(self.project)
+        return FakeResult(None)
+
+
+def patch_tx(monkeypatch, conn):
+    @contextmanager
+    def fake_transaction():
+        yield conn
+
+    monkeypatch.setattr(onboarding, "transaction", fake_transaction)
+
+
+def test_currency_defaults_to_usd():
+    assert onboarding.currency_for_country("Sri Lanka") == "LKR"
+    assert onboarding.currency_for_country("Narnia") == "USD"
+
+
+def test_status_gmail_is_manual_create(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: None)
+    status = onboarding.onboarding_status(GMAIL)
+    assert status.path == "CREATE_MANUAL"
+    assert status.domain is None
+    assert status.has_company is False
+
+
+def test_status_work_email_without_company_locks_domain(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: None)
+    status = onboarding.onboarding_status(USER)
+    assert status.path == "CREATE_WITH_DOMAIN_LOCK"
+    assert status.domain == "acme.com"
+    assert status.suggested_name == "Acme"
+
+
+def test_status_work_email_with_company_asks_to_join(monkeypatch):
+    existing = {"id": "c1", "name": "Acme", "domain": "acme.com"}
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: existing)
+    status = onboarding.onboarding_status(USER)
+    assert status.path == "REQUEST_TO_JOIN"
+    assert status.existing_company == existing
+
+
+def test_status_founder_escape_is_manual(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: "Old Co")
+    status = onboarding.onboarding_status(USER, as_founder=True)
+    assert status.path == "CREATE_MANUAL"
+    assert status.former_company_name is None
+
+
+def test_status_removed_member_is_called_out(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: "Old Co")
+    status = onboarding.onboarding_status(USER)
+    assert status.path == "REMOVED"
+    assert status.former_company_name == "Old Co"
+
+
+def test_status_member_without_project_continues_wizard(monkeypatch):
+    monkeypatch.setattr(
+        onboarding,
+        "get_company_membership",
+        lambda user_id: CompanyMembership(company_id="c1", company_name="Acme", role="admin"),
+    )
+    monkeypatch.setattr(onboarding, "company_project_count", lambda company_id: 0)
+    status = onboarding.onboarding_status(USER)
+    assert status.path == "CONTINUE_WIZARD"
+    assert status.has_company is True
+    assert status.has_project is False
+
+
+def test_create_company_rejects_existing_member(monkeypatch):
+    monkeypatch.setattr(
+        onboarding,
+        "get_company_membership",
+        lambda user_id: CompanyMembership(company_id="c1", company_name="Acme", role="admin"),
+    )
+    with pytest.raises(onboarding.OnboardingError) as excinfo:
+        onboarding.create_company(USER, name="Acme", country="Sri Lanka", lock_domain=True)
+    assert excinfo.value.code == "already_member"
+
+
+def test_create_company_domain_lock_joins_when_taken(monkeypatch):
+    existing = {"id": "c1", "name": "Acme", "domain": "acme.com"}
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: existing)
+    with pytest.raises(onboarding.OnboardingError) as excinfo:
+        onboarding.create_company(USER, name="Acme", country="Sri Lanka", lock_domain=True)
+    assert excinfo.value.code == "join_existing"
+    assert excinfo.value.extra == existing
+
+
+def test_create_company_manual_requires_registration_type(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    with pytest.raises(onboarding.OnboardingError) as excinfo:
+        onboarding.create_company(GMAIL, name="Solo QS", country="Sri Lanka")
+    assert excinfo.value.field == "regType"
+
+
+def test_create_company_inserts_company_and_admin_member(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: None)
+    conn = FakeConn(company={"id": "c9", "name": "Acme"})
+    patch_tx(monkeypatch, conn)
+
+    created = onboarding.create_company(USER, name="Acme", country="Sri Lanka", lock_domain=True)
+    assert created == onboarding.CreatedCompany(id="c9", name="Acme")
+    assert any("INSERT INTO company" in sql for sql, _params in conn.calls)
+    assert any("INSERT INTO company_member" in sql for sql, _params in conn.calls)
+    member_params = next(params for sql, params in conn.calls if "INSERT INTO company_member" in sql)
+    assert member_params == ("c9", "user_1", "admin")
+
+
+def test_create_company_none_registration_flags_duplicate_review(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    conn = FakeConn()
+    patch_tx(monkeypatch, conn)
+
+    onboarding.create_company(
+        GMAIL,
+        name="Solo QS",
+        country="Sri Lanka",
+        registration_type="NONE",
+    )
+    company_params = next(params for sql, params in conn.calls if "INSERT INTO company" in sql)
+    assert company_params[2] == "NONE"
+    assert company_params[3] is None
+    assert company_params[7] is True
+    assert company_params[1] is None
+
+
+def test_create_company_maps_domain_unique_violation(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    lookups = {"n": 0}
+
+    def find(domain):
+        lookups["n"] += 1
+        if lookups["n"] == 1:
+            return None
+        return {"id": "c1", "name": "Acme", "domain": "acme.com"}
+
+    monkeypatch.setattr(onboarding, "find_company_by_domain", find)
+    conn = FakeConn(fail=onboarding.UniqueViolation('duplicate key value violates unique constraint "uq_company_domain_ci"'))
+    patch_tx(monkeypatch, conn)
+    with pytest.raises(onboarding.OnboardingError) as excinfo:
+        onboarding.create_company(USER, name="Acme", country="Sri Lanka", lock_domain=True)
+    assert excinfo.value.code == "join_existing"
+
+
+def test_create_first_project_requires_company(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    with pytest.raises(onboarding.OnboardingError) as excinfo:
+        onboarding.create_first_project(USER, name="Tower")
+    assert excinfo.value.code == "onboarding_incomplete"
+
+
+def test_create_first_project_inserts_project_and_member(monkeypatch):
+    monkeypatch.setattr(
+        onboarding,
+        "get_company_membership",
+        lambda user_id: CompanyMembership(company_id="c1", company_name="Acme", role="admin"),
+    )
+    conn = FakeConn(project={"id": "p9", "name": "Tower"})
+    patch_tx(monkeypatch, conn)
+    created = onboarding.create_first_project(USER, name="Tower", client_name="City")
+    assert created == onboarding.CreatedProject(id="p9", name="Tower")
+    project_params = next(params for sql, params in conn.calls if "INSERT INTO project " in sql)
+    assert project_params[0] == "Tower"
+    assert project_params[2] == "City"
+    assert project_params[4] == "c1"
+    assert any("INSERT INTO project_member" in sql for sql, _params in conn.calls)
