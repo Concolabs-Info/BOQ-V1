@@ -3,7 +3,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ....core.auth import CurrentUser, get_current_user
-from ....core.rbac import permissions_for_role
 from ....modules.platform.company import get_company, update_company
 from ....modules.platform.invitations import (
     InvitationError,
@@ -13,8 +12,21 @@ from ....modules.platform.invitations import (
     revoke_invite,
     send_invites,
 )
-from ....modules.platform.members import list_members, remove_member, update_member_role
+from ....modules.platform.members import (
+    assign_to_project,
+    list_members,
+    remove_member,
+    unassign_from_project,
+    update_member_role,
+)
 from ....modules.platform.membership import CompanyMembership, get_company_membership, require_company, require_permission
+from ....modules.platform.roles import (
+    create_custom_role,
+    delete_custom_role,
+    list_roles,
+    permissions_for_membership,
+    update_custom_role,
+)
 from ....modules.platform.onboarding import (
     OnboardingError,
     OnboardingStatus,
@@ -25,6 +37,7 @@ from ....modules.platform.onboarding import (
 from ..schemas import (
     CompanyOut,
     CompanyPatchIn,
+    CustomRoleIn,
     InviteBatchIn,
     InviteBatchOut,
     InviteClaimIn,
@@ -32,6 +45,7 @@ from ..schemas import (
     InviteFailureOut,
     MemberDirectoryOut,
     MemberOut,
+    MemberProjectIn,
     MemberRoleIn,
     OnboardingCompanyIn,
     OnboardingCompanyOut,
@@ -43,6 +57,8 @@ from ..schemas import (
     PlatformContext,
     PlatformOrganization,
     PlatformUser,
+    RoleListOut,
+    RoleOut,
 )
 
 router = APIRouter(tags=["platform"])
@@ -101,7 +117,7 @@ def get_me(current_user: CurrentUser = Depends(get_current_user)) -> PlatformCon
             if found else None
         ),
         membership_role=found.role if found else None,
-        permissions=permissions_for_role(found.role) if found else [],
+        permissions=permissions_for_membership(found) if found else [],
         is_super_admin=False,
     )
 
@@ -272,3 +288,77 @@ def post_resend_invitation(
         sent=result.sent,
         failures=[InviteFailureOut(email=item.email, reason=item.reason) for item in result.failures],
     )
+
+
+@router.get("/platform/company/roles", response_model=RoleListOut)
+def get_company_roles(membership: CompanyMembership = Depends(require_company)) -> RoleListOut:
+    return RoleListOut(roles=[RoleOut(**row) for row in list_roles(membership.company_id)])
+
+
+@router.post("/platform/company/roles", response_model=RoleOut, status_code=201)
+def post_company_role(
+    body: CustomRoleIn,
+    membership: CompanyMembership = Depends(require_permission("members:manage")),
+) -> RoleOut:
+    try:
+        return RoleOut(**create_custom_role(
+            membership,
+            name=body.name,
+            description=body.description,
+            permissions=body.permissions,
+        ))
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
+@router.patch("/platform/company/roles/{role_id}", response_model=RoleOut)
+def patch_company_role(
+    role_id: str,
+    body: CustomRoleIn,
+    membership: CompanyMembership = Depends(require_permission("members:manage")),
+) -> RoleOut:
+    try:
+        return RoleOut(**update_custom_role(
+            membership,
+            role_id,
+            name=body.name,
+            description=body.description,
+            permissions=body.permissions,
+        ))
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
+@router.delete("/platform/company/roles/{role_id}", status_code=204)
+def delete_company_role(
+    role_id: str,
+    membership: CompanyMembership = Depends(require_permission("members:manage")),
+) -> None:
+    try:
+        delete_custom_role(membership, role_id)
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
+@router.post("/platform/company/members/{user_id}/projects", status_code=204)
+def post_member_project(
+    user_id: str,
+    body: MemberProjectIn,
+    membership: CompanyMembership = Depends(require_permission("members:manage")),
+) -> None:
+    try:
+        assign_to_project(membership, user_id, body.project_id)
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
+@router.delete("/platform/company/members/{user_id}/projects/{project_id}", status_code=204)
+def delete_member_project(
+    user_id: str,
+    project_id: str,
+    membership: CompanyMembership = Depends(require_permission("members:manage")),
+) -> None:
+    try:
+        unassign_from_project(membership, user_id, project_id)
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc

@@ -1,20 +1,32 @@
-"""Company member list, role changes, and removals. Tenancy lives in Postgres, not Clerk Orgs."""
+"""Company member list, role changes, removals, and project assignment.
+Tenancy and roles live in Postgres, not Clerk Orgs."""
 from __future__ import annotations
 
 from ...core.auth import CurrentUser
-from ...core.rbac import ROLE_LABELS, ROLES
+from ...core.rbac import ROLE_LABELS
 from ...database.connection import execute, fetch_all, fetch_one, transaction
 from .invitations import InvitationError
 from .membership import CompanyMembership
+from .roles import known_role, label_for_role
 
 
 def list_members(company_id: str) -> list[dict]:
     rows = fetch_all(
-        "SELECT u.id, u.email, u.full_name, cm.role, cm.created_at "
+        "SELECT u.id, u.email, u.full_name, cm.role, cm.created_at, cr.name AS custom_role_name "
         "FROM company_member cm JOIN app_user u ON u.id = cm.user_id "
+        "LEFT JOIN company_role cr ON cr.company_id = cm.company_id AND cr.key = cm.role "
         "WHERE cm.company_id = %s ORDER BY cm.created_at ASC",
         (company_id,),
     )
+    assigned = fetch_all(
+        "SELECT pm.user_id, pm.project_id FROM project_member pm "
+        "JOIN project p ON p.id = pm.project_id WHERE p.company_id = %s",
+        (company_id,),
+    )
+    by_user: dict[str, list[str]] = {}
+    for row in assigned:
+        by_user.setdefault(row["user_id"], []).append(str(row["project_id"]))
+
     members = []
     for row in rows:
         members.append({
@@ -22,7 +34,8 @@ def list_members(company_id: str) -> list[dict]:
             "email": row["email"],
             "full_name": row["full_name"],
             "role": row["role"],
-            "role_label": ROLE_LABELS.get(row["role"], row["role"]),
+            "role_label": row["custom_role_name"] or ROLE_LABELS.get(row["role"], row["role"]),
+            "workspace_ids": by_user.get(row["id"], []),
             "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
         })
     return members
@@ -39,7 +52,7 @@ def _admin_count(company_id: str) -> int:
 def update_member_role(actor: CurrentUser, membership: CompanyMembership, target_user_id: str, role: str) -> dict:
     if target_user_id == actor.id:
         raise InvitationError("invalid", "You can't change your own role.")
-    if role not in ROLES:
+    if not known_role(membership.company_id, role):
         raise InvitationError("invalid", "Unknown role.")
     current = fetch_one(
         "SELECT user_id, role FROM company_member WHERE company_id = %s AND user_id = %s",
@@ -53,7 +66,7 @@ def update_member_role(actor: CurrentUser, membership: CompanyMembership, target
         "UPDATE company_member SET role = %s WHERE company_id = %s AND user_id = %s",
         (role, membership.company_id, target_user_id),
     )
-    return {"id": target_user_id, "role": role, "role_label": ROLE_LABELS.get(role, role)}
+    return {"id": target_user_id, "role": role, "role_label": label_for_role(membership.company_id, role)}
 
 
 def remove_member(actor: CurrentUser, membership: CompanyMembership, target_user_id: str) -> None:
@@ -83,3 +96,36 @@ def remove_member(actor: CurrentUser, membership: CompanyMembership, target_user
                ON CONFLICT (company_id, user_id) DO UPDATE SET removed_at = now()""",
             (membership.company_id, target_user_id),
         )
+
+
+def assign_to_project(membership: CompanyMembership, user_id: str, project_id: str) -> None:
+    member = fetch_one(
+        "SELECT user_id FROM company_member WHERE company_id = %s AND user_id = %s",
+        (membership.company_id, user_id),
+    )
+    if not member:
+        raise InvitationError("invalid", "That person is not in this company.")
+    project = fetch_one(
+        "SELECT id FROM project WHERE id = %s AND company_id = %s",
+        (project_id, membership.company_id),
+    )
+    if not project:
+        raise InvitationError("invalid", "That project is not in this company.")
+    execute(
+        "INSERT INTO project_member (project_id, user_id) VALUES (%s, %s) "
+        "ON CONFLICT (project_id, user_id) DO NOTHING",
+        (project_id, user_id),
+    )
+
+
+def unassign_from_project(membership: CompanyMembership, user_id: str, project_id: str) -> None:
+    project = fetch_one(
+        "SELECT id FROM project WHERE id = %s AND company_id = %s",
+        (project_id, membership.company_id),
+    )
+    if not project:
+        raise InvitationError("invalid", "That project is not in this company.")
+    execute(
+        "DELETE FROM project_member WHERE project_id = %s AND user_id = %s",
+        (project_id, user_id),
+    )

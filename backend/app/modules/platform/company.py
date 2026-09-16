@@ -1,7 +1,7 @@
 """Company profile for settings. Clerk is not involved."""
 from __future__ import annotations
 
-from ...core.rbac import permissions_for_role
+from .roles import permissions_for_membership
 from ...database.connection import execute, fetch_one
 from .invitations import InvitationError
 from .membership import CompanyMembership
@@ -27,7 +27,7 @@ def get_company(membership: CompanyMembership) -> dict:
         "currency": row["currency"],
         "phone": row["phone"],
         "role": membership.role,
-        "permissions": permissions_for_role(membership.role),
+        "permissions": permissions_for_membership(membership),
     }
 
 

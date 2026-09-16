@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from ...core.auth import CurrentUser
 from ...core.clerk_client import ClerkApiError, create_invitation, pending_invitation_id_for_email, revoke_invitation
 from ...core.config import get_settings
-from ...core.rbac import ASSIGNABLE_ROLES, DEFAULT_INVITE_ROLE
+from ...core.rbac import ASSIGNABLE_ROLES, DEFAULT_INVITE_ROLE, is_custom_role_key
 from ...database.connection import execute, fetch_all, fetch_one, transaction
 from .membership import CompanyMembership, get_company_membership
 
@@ -58,9 +58,18 @@ def invitation_redirect_url() -> str:
     return f"{origin}/sign-up"
 
 
-def resolve_invite_role(role: str | None) -> str:
+def resolve_invite_role(role: str | None, company_id: str | None = None) -> str:
     value = (role or DEFAULT_INVITE_ROLE).strip()
-    return value if value in ASSIGNABLE_ROLES else ""
+    if value in ASSIGNABLE_ROLES:
+        return value
+    if company_id and is_custom_role_key(value):
+        row = fetch_one(
+            "SELECT key FROM company_role WHERE company_id = %s AND key = %s",
+            (company_id, value),
+        )
+        if row:
+            return value
+    return ""
 
 
 def _email_already_in_a_company(email: str) -> bool:
@@ -97,7 +106,7 @@ def send_invites(
         email = str(row.get("email") or "").strip().lower()
         if not email:
             continue
-        role = resolve_invite_role(row.get("role"))
+        role = resolve_invite_role(row.get("role"), membership.company_id)
         if not role:
             result.failures.append(InviteFailure(email=email, reason="Pick an assignable role."))
             continue

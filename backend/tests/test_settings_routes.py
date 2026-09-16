@@ -68,3 +68,38 @@ def test_resend_invite_route(monkeypatch):
     _clear()
     assert response.status_code == 200
     assert response.json()["sent"] == 1
+
+
+def test_list_roles_route(monkeypatch):
+    _auth()
+    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
+    monkeypatch.setattr(
+        platform,
+        "list_roles",
+        lambda company_id: [{"id": "admin", "key": "admin", "name": "Owner / Admin", "description": "", "permissions": ["company:manage"], "built_in": True}],
+    )
+    response = client.get("/api/v1/platform/company/roles")
+    _clear()
+    assert response.status_code == 200
+    assert response.json()["roles"][0]["key"] == "admin"
+
+
+def test_create_role_route(monkeypatch):
+    _auth()
+    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
+    monkeypatch.setattr(
+        platform,
+        "create_custom_role",
+        lambda membership, **kwargs: {
+            "id": "r1",
+            "key": "custom_site_qs",
+            "name": kwargs["name"],
+            "description": kwargs.get("description") or "",
+            "permissions": ["boq:view"],
+            "built_in": False,
+        },
+    )
+    response = client.post("/api/v1/platform/company/roles", json={"name": "Site QS", "permissions": ["boq:view"]})
+    _clear()
+    assert response.status_code == 201
+    assert response.json()["key"] == "custom_site_qs"

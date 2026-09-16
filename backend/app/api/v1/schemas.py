@@ -214,7 +214,7 @@ class OnboardingStatusOut(ApiModel):
 
 class InviteRowIn(ApiModel):
     email: str = Field(default="", max_length=254)
-    role: str | None = Field(default=None, max_length=40)
+    role: str | None = Field(default=None, max_length=80)
     workspace_ids: list[str] = Field(default_factory=list)
 
 
@@ -271,6 +271,7 @@ class MemberOut(ApiModel):
     full_name: str | None = None
     role: str
     role_label: str
+    workspace_ids: list[str] = Field(default_factory=list)
     created_at: str | None = None
 
 
@@ -289,7 +290,30 @@ class MemberDirectoryOut(ApiModel):
 
 
 class MemberRoleIn(ApiModel):
-    role: str = Field(min_length=1, max_length=40)
+    role: str = Field(min_length=1, max_length=80)
+
+
+class RoleOut(ApiModel):
+    id: str
+    key: str
+    name: str
+    description: str = ""
+    permissions: list[str] = Field(default_factory=list)
+    built_in: bool = False
+
+
+class RoleListOut(ApiModel):
+    roles: list[RoleOut]
+
+
+class CustomRoleIn(ApiModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str | None = Field(default=None, max_length=240)
+    permissions: list[str] = Field(default_factory=list)
+
+
+class MemberProjectIn(ApiModel):
+    project_id: str = Field(min_length=1, max_length=80)
 
 
 class ScopeAnswer(ApiModel):

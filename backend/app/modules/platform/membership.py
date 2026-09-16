@@ -1,5 +1,5 @@
 """Which company a Clerk user belongs to, and what their role lets them do.
-See docs/superpowers/specs/2026-09-16-org-auth-onboarding-design.md."""
+Roles and permissions are Postgres data. Clerk is not consulted here."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,7 +8,7 @@ from typing import Callable
 from fastapi import Depends, HTTPException
 
 from ...core.auth import CurrentUser, get_current_user
-from ...core.rbac import permissions_for_role
+from ...core.rbac import is_built_in_role, permissions_for_role
 from ...database.connection import fetch_one
 
 
@@ -31,6 +31,12 @@ def get_company_membership(user_id: str) -> CompanyMembership | None:
     return CompanyMembership(company_id=str(row["company_id"]), company_name=row["company_name"], role=row["role"])
 
 
+def membership_permissions(membership: CompanyMembership) -> list[str]:
+    from .roles import permissions_for_membership
+
+    return permissions_for_membership(membership)
+
+
 def require_company(current_user: CurrentUser = Depends(get_current_user)) -> CompanyMembership:
     found = get_company_membership(current_user.id)
     if found is None:
@@ -43,7 +49,8 @@ def require_permission(permission: str) -> Callable[[CurrentUser], CompanyMember
         found = get_company_membership(current_user.id)
         if found is None:
             raise HTTPException(status_code=409, detail="onboarding_incomplete")
-        if permission not in permissions_for_role(found.role):
+        allowed = permissions_for_role(found.role) if is_built_in_role(found.role) else membership_permissions(found)
+        if permission not in allowed:
             raise HTTPException(status_code=403, detail="insufficient_permission")
         return found
 
