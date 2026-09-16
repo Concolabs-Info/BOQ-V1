@@ -105,10 +105,27 @@ export const PERMISSION_MATRIX: Record<string, RoleKey[]> = {
   "billing:manage": ["admin"],
 };
 
-export function roleLabel(role: string): string {
-  return ROLE_LABELS[role as RoleKey] ?? role;
+export const CUSTOM_ROLE_PREFIX = "custom_";
+
+export function isBuiltInRole(role: string): role is RoleKey {
+  return (ROLES as readonly string[]).includes(role);
+}
+
+export function isCustomRoleKey(role: string): boolean {
+  return role.startsWith(CUSTOM_ROLE_PREFIX);
+}
+
+export function roleLabel(role: string, customName?: string): string {
+  if (customName) return customName;
+  return ROLE_LABELS[role as RoleKey] ?? role.replace(/^custom_/, "").replaceAll("_", " ");
 }
 
 export function isRoleKey(role: string): role is RoleKey {
-  return (ROLES as readonly string[]).includes(role);
+  return isBuiltInRole(role);
 }
+
+export const CUSTOM_PERMISSION_GROUPS = PERMISSION_GROUPS.map((group) => ({
+  ...group,
+  keys: group.keys.filter((item) => item.key !== "billing:manage"),
+}));
+

@@ -10,7 +10,7 @@ import { ActionCard, Card, DataTable, StatCard } from "./PlatformCards";
 import { AccountProfileForm, AccountSecurityCard } from "@/features/settings/components/AccountSettings";
 import { CompanySettingsForm } from "@/features/settings/components/CompanySettingsForm";
 import { MembersManager } from "@/features/settings/components/MembersManager";
-import { RolesMatrix } from "@/features/settings/components/RolesMatrix";
+import { RolesManager } from "@/features/settings/components/RolesManager";
 import { SettingsShell } from "@/features/settings/components/SettingsShell";
 import { getCompanySettings, getMemberDirectory, settingsError } from "@/features/settings/api";
 import {
@@ -253,7 +253,7 @@ export function OrganizationDashboardPage() {
           </div>
           <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             <ActionCard title="Members" description="Invite people with Clerk application invitations. Resend or revoke from the same list." href={appRoutes.organizationMembers} action="Manage" />
-            <ActionCard title="Roles" description="Review the built-in roles and permissions." href={appRoutes.organizationRoles} action="View" />
+            <ActionCard title="Roles" description="Built-in and custom roles stored in the company database." href={appRoutes.organizationRoles} action="Manage" />
             <ActionCard title="Company" description="Name, country, tax number, and phone." href={appRoutes.organizationSettings} action="Open" />
           </div>
         </>
@@ -273,7 +273,7 @@ export function MembersPage() {
 export function RolesPage() {
   return (
     <SettingsShell title="Roles">
-      <RolesMatrix />
+      <RolesManager />
     </SettingsShell>
   );
 }

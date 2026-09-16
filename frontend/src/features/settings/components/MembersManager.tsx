@@ -8,17 +8,21 @@ import { LoadingState } from "@/shared/components/LoadingState";
 import { listProjects } from "@/features/projects/services/projectService";
 import { getPlatformContext } from "@/features/platform/services/platformService";
 import {
+  assignMemberProject,
   getMemberDirectory,
+  listCompanyRoles,
   removeMember,
   resendInvite,
   revokeInvite,
   sendInvites,
   settingsError,
+  unassignMemberProject,
   updateMemberRole,
   type CompanyMember,
+  type CompanyRole,
   type PendingInvite,
 } from "../api";
-import { ASSIGNABLE_ROLES, DEFAULT_INVITE_ROLE, ROLE_LABELS, ROLES, roleLabel, type RoleKey } from "../rbac";
+import { DEFAULT_INVITE_ROLE, roleLabel } from "../rbac";
 import { SettingsCard, SettingsStack } from "./SettingsCard";
 
 type Confirm =
@@ -32,6 +36,7 @@ export function MembersManager() {
   const [members, setMembers] = useState<CompanyMember[]>([]);
   const [invites, setInvites] = useState<PendingInvite[]>([]);
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+  const [roles, setRoles] = useState<CompanyRole[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,19 +44,21 @@ export function MembersManager() {
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<RoleKey>(DEFAULT_INVITE_ROLE);
+  const [inviteRole, setInviteRole] = useState<string>(DEFAULT_INVITE_ROLE);
   const [inviteProjects, setInviteProjects] = useState<string[]>([]);
 
   async function reload() {
-    const [directory, context, projectList] = await Promise.all([
+    const [directory, context, projectList, roleList] = await Promise.all([
       getMemberDirectory(),
       getPlatformContext(),
       listProjects({ limit: 100, offset: 0 }).catch(() => ({ projects: [], total: 0, limit: 100, offset: 0 })),
+      listCompanyRoles().catch(() => ({ roles: [] })),
     ]);
     setMembers(directory.members);
     setInvites(directory.invitations);
     setCanManage(context.permissions.includes("members:manage"));
     setProjects(projectList.projects.map((project) => ({ id: project.id, name: project.name })));
+    setRoles(roleList.roles);
   }
 
   useEffect(() => {
@@ -151,12 +158,15 @@ export function MembersManager() {
               <select
                 value={inviteRole}
                 disabled={busy}
-                onChange={(event) => setInviteRole(event.target.value as RoleKey)}
+                onChange={(event) => setInviteRole(event.target.value)}
                 className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-100 sm:w-52"
               >
-                {ASSIGNABLE_ROLES.map((role) => (
-                  <option key={role} value={role}>
-                    {ROLE_LABELS[role]}
+                {(roles.filter((role) => role.key !== "admin").length
+                  ? roles.filter((role) => role.key !== "admin").map((role) => ({ key: role.key, name: role.name }))
+                  : [{ key: DEFAULT_INVITE_ROLE, name: roleLabel(DEFAULT_INVITE_ROLE) }]
+                ).map((role) => (
+                  <option key={role.key} value={role.key}>
+                    {role.name}
                   </option>
                 ))}
               </select>
@@ -198,19 +208,27 @@ export function MembersManager() {
               <tr>
                 <th className="px-6 py-3">Member</th>
                 <th className="px-4 py-3">Role</th>
+                <th className="px-4 py-3">Projects</th>
                 <th className="px-6 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {members.length === 0 ? (
                 <tr>
-                  <td className="px-6 py-6 text-slate-500" colSpan={3}>
+                  <td className="px-6 py-6 text-slate-500" colSpan={4}>
                     No members yet.
                   </td>
                 </tr>
               ) : (
                 members.map((member) => {
                   const isSelf = Boolean(user && member.id === user.id);
+                  const assigned = member.workspace_ids || [];
+                  const roleOptions: { key: string; name: string }[] = roles.length
+                    ? roles.map((role) => ({ key: role.key, name: role.name }))
+                    : [{ key: member.role, name: member.role_label || roleLabel(member.role) }];
+                  if (!roleOptions.some((role) => role.key === member.role)) {
+                    roleOptions.push({ key: member.role, name: member.role_label || roleLabel(member.role) });
+                  }
                   return (
                     <tr key={member.id}>
                       <td className="px-6 py-4">
@@ -232,14 +250,47 @@ export function MembersManager() {
                             }}
                             className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-300"
                           >
-                            {ROLES.map((role) => (
-                              <option key={role} value={role}>
-                                {ROLE_LABELS[role]}
+                            {roleOptions.map((role) => (
+                              <option key={role.key} value={role.key}>
+                                {role.name}
                               </option>
                             ))}
                           </select>
                         ) : (
                           <span className="text-slate-700">{member.role_label || roleLabel(member.role)}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4">
+                        {canManage ? (
+                          <div className="flex max-w-xs flex-col gap-1">
+                            {projects.length === 0 ? (
+                              <span className="text-xs text-slate-500">No projects yet</span>
+                            ) : (
+                              projects.map((project) => (
+                                <label key={project.id} className="flex items-center gap-2 text-xs text-slate-700">
+                                  <input
+                                    type="checkbox"
+                                    checked={assigned.includes(project.id)}
+                                    disabled={busy}
+                                    onChange={(event) =>
+                                      void run(
+                                        () =>
+                                          event.target.checked
+                                            ? assignMemberProject(member.id, project.id)
+                                            : unassignMemberProject(member.id, project.id),
+                                        event.target.checked ? "Added to project." : "Removed from project.",
+                                      )
+                                    }
+                                  />
+                                  {project.name}
+                                </label>
+                              ))
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-500">
+                            {assigned.length === 0 ? "—" : `${assigned.length} project${assigned.length === 1 ? "" : "s"}`}
+                          </span>
                         )}
                       </td>
                       <td className="px-6 py-4 text-right">
@@ -285,7 +336,9 @@ export function MembersManager() {
                 {invites.map((invite) => (
                   <tr key={invite.id}>
                     <td className="px-6 py-4 text-slate-950">{invite.email}</td>
-                    <td className="px-4 py-4 text-slate-700">{roleLabel(invite.role)}</td>
+                    <td className="px-4 py-4 text-slate-700">
+                      {roles.find((role) => role.key === invite.role)?.name || roleLabel(invite.role)}
+                    </td>
                     <td className="px-6 py-4 text-right">
                       {canManage ? (
                         <div className="flex justify-end gap-2">

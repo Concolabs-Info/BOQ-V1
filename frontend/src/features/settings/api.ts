@@ -23,6 +23,7 @@ export type CompanyMember = {
   full_name: string | null;
   role: string;
   role_label: string;
+  workspace_ids?: string[];
   created_at: string | null;
 };
 
@@ -103,6 +104,60 @@ export function resendInvite(invitationId: string) {
     `/api/v1/platform/invitations/${encodeURIComponent(invitationId)}/resend`,
     {
       method: "POST",
+      skipCache: true,
+    },
+  );
+}
+
+export type CompanyRole = {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  permissions: string[];
+  built_in: boolean;
+};
+
+export function listCompanyRoles() {
+  return requestJson<{ roles: CompanyRole[] }>("/api/v1/platform/company/roles", { skipCache: true });
+}
+
+export function createCompanyRole(payload: { name: string; description?: string; permissions: string[] }) {
+  return requestJson<CompanyRole>("/api/v1/platform/company/roles", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    skipCache: true,
+  });
+}
+
+export function updateCompanyRole(roleId: string, payload: { name: string; description?: string; permissions: string[] }) {
+  return requestJson<CompanyRole>(`/api/v1/platform/company/roles/${encodeURIComponent(roleId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+    skipCache: true,
+  });
+}
+
+export function deleteCompanyRole(roleId: string) {
+  return requestJson<void>(`/api/v1/platform/company/roles/${encodeURIComponent(roleId)}`, {
+    method: "DELETE",
+    skipCache: true,
+  });
+}
+
+export function assignMemberProject(userId: string, projectId: string) {
+  return requestJson<void>(`/api/v1/platform/company/members/${encodeURIComponent(userId)}/projects`, {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId }),
+    skipCache: true,
+  });
+}
+
+export function unassignMemberProject(userId: string, projectId: string) {
+  return requestJson<void>(
+    `/api/v1/platform/company/members/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: "DELETE",
       skipCache: true,
     },
   );
