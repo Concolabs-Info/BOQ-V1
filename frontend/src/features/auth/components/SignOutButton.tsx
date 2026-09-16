@@ -1,18 +1,19 @@
 "use client";
 
+import { useClerk } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { appRoutes } from "@/shared/constants/appRoutes";
-import { logout } from "../services/authService";
 
 type SignOutButtonProps = {
   className?: string;
 };
 
 export function SignOutButton({ className }: SignOutButtonProps) {
+  const { signOut } = useClerk();
   const router = useRouter();
 
   async function handleSignOut() {
-    await logout();
+    await signOut();
     router.replace(appRoutes.login);
   }
 

@@ -1,7 +1,7 @@
 export const appRoutes = {
-  login: "/",
-  forgotPassword: "/",
-  resetPassword: "/",
+  login: "/sign-in",
+  forgotPassword: "/sign-in",
+  resetPassword: "/sign-in",
   dashboard: "/projects",
   createProject: "/projects/new",
   upload: "/projects",
