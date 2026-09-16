@@ -68,3 +68,43 @@ def test_enforce_scopes_viewer_to_assigned_projects(monkeypatch):
     with pytest.raises(HTTPException) as excinfo:
         access.enforce_workspace_access(_request("/api/v1/projects/p1/boq"), USER)
     assert excinfo.value.status_code == 403
+
+
+def _request_with_params(path: str, path_params: dict) -> Request:
+    scope = {
+        "type": "http",
+        "asgi": {"spec_version": "2.3", "version": "3.0"},
+        "http_version": "1.1",
+        "method": "PATCH",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [],
+        "client": ("test", 50000),
+        "server": ("test", 80),
+        "path_params": path_params,
+    }
+    return Request(scope)
+
+
+def test_lookup_project_id_resolves_storey_id(monkeypatch):
+    monkeypatch.setattr("app.modules.pre.access.project_for_storey", lambda storey_id: "p1")
+    result = access._lookup_project_id(_request_with_params("/api/v1/storeys/s1", {"storey_id": "s1"}))
+    assert result == "p1"
+
+
+def test_ensure_project_company_blocks_a_project_from_another_company(monkeypatch):
+    request = _request_with_params("/api/v1/viewports", {})
+    request.state.membership = ADMIN
+    monkeypatch.setattr(access, "_company_owns_project", lambda company_id, project_id: False)
+    with pytest.raises(HTTPException) as excinfo:
+        access.ensure_project_company(request, "someone_elses_project")
+    assert excinfo.value.status_code == 404
+
+
+def test_ensure_project_company_allows_an_owned_project(monkeypatch):
+    request = _request_with_params("/api/v1/viewports", {})
+    request.state.membership = ADMIN
+    monkeypatch.setattr(access, "_company_owns_project", lambda company_id, project_id: True)
+    access.ensure_project_company(request, "p1")  # does not raise

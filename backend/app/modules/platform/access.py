@@ -63,12 +63,14 @@ def _lookup_project_id(request: Request) -> str | None:
     params = request.path_params
     if params.get("project_id"):
         return str(params["project_id"])
-    from ...modules.pre.access import project_for_sheet, project_for_spec, project_for_viewport
+    from ...modules.pre.access import project_for_sheet, project_for_spec, project_for_storey, project_for_viewport
 
     if params.get("viewport_id"):
         return project_for_viewport(str(params["viewport_id"]))
     if params.get("sheet_id"):
         return project_for_sheet(str(params["sheet_id"]))
+    if params.get("storey_id"):
+        return project_for_storey(str(params["storey_id"]))
     if params.get("item_id"):
         return project_for_spec(str(params["item_id"]))
     if params.get("document_id"):
@@ -87,6 +89,19 @@ def _lookup_project_id(request: Request) -> str | None:
 def _company_owns_project(company_id: str, project_id: str) -> bool:
     row = fetch_one("SELECT id FROM project WHERE id = %s AND company_id = %s", (project_id, company_id))
     return row is not None
+
+
+def ensure_project_company(request: Request, project_id: str | None) -> None:
+    """For routes whose resource id comes from the request body rather than
+    the URL path, so enforce_workspace_access's own path-param lookup can't
+    see it (e.g. POST /viewports with sheet_id in the body, POST
+    /confirmations with entity_id in the body). Call this once the handler
+    has resolved project_id itself, before writing anything."""
+    membership: CompanyMembership | None = getattr(request.state, "membership", None)
+    if membership is None or project_id is None:
+        return
+    if not _company_owns_project(membership.company_id, project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
 
 
 def _assigned_to_project(user_id: str, project_id: str) -> bool:
