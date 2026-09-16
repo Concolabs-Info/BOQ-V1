@@ -211,6 +211,39 @@ class OnboardingStatusOut(ApiModel):
     has_company: bool
     has_project: bool
 
+
+class InviteRowIn(ApiModel):
+    email: str = Field(default="", max_length=254)
+    role: str | None = Field(default=None, max_length=40)
+    workspace_ids: list[str] = Field(default_factory=list)
+
+
+class InviteBatchIn(ApiModel):
+    invites: list[InviteRowIn] = Field(default_factory=list)
+
+
+class InviteFailureOut(ApiModel):
+    email: str
+    reason: str
+
+
+class InviteBatchOut(ApiModel):
+    sent: int
+    failures: list[InviteFailureOut] = Field(default_factory=list)
+
+
+class InviteClaimIn(ApiModel):
+    token: str | None = Field(default=None, max_length=200)
+
+
+class InviteClaimOut(ApiModel):
+    claimed: bool
+    already_member: bool = False
+    company_id: str | None = None
+    company_name: str | None = None
+    role: str | None = None
+
+
 class ScopeAnswer(ApiModel):
     choice: str | None = None
     value: str | None = None

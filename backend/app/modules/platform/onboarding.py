@@ -100,8 +100,9 @@ def onboarding_status(user: CurrentUser, *, as_founder: bool = False) -> Onboard
     membership = get_company_membership(user.id)
     if membership:
         has_project = company_project_count(membership.company_id) > 0
+        continue_wizard = membership.role == "admin" and not has_project
         return OnboardingStatus(
-            path="DONE" if has_project else "CONTINUE_WIZARD",
+            path="CONTINUE_WIZARD" if continue_wizard else "DONE",
             domain=None,
             suggested_name="",
             existing_company={"id": membership.company_id, "name": membership.company_name, "domain": None},

@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ....core.auth import CurrentUser, get_current_user
 from ....core.rbac import permissions_for_role
-from ....modules.platform.membership import get_company_membership
+from ....modules.platform.invitations import (
+    InvitationError,
+    claim_invitation,
+    send_invites,
+)
+from ....modules.platform.membership import get_company_membership, require_permission
 from ....modules.platform.onboarding import (
     OnboardingError,
     OnboardingStatus,
@@ -13,6 +18,11 @@ from ....modules.platform.onboarding import (
     onboarding_status,
 )
 from ..schemas import (
+    InviteBatchIn,
+    InviteBatchOut,
+    InviteClaimIn,
+    InviteClaimOut,
+    InviteFailureOut,
     OnboardingCompanyIn,
     OnboardingCompanyOut,
     OnboardingExistingCompany,
@@ -34,6 +44,7 @@ def _http_for(exc: OnboardingError) -> HTTPException:
         "onboarding_incomplete": 409,
         "forbidden": 403,
         "invalid": 400,
+        "expired": 410,
     }.get(exc.code, 400)
     existing = None
     if exc.extra.get("id"):
@@ -127,3 +138,38 @@ def post_onboarding_project(
     except OnboardingError as exc:
         raise _http_for(exc) from exc
     return OnboardingProjectOut(id=created.id, name=created.name)
+
+
+@router.post("/platform/invitations", response_model=InviteBatchOut)
+def post_invitations(
+    body: InviteBatchIn,
+    current_user: CurrentUser = Depends(get_current_user),
+    membership=Depends(require_permission("members:manage")),
+) -> InviteBatchOut:
+    result = send_invites(
+        current_user,
+        membership,
+        [row.model_dump() for row in body.invites],
+    )
+    return InviteBatchOut(
+        sent=result.sent,
+        failures=[InviteFailureOut(email=item.email, reason=item.reason) for item in result.failures],
+    )
+
+
+@router.post("/platform/invitations/claim", response_model=InviteClaimOut)
+def post_invitation_claim(
+    body: InviteClaimIn | None = None,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> InviteClaimOut:
+    try:
+        result = claim_invitation(current_user, token=(body.token if body else None))
+    except InvitationError as exc:
+        raise HTTPException(status_code={"expired": 410, "already_member": 409}.get(exc.code, 400), detail={"code": exc.code, "message": exc.message}) from exc
+    return InviteClaimOut(
+        claimed=result.claimed,
+        already_member=result.already_member,
+        company_id=result.company_id,
+        company_name=result.company_name,
+        role=result.role,
+    )

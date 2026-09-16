@@ -108,6 +108,19 @@ def test_status_member_without_project_continues_wizard(monkeypatch):
     assert status.has_project is False
 
 
+def test_status_invited_member_without_project_is_done(monkeypatch):
+    monkeypatch.setattr(
+        onboarding,
+        "get_company_membership",
+        lambda user_id: CompanyMembership(company_id="c1", company_name="Acme", role="qs"),
+    )
+    monkeypatch.setattr(onboarding, "company_project_count", lambda company_id: 0)
+    status = onboarding.onboarding_status(USER)
+    assert status.path == "DONE"
+    assert status.has_company is True
+    assert status.has_project is False
+
+
 def test_create_company_rejects_existing_member(monkeypatch):
     monkeypatch.setattr(
         onboarding,
