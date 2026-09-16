@@ -48,7 +48,7 @@ export function getCachedPlatformContext(): PlatformContext | null {
 }
 
 export function getPlatformContext() {
-  return requestJson<PlatformContext>(CONTEXT_PATH);
+  return requestJson<PlatformContext>(CONTEXT_PATH, { skipCache: true });
 }
 
 export function getCachedDashboardSummary(): DashboardSummary | null {
