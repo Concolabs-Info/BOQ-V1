@@ -3,11 +3,13 @@
 import { useAuth } from "@clerk/nextjs";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { claimInvitation } from "@/features/onboarding/api";
 import { getPlatformContext } from "@/features/platform/services/platformService";
 import { appRoutes } from "@/shared/constants/appRoutes";
-import { setSessionTokenGetter } from "@/shared/services/apiClient";
+import { removeCachedJson, setSessionTokenGetter } from "@/shared/services/apiClient";
 
 const PUBLIC_PREFIXES = ["/sign-in", "/sign-up", "/login", "/forgot-password"];
+const ME_PATH = "/api/v1/platform/me";
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -33,18 +35,40 @@ export function CompanyGate({ children }: { children: ReactNode }) {
     let mounted = true;
     setReady(false);
     setSessionTokenGetter(() => getToken());
-    getPlatformContext()
-      .then((context) => {
-        if (!mounted) return;
-        if (!context.organization && !isOnboardingPath(pathname)) {
-          router.replace(appRoutes.onboarding);
+
+    async function resolveMembership() {
+      let context = await getPlatformContext();
+      if (!context.organization) {
+        const inviteToken = new URLSearchParams(window.location.search).get("invite");
+        try {
+          const claimed = await claimInvitation(inviteToken);
+          if (claimed.claimed) {
+            removeCachedJson(ME_PATH);
+            context = await getPlatformContext();
+          }
+        } catch {
+          // No pending invite, or it is no longer valid — fall through to onboarding.
+        }
+      }
+      if (!mounted) return;
+      if (context.organization) {
+        if (isOnboardingPath(pathname) && context.membership_role !== "admin") {
+          router.replace(appRoutes.projects);
           return;
         }
         setReady(true);
-      })
-      .catch(() => {
-        if (mounted) setReady(true);
-      });
+        return;
+      }
+      if (!isOnboardingPath(pathname)) {
+        router.replace(appRoutes.onboarding);
+        return;
+      }
+      setReady(true);
+    }
+
+    resolveMembership().catch(() => {
+      if (mounted) setReady(true);
+    });
 
     return () => {
       mounted = false;

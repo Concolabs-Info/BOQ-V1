@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/shared/components/Button";
+import { sendInvites } from "../api";
 
 const ROLE_LABELS: Record<string, string> = {
   chief_estimator: "Chief Estimator",
@@ -18,9 +19,34 @@ type Row = { email: string; role: string };
 export function InviteStep({ onDone }: { onDone: () => void }) {
   const [rows, setRows] = useState<Row[]>([{ email: "", role: "viewer" }]);
   const [note, setNote] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   function update(index: number, patch: Partial<Row>) {
     setRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
+  }
+
+  async function send() {
+    const invites = rows.map((row) => ({ email: row.email.trim(), role: row.role })).filter((row) => row.email);
+    if (invites.length === 0) {
+      setNote("Add at least one email, or skip for now.");
+      return;
+    }
+    setNote(null);
+    setPending(true);
+    try {
+      const result = await sendInvites(invites);
+      if (result.failures.length === 0) {
+        onDone();
+        return;
+      }
+      setNote(
+        `Sent ${result.sent}. Problems: ` + result.failures.map((failure) => `${failure.email} (${failure.reason})`).join(", "),
+      );
+    } catch {
+      setNote("Something went wrong sending invites. Please try again.");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -60,15 +86,10 @@ export function InviteStep({ onDone }: { onDone: () => void }) {
       {note ? <p className="text-sm leading-6 text-slate-500">{note}</p> : null}
 
       <div className="flex flex-col gap-3 sm:flex-row">
-        <Button
-          type="button"
-          variant="secondary"
-          className="h-11 rounded-xl"
-          onClick={() => setNote("Invites will be available from Settings soon. Skip for now to create your first project.")}
-        >
-          Send invites
+        <Button type="button" disabled={pending} className="h-11 rounded-xl" onClick={() => void send()}>
+          {pending ? "Sending…" : "Send invites"}
         </Button>
-        <Button type="button" className="h-11 rounded-xl" onClick={onDone}>
+        <Button type="button" variant="ghost" disabled={pending} className="h-11 rounded-xl" onClick={onDone}>
           Skip for now
         </Button>
       </div>
