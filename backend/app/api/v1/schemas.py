@@ -146,6 +146,29 @@ class ConfirmationCreate(ApiModel):
     entity_id: UUID
     actor: str = "user"
 
+
+class PlatformUser(ApiModel):
+    id: str
+    email: str
+    full_name: str | None = None
+    role: str
+    status: str = "active"
+
+
+class PlatformOrganization(ApiModel):
+    id: str
+    name: str
+    status: str = "active"
+    membership_role: str | None = None
+
+
+class PlatformContext(ApiModel):
+    user: PlatformUser
+    organization: PlatformOrganization | None = None
+    membership_role: str | None = None
+    permissions: list[str]
+    is_super_admin: bool = False
+
 class ScopeAnswer(ApiModel):
     choice: str | None = None
     value: str | None = None
