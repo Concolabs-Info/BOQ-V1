@@ -179,6 +179,11 @@ def _pending_by_email(email: str) -> dict | None:
 
 
 def claim_invitation(user: CurrentUser, *, token: str | None = None) -> ClaimResult:
+    """`token` is accepted for a future accept-link flow, but nothing wires
+    it through yet — the redirect_url Clerk emails today carries no token.
+    The security boundary is the email check below (row["email"] must match
+    the Clerk-verified `user.email`), not `token`; do not rely on token
+    presence alone to authorize a claim."""
     existing = get_company_membership(user.id)
     if existing:
         return ClaimResult(
