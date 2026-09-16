@@ -1,4 +1,5 @@
 """Clerk Backend API helpers. Authentication only — no Organizations calls."""
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -6,9 +7,20 @@ import httpx
 
 from .config import get_settings
 
+# Clerk resource ids are always "<prefix>_<base62>", e.g. "user_2abc123",
+# "inv_2xyz789". Anything else can't be a real Clerk id, so reject it before
+# it becomes part of a request URL instead of trusting it verbatim.
+_CLERK_ID_RE = re.compile(r"^[a-z]+_[A-Za-z0-9]+$")
+
 
 class ClerkApiError(Exception):
     pass
+
+
+def _require_clerk_id(value: str, *, what: str) -> str:
+    if not _CLERK_ID_RE.match(value):
+        raise ClerkApiError(f"Invalid {what}")
+    return value
 
 
 @dataclass(frozen=True)
@@ -44,6 +56,7 @@ def _error_message(response: httpx.Response) -> str:
 
 def fetch_clerk_user(user_id: str) -> ClerkProfile:
     """One-time lookup used the first time get_current_user() sees a Clerk user id."""
+    user_id = _require_clerk_id(user_id, what="Clerk user id")
     response = httpx.get(
         f"https://api.clerk.com/v1/users/{user_id}",
         headers={"Authorization": f"Bearer {_secret_key()}"},
@@ -99,6 +112,7 @@ def revoke_invitation(invitation_id: str) -> None:
     """Revoke a Clerk application invitation. 404 means it is already gone."""
     if not invitation_id:
         return
+    invitation_id = _require_clerk_id(invitation_id, what="Clerk invitation id")
     response = httpx.post(
         f"https://api.clerk.com/v1/invitations/{invitation_id}/revoke",
         headers={"Authorization": f"Bearer {_secret_key()}"},
