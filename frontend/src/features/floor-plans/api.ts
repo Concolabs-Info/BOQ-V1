@@ -65,10 +65,10 @@ export function uploadFloorSource(
   file: File,
   onProgress?: (percent: number) => void
 ): Promise<FloorSourceUploadResult> {
-  return new Promise((resolve, reject) => {
+  return apiRequestHeaders().then((headers) => new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", apiUrl(`${basePath(projectId)}/floors/${floorId}/source`));
-    Object.entries(apiRequestHeaders()).forEach(([name, value]) => request.setRequestHeader(name, value));
+    Object.entries(headers).forEach(([name, value]) => request.setRequestHeader(name, value));
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
     };
@@ -94,5 +94,5 @@ export function uploadFloorSource(
     const body = new FormData();
     body.append("file", file);
     request.send(body);
-  });
+  }));
 }

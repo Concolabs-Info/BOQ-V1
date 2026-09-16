@@ -34,7 +34,7 @@ function loadAsset(path: string): Promise<string | null> {
   if (saved) return Promise.resolve(saved);
   const pending = assetRequests.get(path);
   if (pending) return pending;
-  const request = fetch(apiUrl(path), { headers: apiRequestHeaders(), cache: "force-cache" })
+  const request = apiRequestHeaders().then((headers) => fetch(apiUrl(path), { headers, cache: "force-cache" }))
     .then(async (response) => {
       if (!response.ok) throw new Error("Asset unavailable");
       const blob = await response.blob();

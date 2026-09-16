@@ -1,5 +1,6 @@
+import { bearerHeader } from "./bearerHeader";
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-const AUTH_TOKEN_KEY = "construction_plan_extractor_token";
 const CACHE_PREFIX = "cpe_cache:";
 
 export class ApiRequestError extends Error {
@@ -19,24 +20,16 @@ export function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
 
-export function authHeader(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  const token = window.localStorage.getItem(AUTH_TOKEN_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
+type SessionTokenGetter = () => Promise<string | null>;
+let sessionTokenGetter: SessionTokenGetter | null = null;
+
+export function setSessionTokenGetter(getter: SessionTokenGetter | null): void {
+  sessionTokenGetter = getter;
 }
 
-function isLocalBrowser(): boolean {
-  if (typeof window === "undefined") return false;
-  return ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(window.location.hostname);
-}
-
-export function localDevHeader(): Record<string, string> {
-  return isLocalBrowser() ? { "X-Local-Dev-Bypass": "1" } : {};
-}
-
-
-export function apiRequestHeaders(): Record<string, string> {
-  return { ...localDevHeader(), ...authHeader() };
+export async function apiRequestHeaders(): Promise<Record<string, string>> {
+  const token = sessionTokenGetter ? await sessionTokenGetter() : null;
+  return bearerHeader(token);
 }
 
 function canUseStorage(): boolean {
@@ -137,7 +130,7 @@ export async function downloadApiFile(path: string, fallbackFileName: string): P
   try {
     const response = await fetch(apiUrl(path), {
       method: "GET",
-      headers: apiRequestHeaders(),
+      headers: await apiRequestHeaders(),
       cache: "no-store",
     });
 
@@ -181,8 +174,7 @@ export async function requestJson<T>(path: string, options?: RequestInit): Promi
       ...options,
       headers: {
         ...(options?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-        ...localDevHeader(),
-        ...authHeader(),
+        ...(await apiRequestHeaders()),
         ...(options?.headers || {}),
       },
     });

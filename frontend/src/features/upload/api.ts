@@ -10,10 +10,9 @@ export function uploadProjectPdf(
   file: File,
   onProgress: (progress: UploadProgress) => void
 ): Promise<UploadResult> {
-  return new Promise((resolve, reject) => {
+  return apiRequestHeaders().then((headers) => new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", apiUrl(`/api/v1/projects/${projectId}/workflow/documents`));
-    const headers = apiRequestHeaders();
     Object.entries(headers).forEach(([name, value]) => request.setRequestHeader(name, value));
 
     request.upload.onprogress = (event) => {
@@ -52,5 +51,5 @@ export function uploadProjectPdf(
     body.append("file", file);
     body.append("document_type", "source");
     request.send(body);
-  });
+  }));
 }

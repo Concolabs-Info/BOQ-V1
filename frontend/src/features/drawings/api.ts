@@ -35,9 +35,9 @@ export function linkDrawingSpecifications(projectId: string, drawingId: string, 
 }
 
 export function uploadDrawingSource(projectId: string, drawingId: string, file: File, onProgress?: (percent: number) => void): Promise<DrawingSourceUploadResult> {
-  return new Promise((resolve, reject) => {
+  return apiRequestHeaders().then((headers) => new Promise((resolve, reject) => {
     const request = new XMLHttpRequest(); request.open("POST", apiUrl(`${base(projectId)}/${drawingId}/source`));
-    Object.entries(apiRequestHeaders()).forEach(([name, value]) => request.setRequestHeader(name, value));
+    Object.entries(headers).forEach(([name, value]) => request.setRequestHeader(name, value));
     request.upload.onprogress = (event) => { if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100)); };
     request.onerror = () => reject(new ApiRequestError(0, "The drawing source could not be uploaded."));
     request.onload = () => {
@@ -47,7 +47,7 @@ export function uploadDrawingSource(projectId: string, drawingId: string, file: 
       reject(new ApiRequestError(request.status, userFacingApiError(request.status, raw), raw));
     };
     const body = new FormData(); body.append("file", file); request.send(body);
-  });
+  }));
 }
 
 export function getDrawingSource(projectId: string, drawingId: string, documentId: string) {

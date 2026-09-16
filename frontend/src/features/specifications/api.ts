@@ -29,10 +29,10 @@ export function uploadSpecificationSource(
   },
   onProgress: (percent: number) => void
 ): Promise<SpecificationsState> {
-  return new Promise((resolve, reject) => {
+  return apiRequestHeaders().then((headers) => new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", apiUrl(`${base(projectId)}/sources/upload`));
-    Object.entries(apiRequestHeaders()).forEach(([name, value]) => request.setRequestHeader(name, value));
+    Object.entries(headers).forEach(([name, value]) => request.setRequestHeader(name, value));
     request.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
       onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
@@ -63,7 +63,7 @@ export function uploadSpecificationSource(
     if (input.replaceSourceId) body.append("replace_source_id", input.replaceSourceId);
     body.append("file", input.file);
     request.send(body);
-  });
+  }));
 }
 
 export function createSpecificationCrop(projectId: string, payload: CropSourcePayload): Promise<{ state: SpecificationsState }> {
