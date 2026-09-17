@@ -19,6 +19,8 @@ const nextConfig = {
   turbopack: {
     root: path.join(__dirname),
   },
+  // Don't regenerate AGENTS.md/CLAUDE.md on every `next dev` run.
+  agentRules: false,
 };
 
 module.exports = nextConfig;
