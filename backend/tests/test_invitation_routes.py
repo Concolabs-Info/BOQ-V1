@@ -91,3 +91,46 @@ def test_claim_maps_expired(monkeypatch):
     _clear()
     assert response.status_code == 410
     assert response.json()["detail"]["code"] == "expired"
+
+
+def test_patch_invite_updates_role_and_projects(monkeypatch):
+    _auth()
+    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
+
+    def fake_update(membership, invitation_id, role=None, workspace_ids=None):
+        assert membership.company_id == "c1"
+        assert invitation_id == "inv-1"
+        assert role == "chief_estimator"
+        assert workspace_ids == ["p1"]
+        return {
+            "id": "inv-1",
+            "email": "join@acme.com",
+            "role": "chief_estimator",
+            "workspace_ids": ["p1"],
+            "expires_at": None,
+            "created_at": None,
+        }
+
+    monkeypatch.setattr(platform, "update_invite", fake_update)
+    response = client.patch(
+        "/api/v1/platform/invitations/inv-1",
+        json={"role": "chief_estimator", "workspace_ids": ["p1"]},
+    )
+    _clear()
+    assert response.status_code == 200
+    assert response.json()["role"] == "chief_estimator"
+    assert response.json()["workspace_ids"] == ["p1"]
+
+
+def test_patch_invite_maps_invalid(monkeypatch):
+    _auth()
+    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
+
+    def boom(membership, invitation_id, role=None, workspace_ids=None):
+        raise InvitationError("invalid", "That invite is no longer pending.")
+
+    monkeypatch.setattr(platform, "update_invite", boom)
+    response = client.patch("/api/v1/platform/invitations/inv-1", json={"role": "qs"})
+    _clear()
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "invalid"

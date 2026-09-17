@@ -1,5 +1,6 @@
 export type OnboardingPath =
   | "REQUEST_TO_JOIN"
+  | "ACCEPT_INVITE"
   | "CREATE_WITH_DOMAIN_LOCK"
   | "CREATE_MANUAL"
   | "CONTINUE_WIZARD"
@@ -22,6 +23,7 @@ export type OnboardingStatus = {
   former_company_name: string | null;
   has_company: boolean;
   has_project: boolean;
+  pending_project_count?: number;
 };
 
 export type CreatedCompany = {
@@ -38,8 +40,8 @@ export type CreatedProject = {
 export const FLOW_STEPS = [
   { title: "Account", blurb: "Your name, email and password" },
   { title: "Company", blurb: "Name and country" },
-  { title: "Invite team", blurb: "Optional teammates" },
   { title: "Project", blurb: "Your first job" },
+  { title: "Invite team", blurb: "Optional teammates" },
 ] as const;
 
 export const WIZARD_STEP_OFFSET = 1;

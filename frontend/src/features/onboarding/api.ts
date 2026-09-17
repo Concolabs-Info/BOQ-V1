@@ -1,4 +1,4 @@
-import { removeCachedJson, requestJson } from "@/shared/services/apiClient";
+import { removeCachedJson, requestJson, setSessionTokenGetter } from "@/shared/services/apiClient";
 import type { CreatedCompany, CreatedProject, OnboardingStatus } from "./types";
 
 const STATUS_PATH = "/api/v1/platform/onboarding/status";
@@ -62,5 +62,17 @@ export function claimInvitation(token?: string | null) {
     method: "POST",
     body: JSON.stringify({ token: token || null }),
     skipCache: true,
+  }).then((result) => {
+    removeCachedJson(ME_PATH);
+    return result;
   });
+}
+
+export async function claimInvitationWithSession(getToken: () => Promise<string | null>) {
+  setSessionTokenGetter(getToken);
+  try {
+    return await claimInvitation();
+  } catch {
+    return null;
+  }
 }

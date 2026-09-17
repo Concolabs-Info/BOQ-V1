@@ -6,10 +6,9 @@ import { useEffect, useState, type ReactNode } from "react";
 import { claimInvitation } from "@/features/onboarding/api";
 import { getPlatformContext } from "@/features/platform/services/platformService";
 import { appRoutes } from "@/shared/constants/appRoutes";
-import { removeCachedJson, setSessionTokenGetter } from "@/shared/services/apiClient";
+import { setSessionTokenGetter } from "@/shared/services/apiClient";
 
 const PUBLIC_PREFIXES = ["/sign-in", "/sign-up", "/login", "/forgot-password", "/help", "/legal"];
-const ME_PATH = "/api/v1/platform/me";
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -42,11 +41,12 @@ export function CompanyGate({ children }: { children: ReactNode }) {
         const inviteToken = new URLSearchParams(window.location.search).get("invite");
         try {
           const claimed = await claimInvitation(inviteToken);
-          if (claimed.claimed) {
-            removeCachedJson(ME_PATH);
+          if (claimed.claimed || claimed.already_member) {
             context = await getPlatformContext();
           }
         } catch {
+          // Expired or missing invites fall through to onboarding, which
+          // still prefers ACCEPT_INVITE when a pending invite exists.
         }
       }
       if (!mounted) return;

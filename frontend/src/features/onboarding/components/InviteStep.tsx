@@ -5,12 +5,20 @@ import { AUTH_CONTROL_CLASS } from "@/features/auth/components/AuthField";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/shared/components/Button";
 import { ASSIGNABLE_ROLES, DEFAULT_INVITE_ROLE, roleLabel } from "@/features/settings/rbac";
+import { ProjectAccessField, type ProjectOption } from "@/features/settings/components/ProjectAccessPicker";
 import { sendInvites } from "../api";
 
 type Row = { email: string; role: string };
 
-export function InviteStep({ onDone }: { onDone: () => void }) {
+export function InviteStep({
+  onDone,
+  projects = [],
+}: {
+  onDone: () => void;
+  projects?: ProjectOption[];
+}) {
   const [rows, setRows] = useState<Row[]>([{ email: "", role: DEFAULT_INVITE_ROLE }]);
+  const [projectIds, setProjectIds] = useState<string[]>([]);
   const [note, setNote] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -19,7 +27,9 @@ export function InviteStep({ onDone }: { onDone: () => void }) {
   }
 
   async function send() {
-    const invites = rows.map((row) => ({ email: row.email.trim(), role: row.role })).filter((row) => row.email);
+    const invites = rows
+      .map((row) => ({ email: row.email.trim(), role: row.role, workspace_ids: projectIds }))
+      .filter((row) => row.email);
     if (invites.length === 0) {
       setNote("Add at least one email, or skip for now.");
       return;
@@ -76,6 +86,17 @@ export function InviteStep({ onDone }: { onDone: () => void }) {
           + Add another
         </button>
       </div>
+
+      {projects.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-sm font-medium text-slate-950">Projects</p>
+          <ProjectAccessField projects={projects} selectedIds={projectIds} disabled={pending} onChange={setProjectIds} />
+        </div>
+      ) : (
+        <p className="text-sm leading-6 text-slate-500">
+          You can add them to a project later from Settings → Members.
+        </p>
+      )}
 
       {note ? <p className="text-sm leading-6 text-slate-500">{note}</p> : null}
 

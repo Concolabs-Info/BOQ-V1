@@ -106,6 +106,27 @@ def test_send_invites_inserts_hashed_token_and_calls_clerk(monkeypatch):
     assert any("clerk_invitation_id" in sql for sql, _params in conn.calls)
 
 
+def test_send_invites_stores_project_ids(monkeypatch):
+    monkeypatch.setattr(invitations, "invitation_redirect_url", lambda: "http://localhost:3000/sign-up")
+    monkeypatch.setattr(invitations, "_email_already_in_a_company", lambda email: False)
+    monkeypatch.setattr(invitations, "owned_workspace_ids", lambda company_id, ids: list(ids))
+    monkeypatch.setattr(
+        invitations,
+        "create_invitation",
+        lambda email, **kwargs: type("Invite", (), {"id": "clerk_inv_2", "email": email})(),
+    )
+    conn = FakeConn(insert_id="inv-2")
+    patch_tx(monkeypatch, conn)
+    result = invitations.send_invites(
+        ADMIN,
+        MEMBERSHIP,
+        [{"email": "join@acme.com", "role": "qs", "workspace_ids": ["p1", "p2"]}],
+    )
+    assert result.sent == 1
+    insert = next(params for sql, params in conn.calls if "INSERT INTO invitation" in sql)
+    assert insert[3] == '["p1", "p2"]'
+
+
 def test_send_invites_records_clerk_failure(monkeypatch):
     monkeypatch.setattr(invitations, "invitation_redirect_url", lambda: "http://localhost:3000/sign-up")
     monkeypatch.setattr(invitations, "_email_already_in_a_company", lambda email: False)
@@ -145,8 +166,61 @@ def test_claim_by_email_inserts_membership(monkeypatch):
     result = invitations.claim_invitation(GUEST)
     assert result == invitations.ClaimResult(claimed=True, company_id="c1", company_name="Acme", role="qs")
     assert any("INSERT INTO company_member" in sql for sql, _params in conn.calls)
-    assert any("INSERT INTO project_member" in sql for sql, _params in conn.calls)
+    assert any(
+        "INSERT INTO project_member" in sql and params == ("p1", GUEST.id) for sql, params in conn.calls
+    )
     assert any("status = 'accepted'" in sql for sql, _params in conn.calls)
+
+
+def test_pending_invite_for_email_counts_projects(monkeypatch):
+    monkeypatch.setattr(
+        invitations,
+        "_pending_by_email",
+        lambda email: {
+            "id": "inv-1",
+            "company_id": "c1",
+            "email": email,
+            "role": "qs",
+            "workspace_ids": ["p1", "p2"],
+            "status": "pending",
+        },
+    )
+    monkeypatch.setattr(
+        invitations,
+        "fetch_one",
+        lambda sql, params=(): {"id": "c1", "name": "Acme", "domain": "acme.com"},
+    )
+    pending = invitations.pending_invite_for_email("join@acme.com")
+    assert pending["company_name"] == "Acme"
+    assert pending["project_count"] == 2
+
+
+def test_pending_invite_for_email_none(monkeypatch):
+    monkeypatch.setattr(invitations, "_pending_by_email", lambda email: None)
+    assert invitations.pending_invite_for_email("join@acme.com") is None
+
+
+def test_claim_without_projects_skips_project_member(monkeypatch):
+    monkeypatch.setattr(invitations, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(
+        invitations,
+        "_pending_by_email",
+        lambda email: {
+            "id": "inv-1",
+            "company_id": "c1",
+            "email": "join@acme.com",
+            "role": "qs",
+            "workspace_ids": [],
+            "status": "pending",
+            "expires_at": datetime.now(timezone.utc) + timedelta(days=1),
+        },
+    )
+    monkeypatch.setattr(invitations, "fetch_one", lambda sql, params=(): {"id": "c1", "name": "Acme"})
+    conn = FakeConn()
+    patch_tx(monkeypatch, conn)
+    result = invitations.claim_invitation(GUEST)
+    assert result.claimed is True
+    assert not any("INSERT INTO project_member" in sql for sql, _params in conn.calls)
 
 
 def test_claim_by_token_rejects_email_mismatch(monkeypatch):
@@ -224,3 +298,85 @@ def test_resend_invite_sends_again(monkeypatch):
     )
     result = invitations.resend_invite(ADMIN, MEMBERSHIP, "inv-1")
     assert result.sent == 1
+
+
+def _pending_row(**overrides):
+    row = {
+        "id": "inv-1",
+        "email": "join@acme.com",
+        "role": "qs",
+        "workspace_ids": [],
+        "status": "pending",
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
+        "created_at": datetime.now(timezone.utc),
+    }
+    row.update(overrides)
+    return row
+
+
+def test_update_invite_sets_projects_and_role(monkeypatch):
+    row = _pending_row()
+
+    def fake_fetch_one(sql, params=()):
+        if "FROM invitation" in sql:
+            return row
+        if "FROM project" in sql:
+            return {"id": params[0]}
+        return None
+
+    seen = {}
+    monkeypatch.setattr(invitations, "fetch_one", fake_fetch_one)
+    monkeypatch.setattr(
+        invitations,
+        "execute",
+        lambda sql, params=(): seen.update({"sql": sql, "params": params}),
+    )
+    result = invitations.update_invite(
+        MEMBERSHIP,
+        "inv-1",
+        role="chief_estimator",
+        workspace_ids=["p1", "p2"],
+    )
+    assert result["role"] == "chief_estimator"
+    assert result["workspace_ids"] == ["p1", "p2"]
+    assert seen["params"][0] == "chief_estimator"
+    assert seen["params"][1] == '["p1", "p2"]'
+
+
+def test_update_invite_clears_projects(monkeypatch):
+    row = _pending_row(workspace_ids=["p1"])
+    monkeypatch.setattr(invitations, "fetch_one", lambda sql, params=(): row)
+    seen = {}
+    monkeypatch.setattr(
+        invitations,
+        "execute",
+        lambda sql, params=(): seen.update({"params": params}),
+    )
+    result = invitations.update_invite(MEMBERSHIP, "inv-1", workspace_ids=[])
+    assert result["workspace_ids"] == []
+    assert result["role"] == "qs"
+    assert seen["params"][1] == "[]"
+
+
+def test_update_invite_rejects_admin_role(monkeypatch):
+    monkeypatch.setattr(invitations, "fetch_one", lambda sql, params=(): _pending_row())
+    with pytest.raises(invitations.InvitationError) as excinfo:
+        invitations.update_invite(MEMBERSHIP, "inv-1", role="admin")
+    assert "assignable" in excinfo.value.message.lower()
+
+
+def test_update_invite_rejects_missing(monkeypatch):
+    monkeypatch.setattr(invitations, "fetch_one", lambda sql, params=(): None)
+    with pytest.raises(invitations.InvitationError):
+        invitations.update_invite(MEMBERSHIP, "inv-1", role="qs")
+
+
+def test_update_invite_rejects_expired(monkeypatch):
+    monkeypatch.setattr(
+        invitations,
+        "fetch_one",
+        lambda sql, params=(): _pending_row(expires_at=datetime.now(timezone.utc) - timedelta(days=1)),
+    )
+    with pytest.raises(invitations.InvitationError) as excinfo:
+        invitations.update_invite(MEMBERSHIP, "inv-1", role="qs")
+    assert excinfo.value.code == "expired"

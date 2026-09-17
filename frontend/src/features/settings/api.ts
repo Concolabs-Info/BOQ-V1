@@ -13,6 +13,7 @@ export type CompanySettings = {
   country: string;
   currency: string;
   phone: string | null;
+  logo_url: string | null;
   role: string;
   permissions: string[];
 };
@@ -70,6 +71,23 @@ export function updateCompanySettings(payload: {
   });
 }
 
+export function uploadCompanyLogo(file: File) {
+  const body = new FormData();
+  body.append("file", file);
+  return requestJson<CompanySettings>("/api/v1/platform/company/logo", {
+    method: "POST",
+    body,
+    skipCache: true,
+  });
+}
+
+export function deleteCompanyLogo() {
+  return requestJson<CompanySettings>("/api/v1/platform/company/logo", {
+    method: "DELETE",
+    skipCache: true,
+  });
+}
+
 export function getMemberDirectory() {
   return requestJson<MemberDirectory>("/api/v1/platform/company/members", { skipCache: true });
 }
@@ -88,6 +106,14 @@ export function updateMemberRole(userId: string, role: string) {
 export function removeMember(userId: string) {
   return requestJson<void>(`/api/v1/platform/company/members/${encodeURIComponent(userId)}`, {
     method: "DELETE",
+    skipCache: true,
+  });
+}
+
+export function updateInvite(invitationId: string, payload: { role?: string; workspace_ids?: string[] }) {
+  return requestJson<PendingInvite>(`/api/v1/platform/invitations/${encodeURIComponent(invitationId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
     skipCache: true,
   });
 }

@@ -6,7 +6,8 @@ import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { LoadingState } from "@/shared/components/LoadingState";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { getOnboardingStatus } from "../api";
-import { FLOW_STEPS, WIZARD_STEP_OFFSET, type OnboardingStatus, type WizardStep } from "../types";
+import { FLOW_STEPS, WIZARD_STEP_OFFSET, type CreatedProject, type OnboardingStatus, type WizardStep } from "../types";
+import { AcceptInviteStep } from "./AcceptInviteStep";
 import { CreateCompanyLocked } from "./CreateCompanyLocked";
 import { CreateCompanyManual } from "./CreateCompanyManual";
 import { FirstProjectStep } from "./FirstProjectStep";
@@ -17,7 +18,7 @@ import { OnboardingShell } from "./OnboardingShell";
 import { RemovedFromCompany } from "./RemovedFromCompany";
 import { SignedInAs } from "./SignedInAs";
 
-const STEP_INDEX: Record<WizardStep, number> = { branch: 0, invite: 1, project: 2 };
+const STEP_INDEX: Record<WizardStep, number> = { branch: 0, project: 1, invite: 2 };
 
 export function OnboardingWizard() {
   const router = useRouter();
@@ -26,6 +27,7 @@ export function OnboardingWizard() {
   const afterDelete = searchParams.get("after") === "deleted";
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [step, setStep] = useState<WizardStep>("branch");
+  const [firstProject, setFirstProject] = useState<CreatedProject | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -68,6 +70,19 @@ export function OnboardingWizard() {
     return <RemovedFromCompany companyName={status.former_company_name} />;
   }
 
+  if (status.path === "ACCEPT_INVITE") {
+    const label = status.existing_company?.name ?? "your company";
+    return (
+      <OnboardingShell
+        rail={<BrandRailNote />}
+        heading={`Join ${label}`}
+        sub="You've been invited. You'll only see the projects they picked for you."
+      >
+        <AcceptInviteStep company={status.existing_company} projectCount={status.pending_project_count ?? 0} />
+      </OnboardingShell>
+    );
+  }
+
   if (status.path === "REQUEST_TO_JOIN") {
     const label = status.existing_company?.name ?? status.domain ?? "your company";
     return (
@@ -93,7 +108,7 @@ export function OnboardingWizard() {
   let sub = afterDelete
     ? "Your previous company was deleted. A few details to get started again."
     : "A few details to get started. Billing and tax info come later.";
-  let body = <CreateCompanyManual onCreated={() => setStep("invite")} />;
+  let body = <CreateCompanyManual onCreated={() => setStep("project")} />;
 
   if (step === "branch" && status.path === "CREATE_WITH_DOMAIN_LOCK") {
     heading = afterDelete
@@ -102,15 +117,30 @@ export function OnboardingWizard() {
     sub = afterDelete
       ? "Your previous company was deleted. Create a new one to keep working on projects."
       : "You'll be the owner. We matched your work email domain.";
-    body = <CreateCompanyLocked suggestedName={status.suggested_name} onCreated={() => setStep("invite")} />;
-  } else if (step === "invite") {
-    heading = "Invite your team";
-    sub = "Optional. They'll get an email with a link to join. You can also do this later from Settings.";
-    body = <InviteStep onDone={() => setStep("project")} />;
+    body = <CreateCompanyLocked suggestedName={status.suggested_name} onCreated={() => setStep("project")} />;
   } else if (step === "project") {
     heading = "Create your first project";
     sub = "Same details as a new project later. Only the name is required.";
-    body = <FirstProjectStep />;
+    body = (
+      <FirstProjectStep
+        onCreated={(project) => {
+          setFirstProject(project);
+          setStep("invite");
+        }}
+        onSkip={() => router.replace(appRoutes.projects)}
+      />
+    );
+  } else if (step === "invite") {
+    heading = "Invite your team";
+    sub = firstProject
+      ? `Optional. They'll get an email to join, and they'll only see ${firstProject.name} unless you change that.`
+      : "Optional. They'll get an email to join. You can add them to a project later from Settings.";
+    body = (
+      <InviteStep
+        projects={firstProject ? [{ id: firstProject.id, name: firstProject.name }] : []}
+        onDone={() => router.replace(appRoutes.projects)}
+      />
+    );
   }
 
   return (

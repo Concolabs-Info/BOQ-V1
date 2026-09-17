@@ -52,6 +52,7 @@ def test_currency_defaults_to_usd():
 def test_status_gmail_is_manual_create(monkeypatch):
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
     monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
     monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: None)
     status = onboarding.onboarding_status(GMAIL)
     assert status.path == "CREATE_MANUAL"
@@ -62,6 +63,7 @@ def test_status_gmail_is_manual_create(monkeypatch):
 def test_status_work_email_without_company_locks_domain(monkeypatch):
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
     monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
     monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: None)
     status = onboarding.onboarding_status(USER)
     assert status.path == "CREATE_WITH_DOMAIN_LOCK"
@@ -73,6 +75,7 @@ def test_status_work_email_with_company_asks_to_join(monkeypatch):
     existing = {"id": "c1", "name": "Acme", "domain": "acme.com"}
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
     monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
     monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: existing)
     status = onboarding.onboarding_status(USER)
     assert status.path == "REQUEST_TO_JOIN"
@@ -81,6 +84,7 @@ def test_status_work_email_with_company_asks_to_join(monkeypatch):
 
 def test_status_founder_escape_is_manual(monkeypatch):
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
     monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: "Old Co")
     status = onboarding.onboarding_status(USER, as_founder=True)
     assert status.path == "CREATE_MANUAL"
@@ -89,6 +93,7 @@ def test_status_founder_escape_is_manual(monkeypatch):
 
 def test_status_removed_member_is_called_out(monkeypatch):
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
     monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: "Old Co")
     status = onboarding.onboarding_status(USER)
     assert status.path == "REMOVED"
@@ -119,6 +124,44 @@ def test_status_invited_member_without_project_is_done(monkeypatch):
     assert status.path == "DONE"
     assert status.has_company is True
     assert status.has_project is False
+
+
+def test_status_pending_invite_is_accept_invite(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(
+        onboarding,
+        "pending_invite_for_email",
+        lambda email: {
+            "company_id": "c1",
+            "company_name": "Acme",
+            "domain": "acme.com",
+            "role": "qs",
+            "project_count": 1,
+        },
+    )
+    status = onboarding.onboarding_status(USER)
+    assert status.path == "ACCEPT_INVITE"
+    assert status.existing_company["name"] == "Acme"
+    assert status.pending_project_count == 1
+
+
+def test_status_pending_invite_beats_removed_and_join(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: "Old Co")
+    monkeypatch.setattr(
+        onboarding,
+        "pending_invite_for_email",
+        lambda email: {
+            "company_id": "c1",
+            "company_name": "Acme",
+            "domain": "acme.com",
+            "role": "qs",
+            "project_count": 0,
+        },
+    )
+    status = onboarding.onboarding_status(USER, as_founder=True)
+    assert status.path == "ACCEPT_INVITE"
+    assert status.former_company_name is None
 
 
 def test_create_company_rejects_existing_member(monkeypatch):

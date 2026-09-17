@@ -1,12 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { AUTH_CONTROL_CLASS, AuthField } from "@/features/auth/components/AuthField";
 import { Button } from "@/shared/components/Button";
-import { appRoutes } from "@/shared/constants/appRoutes";
 import { ApiRequestError } from "@/shared/services/apiClient";
 import { createOnboardingProject } from "../api";
+import type { CreatedProject } from "../types";
 import { FieldError, FieldLabel } from "./formBits";
 
 function optional(value: string) {
@@ -14,8 +13,13 @@ function optional(value: string) {
   return cleaned || undefined;
 }
 
-export function FirstProjectStep() {
-  const router = useRouter();
+export function FirstProjectStep({
+  onCreated,
+  onSkip,
+}: {
+  onCreated: (project: CreatedProject) => void;
+  onSkip: () => void;
+}) {
   const [name, setName] = useState("");
   const [projectNumber, setProjectNumber] = useState("");
   const [clientName, setClientName] = useState("");
@@ -35,14 +39,14 @@ export function FirstProjectStep() {
     setNameError(null);
     setPending(true);
     try {
-      await createOnboardingProject({
+      const created = await createOnboardingProject({
         name: cleanName,
         project_number: optional(projectNumber),
         client_name: optional(clientName),
         location: optional(location),
         description: optional(description),
       });
-      router.replace(appRoutes.projects);
+      onCreated(created);
     } catch (caught) {
       if (caught instanceof ApiRequestError && caught.details?.field === "name") {
         setNameError(caught.rawMessage || caught.message);
@@ -128,7 +132,7 @@ export function FirstProjectStep() {
           variant="ghost"
           disabled={pending}
           className="h-11 rounded-xl"
-          onClick={() => router.replace(appRoutes.projects)}
+          onClick={onSkip}
         >
           Skip for now
         </Button>

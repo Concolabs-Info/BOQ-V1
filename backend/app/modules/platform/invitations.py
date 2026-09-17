@@ -94,6 +94,17 @@ def owned_workspace_ids(company_id: str, workspace_ids: list[str] | None) -> lis
     return owned
 
 
+def _workspace_id_list(value) -> list[str]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
+
+
 def send_invites(
     user: CurrentUser,
     membership: CompanyMembership,
@@ -185,6 +196,25 @@ def _pending_by_email(email: str) -> dict | None:
     )
 
 
+def pending_invite_for_email(email: str) -> dict | None:
+    """Open invitation for this email, if any. Used to send invitees into join
+    instead of founder setup or 'request to join'."""
+    row = _pending_by_email(email)
+    if not row:
+        return None
+    company = fetch_one("SELECT id, name, domain FROM company WHERE id = %s", (row["company_id"],))
+    if not company:
+        return None
+    workspace_ids = _workspace_id_list(row.get("workspace_ids"))
+    return {
+        "company_id": str(company["id"]),
+        "company_name": company["name"],
+        "domain": company.get("domain"),
+        "role": row["role"],
+        "project_count": len([item for item in workspace_ids if item]),
+    }
+
+
 def claim_invitation(user: CurrentUser, *, token: str | None = None) -> ClaimResult:
     """`token` is accepted for a future accept-link flow, but nothing wires
     it through yet — the redirect_url Clerk emails today carries no token.
@@ -216,9 +246,7 @@ def claim_invitation(user: CurrentUser, *, token: str | None = None) -> ClaimRes
     if not company:
         raise InvitationError("invalid", "That company no longer exists.")
 
-    workspace_ids = row.get("workspace_ids") or []
-    if isinstance(workspace_ids, str):
-        workspace_ids = json.loads(workspace_ids)
+    workspace_ids = _workspace_id_list(row.get("workspace_ids"))
 
     try:
         with transaction() as conn:
@@ -263,11 +291,57 @@ def list_pending_invitations(company_id: str) -> list[dict]:
             "id": str(row["id"]),
             "email": row["email"],
             "role": row["role"],
-            "workspace_ids": [str(item) for item in (row.get("workspace_ids") or [])],
+            "workspace_ids": _workspace_id_list(row.get("workspace_ids")),
             "expires_at": row["expires_at"].isoformat() if row.get("expires_at") else None,
             "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
         })
     return pending
+
+
+def update_invite(
+    membership: CompanyMembership,
+    invitation_id: str,
+    *,
+    role: str | None = None,
+    workspace_ids: list[str] | None = None,
+) -> dict:
+    row = fetch_one(
+        "SELECT id, email, role, workspace_ids, status, expires_at, created_at "
+        "FROM invitation WHERE id = %s AND company_id = %s",
+        (invitation_id, membership.company_id),
+    )
+    if not row or row["status"] != "pending":
+        raise InvitationError("invalid", "That invite is no longer pending.")
+
+    expires_at = row.get("expires_at")
+    if expires_at is not None and expires_at < datetime.now(timezone.utc):
+        raise InvitationError("expired", "This invitation has expired.")
+
+    next_role = row["role"]
+    if role is not None:
+        resolved = resolve_invite_role(role, membership.company_id)
+        if not resolved:
+            raise InvitationError("invalid", "Pick an assignable role.")
+        next_role = resolved
+
+    next_ids = (
+        owned_workspace_ids(membership.company_id, workspace_ids)
+        if workspace_ids is not None
+        else _workspace_id_list(row.get("workspace_ids"))
+    )
+
+    execute(
+        "UPDATE invitation SET role = %s, workspace_ids = %s::jsonb WHERE id = %s AND company_id = %s",
+        (next_role, json.dumps(next_ids), invitation_id, membership.company_id),
+    )
+    return {
+        "id": str(row["id"]),
+        "email": row["email"],
+        "role": next_role,
+        "workspace_ids": next_ids,
+        "expires_at": row["expires_at"].isoformat() if row.get("expires_at") else None,
+        "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+    }
 
 
 def _revoke_clerk_invite(row: dict) -> None:
@@ -308,9 +382,7 @@ def resend_invite(user: CurrentUser, membership: CompanyMembership, invitation_i
     if not row or row["status"] != "pending":
         raise InvitationError("invalid", "That invite is no longer pending.")
     _revoke_clerk_invite(row)
-    workspace_ids = row.get("workspace_ids") or []
-    if isinstance(workspace_ids, str):
-        workspace_ids = json.loads(workspace_ids)
+    workspace_ids = _workspace_id_list(row.get("workspace_ids"))
     return send_invites(
         user,
         membership,

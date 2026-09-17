@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from ...core.auth import CurrentUser
 from ...database.connection import fetch_one, transaction
+from .invitations import pending_invite_for_email
 from .membership import get_company_membership
 from .onboarding_path import (
     domain_of_email,
@@ -64,6 +65,7 @@ class OnboardingStatus:
     former_company_name: str | None
     has_company: bool
     has_project: bool
+    pending_project_count: int = 0
 
 
 def currency_for_country(country: str) -> str:
@@ -109,6 +111,23 @@ def onboarding_status(user: CurrentUser, *, as_founder: bool = False) -> Onboard
             former_company_name=None,
             has_company=True,
             has_project=has_project,
+        )
+
+    pending = pending_invite_for_email(user.email)
+    if pending:
+        return OnboardingStatus(
+            path="ACCEPT_INVITE",
+            domain=pending.get("domain"),
+            suggested_name="",
+            existing_company={
+                "id": pending["company_id"],
+                "name": pending["company_name"],
+                "domain": pending.get("domain"),
+            },
+            former_company_name=None,
+            has_company=False,
+            has_project=False,
+            pending_project_count=int(pending.get("project_count") or 0),
         )
 
     if not as_founder:
