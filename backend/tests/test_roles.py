@@ -45,13 +45,14 @@ def test_create_custom_role_rejects_empty_permissions(monkeypatch):
 
 
 def test_delete_custom_role_blocked_when_assigned(monkeypatch):
+    role_id = "11111111-1111-1111-1111-111111111111"
     monkeypatch.setattr(
         roles,
         "fetch_one",
-        lambda sql, params=(): {"id": "r1", "key": "custom_site_qs"} if "FROM company_role" in sql else {"user_id": "u2"},
+        lambda sql, params=(): {"id": role_id, "key": "custom_site_qs"} if "FROM company_role" in sql else {"user_id": "u2"},
     )
     with pytest.raises(InvitationError) as excinfo:
-        roles.delete_custom_role(MEMBERSHIP, "r1")
+        roles.delete_custom_role(MEMBERSHIP, role_id)
     assert "Reassign" in excinfo.value.message
 
 
@@ -129,9 +130,10 @@ def test_permissions_for_membership_uses_built_in_override(monkeypatch):
 
 
 def test_delete_built_in_role_rejected(monkeypatch):
-    monkeypatch.setattr(roles, "fetch_one", lambda sql, params=(): {"id": "r-qs", "key": "qs"})
+    role_id = "22222222-2222-2222-2222-222222222222"
+    monkeypatch.setattr(roles, "fetch_one", lambda sql, params=(): {"id": role_id, "key": "qs"})
     with pytest.raises(InvitationError) as excinfo:
-        roles.delete_custom_role(MEMBERSHIP, "r-qs")
+        roles.delete_custom_role(MEMBERSHIP, role_id)
     assert "cannot be deleted" in excinfo.value.message
 
 
@@ -147,6 +149,24 @@ def test_delete_built_in_role_by_plain_key_rejected_without_a_db_call(monkeypatc
     with pytest.raises(InvitationError) as excinfo:
         roles.delete_custom_role(MEMBERSHIP, "qs")
     assert "cannot be deleted" in excinfo.value.message
+
+
+def test_delete_custom_role_rejects_a_malformed_id_without_a_db_call(monkeypatch):
+    def fail_if_called(sql, params=()):
+        raise AssertionError("fetch_one should not be called for a non-uuid role id")
+
+    monkeypatch.setattr(roles, "fetch_one", fail_if_called)
+    with pytest.raises(InvitationError):
+        roles.delete_custom_role(MEMBERSHIP, "not-a-uuid")
+
+
+def test_update_custom_role_rejects_a_malformed_id_without_a_db_call(monkeypatch):
+    def fail_if_called(sql, params=()):
+        raise AssertionError("fetch_one should not be called for a non-uuid role id")
+
+    monkeypatch.setattr(roles, "fetch_one", fail_if_called)
+    with pytest.raises(InvitationError):
+        roles.update_role(MEMBERSHIP, "not-a-uuid", name="X", description=None, permissions=["boq:view"])
 
 
 def test_permissions_for_membership_uses_custom_row(monkeypatch):

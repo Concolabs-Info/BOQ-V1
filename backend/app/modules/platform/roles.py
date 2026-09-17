@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 
+from ...core.ids import is_valid_uuid
 from ...core.rbac import (
     ALL_PERMISSIONS,
     ASSIGNABLE_ROLES,
@@ -207,6 +208,8 @@ def upsert_built_in_role(
 
 
 def update_custom_role(membership: CompanyMembership, role_id: str, *, name: str, description: str | None, permissions: list[str]) -> dict:
+    if not is_valid_uuid(role_id):
+        raise InvitationError("invalid", "That role no longer exists.")
     current = fetch_one(
         "SELECT id, key, name FROM company_role WHERE id = %s AND company_id = %s",
         (role_id, membership.company_id),
@@ -267,6 +270,8 @@ def delete_custom_role(membership: CompanyMembership, role_id: str) -> None:
     # or Postgres raises InvalidTextRepresentation instead of a clean error.
     if is_built_in_role(role_id):
         raise InvitationError("invalid", "Built-in roles cannot be deleted.")
+    if not is_valid_uuid(role_id):
+        raise InvitationError("invalid", "That role no longer exists.")
     current = fetch_one(
         "SELECT id, key FROM company_role WHERE id = %s AND company_id = %s",
         (role_id, membership.company_id),

@@ -78,3 +78,21 @@ def test_remove_member_writes_former_member(monkeypatch):
     members.remove_member(ACTOR, MEMBERSHIP, "user_2")
     assert any("former_member" in sql for sql in recorded)
     assert any("DELETE FROM company_member" in sql for sql in recorded)
+
+
+def test_assign_to_project_rejects_a_malformed_project_id_without_a_db_call(monkeypatch):
+    def fail_if_called(sql, params=()):
+        raise AssertionError("fetch_one should not be called for a non-uuid project id")
+
+    monkeypatch.setattr(members, "fetch_one", fail_if_called)
+    with pytest.raises(InvitationError):
+        members.assign_to_project(MEMBERSHIP, "user_2", "not-a-uuid")
+
+
+def test_unassign_from_project_rejects_a_malformed_project_id_without_a_db_call(monkeypatch):
+    def fail_if_called(sql, params=()):
+        raise AssertionError("fetch_one should not be called for a non-uuid project id")
+
+    monkeypatch.setattr(members, "fetch_one", fail_if_called)
+    with pytest.raises(InvitationError):
+        members.unassign_from_project(MEMBERSHIP, "user_2", "not-a-uuid")

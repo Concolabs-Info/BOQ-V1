@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from ...core.auth import CurrentUser
 from ...core.clerk_client import ClerkApiError, create_invitation, pending_invitation_id_for_email, revoke_invitation
 from ...core.config import get_settings
+from ...core.ids import is_valid_uuid
 from ...core.rbac import ASSIGNABLE_ROLES, DEFAULT_INVITE_ROLE, is_custom_role_key
 from ...database.connection import execute, fetch_all, fetch_one, transaction
 from .membership import CompanyMembership, get_company_membership
@@ -428,6 +429,8 @@ def update_invite(
     role: str | None = None,
     workspace_ids: list[str] | None = None,
 ) -> dict:
+    if not is_valid_uuid(invitation_id):
+        raise InvitationError("invalid", "That invite is no longer pending.")
     row = fetch_one(
         "SELECT id, email, role, workspace_ids, status, expires_at, created_at "
         "FROM invitation WHERE id = %s AND company_id = %s",
@@ -477,6 +480,8 @@ def _revoke_clerk_invite(row: dict) -> None:
 
 
 def revoke_invite(membership: CompanyMembership, invitation_id: str) -> None:
+    if not is_valid_uuid(invitation_id):
+        raise InvitationError("invalid", "That invite is no longer pending.")
     row = fetch_one(
         "SELECT id, email, clerk_invitation_id, status FROM invitation WHERE id = %s AND company_id = %s",
         (invitation_id, membership.company_id),
@@ -491,6 +496,8 @@ def revoke_invite(membership: CompanyMembership, invitation_id: str) -> None:
 
 
 def resend_invite(user: CurrentUser, membership: CompanyMembership, invitation_id: str) -> SendInvitesResult:
+    if not is_valid_uuid(invitation_id):
+        raise InvitationError("invalid", "That invite is no longer pending.")
     row = fetch_one(
         "SELECT id, email, role, workspace_ids, status FROM invitation WHERE id = %s AND company_id = %s",
         (invitation_id, membership.company_id),

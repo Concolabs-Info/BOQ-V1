@@ -3,6 +3,7 @@ Tenancy and roles live in Postgres, not Clerk Orgs."""
 from __future__ import annotations
 
 from ...core.auth import CurrentUser
+from ...core.ids import is_valid_uuid
 from ...core.rbac import ROLE_LABELS
 from ...database.connection import execute, fetch_all, fetch_one, transaction
 from .invitations import InvitationError
@@ -102,6 +103,8 @@ def remove_member(actor: CurrentUser, membership: CompanyMembership, target_user
 
 
 def assign_to_project(membership: CompanyMembership, user_id: str, project_id: str) -> None:
+    if not is_valid_uuid(project_id):
+        raise InvitationError("invalid", "That project is not in this company.")
     member = fetch_one(
         "SELECT user_id FROM company_member WHERE company_id = %s AND user_id = %s",
         (membership.company_id, user_id),
@@ -122,6 +125,8 @@ def assign_to_project(membership: CompanyMembership, user_id: str, project_id: s
 
 
 def unassign_from_project(membership: CompanyMembership, user_id: str, project_id: str) -> None:
+    if not is_valid_uuid(project_id):
+        raise InvitationError("invalid", "That project is not in this company.")
     project = fetch_one(
         "SELECT id FROM project WHERE id = %s AND company_id = %s",
         (project_id, membership.company_id),

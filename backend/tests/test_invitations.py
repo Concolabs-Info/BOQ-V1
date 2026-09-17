@@ -18,6 +18,7 @@ GUEST = CurrentUser(
     terms_version=CURRENT_TERMS_VERSION,
 )
 MEMBERSHIP = CompanyMembership(company_id="c1", company_name="Acme", role="admin")
+INVITE_ID = "11111111-1111-1111-1111-111111111111"
 
 
 class FakeResult:
@@ -371,7 +372,7 @@ def test_revoke_invite_marks_row_and_calls_clerk(monkeypatch):
     seen = {}
     monkeypatch.setattr(invitations, "revoke_invitation", lambda invitation_id: seen.setdefault("id", invitation_id))
     monkeypatch.setattr(invitations, "execute", lambda sql, params=(): seen.setdefault("sql", sql))
-    invitations.revoke_invite(MEMBERSHIP, "inv-1")
+    invitations.revoke_invite(MEMBERSHIP, INVITE_ID)
     assert seen["id"] == "clerk_1"
     assert "revoked" in seen["sql"]
 
@@ -395,7 +396,7 @@ def test_resend_invite_sends_again(monkeypatch):
         "send_invites",
         lambda user, membership, rows: invitations.SendInvitesResult(sent=1, failures=[]),
     )
-    result = invitations.resend_invite(ADMIN, MEMBERSHIP, "inv-1")
+    result = invitations.resend_invite(ADMIN, MEMBERSHIP, INVITE_ID)
     assert result.sent == 1
 
 
@@ -433,7 +434,7 @@ def test_update_invite_sets_projects_and_role(monkeypatch):
     )
     result = invitations.update_invite(
         MEMBERSHIP,
-        "inv-1",
+        INVITE_ID,
         role="chief_estimator",
         workspace_ids=["p1", "p2"],
     )
@@ -454,7 +455,7 @@ def test_update_invite_clears_projects(monkeypatch):
         "execute",
         lambda sql, params=(): seen.update({"params": params}),
     )
-    result = invitations.update_invite(MEMBERSHIP, "inv-1", workspace_ids=[])
+    result = invitations.update_invite(MEMBERSHIP, INVITE_ID, workspace_ids=[])
     assert result["workspace_ids"] == []
     assert result["role"] == "qs"
     assert seen["params"][1] == "[]"
@@ -463,14 +464,41 @@ def test_update_invite_clears_projects(monkeypatch):
 def test_update_invite_rejects_admin_role(monkeypatch):
     monkeypatch.setattr(invitations, "fetch_one", lambda sql, params=(): _pending_row())
     with pytest.raises(invitations.InvitationError) as excinfo:
-        invitations.update_invite(MEMBERSHIP, "inv-1", role="admin")
+        invitations.update_invite(MEMBERSHIP, INVITE_ID, role="admin")
     assert "assignable" in excinfo.value.message.lower()
 
 
 def test_update_invite_rejects_missing(monkeypatch):
     monkeypatch.setattr(invitations, "fetch_one", lambda sql, params=(): None)
     with pytest.raises(invitations.InvitationError):
-        invitations.update_invite(MEMBERSHIP, "inv-1", role="qs")
+        invitations.update_invite(MEMBERSHIP, INVITE_ID, role="qs")
+
+
+def test_update_invite_rejects_a_malformed_id_without_a_db_call(monkeypatch):
+    def fail_if_called(sql, params=()):
+        raise AssertionError("fetch_one should not be called for a non-uuid invitation id")
+
+    monkeypatch.setattr(invitations, "fetch_one", fail_if_called)
+    with pytest.raises(invitations.InvitationError):
+        invitations.update_invite(MEMBERSHIP, "not-a-uuid", role="qs")
+
+
+def test_revoke_invite_rejects_a_malformed_id_without_a_db_call(monkeypatch):
+    def fail_if_called(sql, params=()):
+        raise AssertionError("fetch_one should not be called for a non-uuid invitation id")
+
+    monkeypatch.setattr(invitations, "fetch_one", fail_if_called)
+    with pytest.raises(invitations.InvitationError):
+        invitations.revoke_invite(MEMBERSHIP, "not-a-uuid")
+
+
+def test_resend_invite_rejects_a_malformed_id_without_a_db_call(monkeypatch):
+    def fail_if_called(sql, params=()):
+        raise AssertionError("fetch_one should not be called for a non-uuid invitation id")
+
+    monkeypatch.setattr(invitations, "fetch_one", fail_if_called)
+    with pytest.raises(invitations.InvitationError):
+        invitations.resend_invite(ADMIN, MEMBERSHIP, "not-a-uuid")
 
 
 def test_update_invite_rejects_expired(monkeypatch):
@@ -480,7 +508,7 @@ def test_update_invite_rejects_expired(monkeypatch):
         lambda sql, params=(): _pending_row(expires_at=datetime.now(timezone.utc) - timedelta(days=1)),
     )
     with pytest.raises(invitations.InvitationError) as excinfo:
-        invitations.update_invite(MEMBERSHIP, "inv-1", role="qs")
+        invitations.update_invite(MEMBERSHIP, INVITE_ID, role="qs")
     assert excinfo.value.code == "expired"
 
 

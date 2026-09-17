@@ -18,6 +18,7 @@ USER = CurrentUser(
 )
 ADMIN = CompanyMembership(company_id="c1", company_name="Acme", role="admin")
 PROJECT_MANAGER = CompanyMembership(company_id="c1", company_name="Acme", role="project_manager")
+PROJECT_ID = "11111111-1111-1111-1111-111111111111"
 QA_CHECKER = CompanyMembership(company_id="c1", company_name="Acme", role="qa_checker")
 
 
@@ -37,7 +38,7 @@ def test_boq_read_requires_view():
     assert access.required_permissions("GET", "/api/v1/projects/p1/boq") == ["boq:view"]
 
 
-def _request(path: str, method: str = "GET", project_id: str | None = "p1") -> Request:
+def _request(path: str, method: str = "GET", project_id: str | None = PROJECT_ID) -> Request:
     scope = {
         "type": "http",
         "asgi": {"spec_version": "2.3", "version": "3.0"},
@@ -110,9 +111,16 @@ def _request_with_params(path: str, path_params: dict) -> Request:
 
 
 def test_lookup_project_id_resolves_storey_id(monkeypatch):
-    monkeypatch.setattr("app.modules.pre.access.project_for_storey", lambda storey_id: "p1")
-    result = access._lookup_project_id(_request_with_params("/api/v1/storeys/s1", {"storey_id": "s1"}))
-    assert result == "p1"
+    storey_id = "22222222-2222-2222-2222-222222222222"
+    monkeypatch.setattr("app.modules.pre.access.project_for_storey", lambda storey_id: PROJECT_ID)
+    result = access._lookup_project_id(_request_with_params(f"/api/v1/storeys/{storey_id}", {"storey_id": storey_id}))
+    assert result == PROJECT_ID
+
+
+def test_lookup_project_id_rejects_a_malformed_id_as_not_found():
+    with pytest.raises(HTTPException) as excinfo:
+        access._lookup_project_id(_request_with_params("/api/v1/storeys/not-a-uuid", {"storey_id": "not-a-uuid"}))
+    assert excinfo.value.status_code == 404
 
 
 def test_ensure_project_company_blocks_a_project_from_another_company(monkeypatch):

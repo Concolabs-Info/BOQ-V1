@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request
 
 from ...core.auth import CurrentUser, get_current_user
+from ...core.ids import is_valid_uuid
 from ...core.rbac import is_project_scoped
 from ...database.connection import fetch_one
 from .membership import CompanyMembership, get_company_membership
@@ -62,6 +63,13 @@ def required_permissions(method: str, path: str) -> list[str]:
 
 def _lookup_project_id(request: Request) -> str | None:
     params = request.path_params
+    # A malformed id can never match a real (uuid) row, so treat it the same
+    # as "not found" here rather than letting it reach a uuid-typed column
+    # and raise an unhandled InvalidTextRepresentation.
+    for key in ("project_id", "viewport_id", "sheet_id", "storey_id", "item_id", "document_id", "render_id"):
+        if params.get(key) and not is_valid_uuid(str(params[key])):
+            raise HTTPException(status_code=404, detail="Project not found")
+
     if params.get("project_id"):
         return str(params["project_id"])
     from ...modules.pre.access import project_for_sheet, project_for_spec, project_for_storey, project_for_viewport
