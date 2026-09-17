@@ -7,6 +7,7 @@ import { ApiRequestError } from "@/shared/services/apiClient";
 import { createOnboardingCompany } from "../api";
 import { currencyForCountry } from "../countries";
 import { CountrySelect } from "./CountrySelect";
+import { FieldLabel } from "./formBits";
 
 export function CreateCompanyLocked({
   suggestedName,
@@ -58,17 +59,16 @@ export function CreateCompanyLocked({
       />
 
       <div className="flex flex-col gap-2">
-        <label htmlFor="country" className="flex items-center gap-1 text-sm font-medium text-slate-950">
+        <FieldLabel htmlFor="country" required>
           Country
-          <span className="text-red-600">*</span>
-        </label>
+        </FieldLabel>
         <CountrySelect id="country" value={country} onChange={setCountry} />
         <p className="text-xs text-slate-500">Currency: {currencyForCountry(country)}</p>
       </div>
 
       {formError ? <p className="text-sm text-red-600">{formError}</p> : null}
 
-      <Button type="submit" disabled={pending} className="h-11 w-full rounded-xl">
+      <Button type="submit" pending={pending} className="h-11 w-full rounded-xl">
         {pending ? "Creating…" : "Create company"}
       </Button>
     </form>

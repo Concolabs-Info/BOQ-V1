@@ -24,6 +24,7 @@ import {
 } from "../api";
 import { DEFAULT_INVITE_ROLE, roleLabel } from "../rbac";
 import { SettingsCard, SettingsStack } from "./SettingsCard";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Confirm =
   | { kind: "promote"; member: CompanyMember }
@@ -155,21 +156,23 @@ export function MembersManager() {
                 onChange={(event) => setInviteEmail(event.target.value)}
                 className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
               />
-              <select
-                value={inviteRole}
-                disabled={busy}
-                onChange={(event) => setInviteRole(event.target.value)}
-                className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-100 sm:w-52"
-              >
-                {(roles.filter((role) => role.key !== "admin").length
-                  ? roles.filter((role) => role.key !== "admin").map((role) => ({ key: role.key, name: role.name }))
-                  : [{ key: DEFAULT_INVITE_ROLE, name: roleLabel(DEFAULT_INVITE_ROLE) }]
-                ).map((role) => (
-                  <option key={role.key} value={role.key}>
-                    {role.name}
-                  </option>
-                ))}
-              </select>
+              <Select value={inviteRole} disabled={busy} onValueChange={(next) => setInviteRole(String(next))}>
+                <SelectTrigger className="sm:w-52">
+                  <SelectValue>
+                    {(roles.find((role) => role.key === inviteRole)?.name) ?? roleLabel(inviteRole)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {(roles.filter((role) => role.key !== "admin").length
+                    ? roles.filter((role) => role.key !== "admin").map((role) => ({ key: role.key, name: role.name }))
+                    : [{ key: DEFAULT_INVITE_ROLE, name: roleLabel(DEFAULT_INVITE_ROLE) }]
+                  ).map((role) => (
+                    <SelectItem key={role.key} value={role.key}>
+                      {role.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             {projects.length > 0 ? (
               <fieldset className="flex flex-col gap-2">
@@ -237,25 +240,31 @@ export function MembersManager() {
                       </td>
                       <td className="px-4 py-4">
                         {canManage && !isSelf ? (
-                          <select
+                          <Select
                             value={member.role}
                             disabled={busy}
-                            onChange={(event) => {
-                              const next = event.target.value;
-                              if (next === "admin") {
+                            onValueChange={(next) => {
+                              const nextRole = String(next);
+                              if (nextRole === "admin") {
                                 setConfirm({ kind: "promote", member });
                                 return;
                               }
-                              void run(() => updateMemberRole(member.id, next), "Role updated.");
+                              void run(() => updateMemberRole(member.id, nextRole), "Role updated.");
                             }}
-                            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-300"
                           >
-                            {roleOptions.map((role) => (
-                              <option key={role.key} value={role.key}>
-                                {role.name}
-                              </option>
-                            ))}
-                          </select>
+                            <SelectTrigger className="h-10">
+                              <SelectValue>
+                                {roleOptions.find((role) => role.key === member.role)?.name ?? member.role_label}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {roleOptions.map((role) => (
+                                <SelectItem key={role.key} value={role.key}>
+                                  {role.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         ) : (
                           <span className="text-slate-700">{member.role_label || roleLabel(member.role)}</span>
                         )}

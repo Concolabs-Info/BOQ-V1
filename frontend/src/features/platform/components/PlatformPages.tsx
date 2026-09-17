@@ -237,7 +237,7 @@ export function OrganizationDashboardPage() {
   }, []);
 
   return (
-    <PlatformShell title="Company" eyebrow="Settings" activeNavHref={appRoutes.organization}>
+    <SettingsShell title="Company">
       {isLoading ? <LoadingState label="Loading company" /> : null}
       {error ? <ErrorMessage message={error} /> : null}
       {!isLoading && !error ? (
@@ -258,7 +258,7 @@ export function OrganizationDashboardPage() {
           </div>
         </>
       ) : null}
-    </PlatformShell>
+    </SettingsShell>
   );
 }
 

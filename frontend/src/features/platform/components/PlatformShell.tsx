@@ -24,10 +24,8 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
   const nav = [
     { title: "Projects", href: appRoutes.projects },
     ...(projectId ? [{ title: "Project workspace", href: appRoutes.pre(projectId, "upload") }] : []),
-    { title: "Company", href: appRoutes.organizationSettings },
-    { title: "Members", href: appRoutes.organizationMembers },
-    { title: "Account", href: appRoutes.accountProfile },
   ];
+  const settingsActive = pathname.startsWith("/organization") || pathname.startsWith("/account");
 
   const navigation = <>
     <div className="flex items-center gap-3 px-1">
@@ -49,13 +47,25 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
       <p className="mt-1 text-xs leading-5 text-slate-500">Pre and production Takeoff modules are connected to the project API, PostgreSQL and drawing storage.</p><button type="button" onClick={() => { window.location.reload(); }} className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700">Reload project</button>
     </div>
   </>;
+  const settingsLink = (
+    <Link
+      href={appRoutes.organizationSettings}
+      onClick={() => setMobileOpen(false)}
+      className={settingsActive ? "flex items-center rounded-xl border-l-2 border-blue-600 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700" : "flex items-center rounded-xl border-l-2 border-transparent px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"}
+    >
+      Settings
+    </Link>
+  );
 
   return <main className="autoboq-ui h-dvh overflow-hidden bg-[#eef3f8] text-slate-950">
     <div className="flex h-full min-h-0 w-full">
       <aside aria-hidden={desktopCollapsed} className={`hidden shrink-0 overflow-hidden bg-white xl:block ${desktopCollapsed ? "w-0 border-r-0 border-transparent" : "w-[280px] border-r border-slate-200"}`}>
-        <div className={`h-full w-[280px] overflow-y-auto px-5 py-6 ${desktopCollapsed ? "pointer-events-none opacity-0" : "opacity-100"}`}>{navigation}</div>
+        <div className={`flex h-full w-[280px] flex-col px-5 py-6 ${desktopCollapsed ? "pointer-events-none opacity-0" : "opacity-100"}`}>
+          <div className="min-h-0 flex-1 overflow-y-auto">{navigation}</div>
+          <div className="mt-4 shrink-0 border-t border-slate-200 pt-4">{settingsLink}</div>
+        </div>
       </aside>
-      {mobileOpen ? <div className="fixed inset-0 z-50 xl:hidden"><button aria-label="Close navigation" className="absolute inset-0 bg-slate-950/35" onClick={() => setMobileOpen(false)} /><aside className="relative h-full w-[290px] overflow-y-auto border-r border-slate-200 bg-white px-5 py-6 shadow-2xl"><button className="ml-auto block rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600" onClick={() => setMobileOpen(false)}>Close</button><div className="mt-4">{navigation}</div></aside></div> : null}
+      {mobileOpen ? <div className="fixed inset-0 z-50 xl:hidden"><button aria-label="Close navigation" className="absolute inset-0 bg-slate-950/35" onClick={() => setMobileOpen(false)} /><aside className="relative flex h-full w-[290px] flex-col border-r border-slate-200 bg-white px-5 py-6 shadow-2xl"><button className="ml-auto block rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600" onClick={() => setMobileOpen(false)}>Close</button><div className="mt-4 min-h-0 flex-1 overflow-y-auto">{navigation}</div><div className="mt-4 shrink-0 border-t border-slate-200 pt-4">{settingsLink}</div></aside></div> : null}
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className={officeHeader ? "flex h-[58px] shrink-0 items-stretch gap-3 border-b border-slate-300 bg-[#f8f9fb] px-2" : `flex min-h-[72px] shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 ${flushContent ? "lg:px-7" : "lg:px-8"}`}>
           <div className={officeHeader ? "flex shrink-0 items-center gap-2 border-r border-slate-300 pr-3" : "flex shrink-0 items-center gap-3"}>

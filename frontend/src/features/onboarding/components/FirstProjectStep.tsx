@@ -50,7 +50,7 @@ export function FirstProjectStep() {
         error={error ?? undefined}
       />
       <div className="flex flex-col gap-3 sm:flex-row">
-        <Button type="submit" disabled={pending} className="h-11 rounded-xl sm:flex-1">
+        <Button type="submit" pending={pending} className="h-11 rounded-xl sm:flex-1">
           {pending ? "Creating…" : "Create project workspace"}
         </Button>
         <Button

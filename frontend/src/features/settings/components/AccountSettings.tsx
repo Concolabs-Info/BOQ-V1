@@ -77,7 +77,7 @@ export function AccountSecurityCard() {
     <SettingsStack>
       <SettingsCard
         title="Password and access"
-        description="Sign-in, password, and two-factor authentication stay with Clerk. Invitations also go through Clerk — not a separate email provider."
+        description="Sign-in, password, and two-factor authentication stay with Clerk. Invitations also go through Clerk, not a separate email provider."
         footer={<SignOutButton className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50" />}
       >
         <p className="text-sm leading-6 text-slate-500">

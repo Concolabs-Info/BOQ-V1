@@ -100,7 +100,7 @@ export function CompanySettingsForm() {
             value={name}
             disabled={disabled}
             onChange={(event) => setName(event.target.value)}
-            className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+            className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
           />
         </SettingsCard>
 
@@ -151,7 +151,7 @@ export function CompanySettingsForm() {
             value={taxId}
             disabled={disabled}
             onChange={(event) => setTaxId(event.target.value)}
-            className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+            className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
           />
         </SettingsCard>
 
@@ -172,7 +172,7 @@ export function CompanySettingsForm() {
             value={phone}
             disabled={disabled}
             onChange={(event) => setPhone(event.target.value)}
-            className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+            className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
           />
         </SettingsCard>
       </SettingsStack>
