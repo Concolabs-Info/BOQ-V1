@@ -9,6 +9,7 @@ from ...core.rbac import is_project_scoped
 from ...database.connection import fetch_one
 from .membership import CompanyMembership, get_company_membership
 from .roles import permissions_for_membership
+from .terms import has_accepted_current
 
 
 def required_permissions(method: str, path: str) -> list[str]:
@@ -119,6 +120,8 @@ def enforce_workspace_access(
     membership = get_company_membership(current_user.id)
     if membership is None:
         raise HTTPException(status_code=409, detail="onboarding_incomplete")
+    if not has_accepted_current(current_user.terms_accepted_at, current_user.terms_version):
+        raise HTTPException(status_code=403, detail={"code": "terms", "message": "Accept the current terms to continue."})
 
     request.state.current_user = current_user
     request.state.membership = membership

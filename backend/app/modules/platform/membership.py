@@ -11,6 +11,7 @@ from fastapi import Depends, HTTPException
 from ...core.auth import CurrentUser, get_current_user
 from ...core.rbac import is_built_in_role, permissions_for_role
 from ...database.connection import fetch_one
+from .terms import has_accepted_current
 
 COMPANY_LOGO_PATH = "/api/v1/platform/company/logo"
 
@@ -53,10 +54,16 @@ def membership_permissions(membership: CompanyMembership) -> list[str]:
     return permissions_for_membership(membership)
 
 
+def _require_current_terms(current_user: CurrentUser) -> None:
+    if not has_accepted_current(current_user.terms_accepted_at, current_user.terms_version):
+        raise HTTPException(status_code=403, detail={"code": "terms", "message": "Accept the current terms to continue."})
+
+
 def require_company(current_user: CurrentUser = Depends(get_current_user)) -> CompanyMembership:
     found = get_company_membership(current_user.id)
     if found is None:
         raise HTTPException(status_code=409, detail="onboarding_incomplete")
+    _require_current_terms(current_user)
     return found
 
 
@@ -65,6 +72,7 @@ def require_permission(permission: str) -> Callable[[CurrentUser], CompanyMember
         found = get_company_membership(current_user.id)
         if found is None:
             raise HTTPException(status_code=409, detail="onboarding_incomplete")
+        _require_current_terms(current_user)
         allowed = permissions_for_role(found.role) if is_built_in_role(found.role) else membership_permissions(found)
         if permission not in allowed:
             raise HTTPException(status_code=403, detail="insufficient_permission")

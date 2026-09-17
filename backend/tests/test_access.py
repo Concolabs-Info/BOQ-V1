@@ -1,12 +1,21 @@
+from datetime import datetime, timezone
+
 from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.core.auth import CurrentUser
 from app.modules.platform import access
 from app.modules.platform.membership import CompanyMembership
+from app.modules.platform.terms import CURRENT_TERMS_VERSION
 import pytest
 
-USER = CurrentUser(id="user_1", email="a@acme.com", full_name="A")
+USER = CurrentUser(
+    id="user_1",
+    email="a@acme.com",
+    full_name="A",
+    terms_accepted_at=datetime.now(timezone.utc),
+    terms_version=CURRENT_TERMS_VERSION,
+)
 ADMIN = CompanyMembership(company_id="c1", company_name="Acme", role="admin")
 PROJECT_MANAGER = CompanyMembership(company_id="c1", company_name="Acme", role="project_manager")
 QA_CHECKER = CompanyMembership(company_id="c1", company_name="Acme", role="qa_checker")

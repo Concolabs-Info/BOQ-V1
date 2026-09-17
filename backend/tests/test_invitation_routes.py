@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 
 from app.api.v1.routes import platform
@@ -6,9 +8,16 @@ from app.main import app
 from app.modules.platform import membership as membership_mod
 from app.modules.platform.invitations import ClaimResult, InvitationError, InviteFailure, SendInvitesResult
 from app.modules.platform.membership import CompanyMembership
+from app.modules.platform.terms import CURRENT_TERMS_VERSION
 
 client = TestClient(app)
-USER = CurrentUser(id="user_1", email="owner@acme.com", full_name="A")
+USER = CurrentUser(
+    id="user_1",
+    email="owner@acme.com",
+    full_name="A",
+    terms_accepted_at=datetime.now(timezone.utc),
+    terms_version=CURRENT_TERMS_VERSION,
+)
 ADMIN = CompanyMembership(company_id="c1", company_name="Acme", role="admin")
 QS = CompanyMembership(company_id="c1", company_name="Acme", role="qs")
 
