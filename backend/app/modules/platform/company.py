@@ -65,7 +65,7 @@ def normalize_company_logo(data: bytes) -> bytes:
     try:
         image = Image.open(BytesIO(data))
         image.load()
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         raise InvitationError("invalid", "Choose a PNG, JPEG, or WebP image.") from exc
     if image.format not in ALLOWED_FORMATS:
         raise InvitationError("invalid", "Choose a PNG, JPEG, or WebP image.")

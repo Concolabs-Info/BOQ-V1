@@ -43,6 +43,15 @@ def test_normalize_writes_a_png_thumbnail():
     assert max(image.size) <= 512
 
 
+def test_normalize_rejects_a_decompression_bomb_cleanly():
+    # A highly compressible, oversized image can stay under MAX_LOGO_BYTES
+    # while still tripping Pillow's decompression-bomb guard on load(). That
+    # guard raises Image.DecompressionBombError, which must be caught here
+    # like any other bad image, not surfaced as an unhandled 500.
+    with pytest.raises(InvitationError):
+        normalize_company_logo(_png((40000, 40000)))
+
+
 def test_save_company_logo_stores_png_and_returns_url(tmp_path, monkeypatch):
     membership = CompanyMembership(company_id="c1", company_name="Acme", role="admin")
     stored = {"logo_storage_key": None}
