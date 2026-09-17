@@ -12,14 +12,17 @@
     "test:auth": "node scripts/test-bearer-header.mjs"
   },
   "dependencies": {
+    "@base-ui/react": "^1.8.0",
     "@clerk/nextjs": "^7.9.4",
     "@tanstack/react-query": "^5.59.16",
     "@types/node": "^20.14.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
+    "country-flag-icons": "^1.6.20",
     "exceljs": "^4.4.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
+    "lucide-react": "^1.46.0",
     "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
