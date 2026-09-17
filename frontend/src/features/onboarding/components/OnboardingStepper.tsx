@@ -1,13 +1,21 @@
-import { FLOW_STEPS } from "../types";
+import { FLOW_STEPS, type FlowStep } from "../types";
 
 type StepState = "done" | "active" | "upcoming";
 
-export function OnboardingStepper({ current }: { current: number }) {
+export function OnboardingStepper({
+  current,
+  steps = FLOW_STEPS,
+}: {
+  current: number;
+  steps?: readonly FlowStep[];
+}) {
   return (
     <ol className="flex flex-col">
-      {FLOW_STEPS.map((step, index) => {
-        const state: StepState = index < current ? "done" : index === current ? "active" : "upcoming";
-        const last = index === FLOW_STEPS.length - 1;
+      {steps.map((step, index) => {
+        let state: StepState = "upcoming";
+        if (index < current) state = "done";
+        else if (index === current) state = "active";
+        const last = index === steps.length - 1;
         return (
           <li key={step.title} className="flex gap-3">
             <div className="flex flex-col items-center">

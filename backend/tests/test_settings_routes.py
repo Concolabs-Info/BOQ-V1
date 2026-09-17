@@ -266,8 +266,48 @@ def test_delete_company_route(monkeypatch):
     _auth()
     monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
     seen = {}
-    monkeypatch.setattr(platform, "delete_company", lambda membership, confirm_name: seen.update(confirm_name=confirm_name))
+    monkeypatch.setattr(
+        platform,
+        "delete_company",
+        lambda membership, confirm_name, actor_user_id=None: seen.update(
+            confirm_name=confirm_name,
+            actor_user_id=actor_user_id,
+        ),
+    )
     response = client.request("DELETE", "/api/v1/platform/company", json={"confirm_name": "Acme"})
     _clear()
     assert response.status_code == 204
     assert seen["confirm_name"] == "Acme"
+    assert seen["actor_user_id"] == "user_1"
+
+
+def test_members_can_read_company_without_manage(monkeypatch):
+    _auth()
+    monkeypatch.setattr(
+        membership_mod,
+        "get_company_membership",
+        lambda user_id: CompanyMembership(company_id="c1", company_name="Acme", role="project_manager"),
+    )
+    monkeypatch.setattr(
+        platform,
+        "get_company",
+        lambda membership: {
+            "id": "c1",
+            "name": "Acme",
+            "domain": None,
+            "registration_type": "PV",
+            "registration_number": "PV123",
+            "tax_id": None,
+            "country": "Sri Lanka",
+            "currency": "LKR",
+            "phone": None,
+            "logo_url": None,
+            "role": "project_manager",
+            "permissions": ["boq:view"],
+        },
+    )
+    response = client.get("/api/v1/platform/company")
+    _clear()
+    assert response.status_code == 200
+    assert response.json()["name"] == "Acme"
+    assert response.json()["role"] == "project_manager"

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { SignOutButton } from "@/features/auth/components/SignOutButton";
 import { BrandRailNote } from "@/features/onboarding/components/OnboardingStepper";
 import { OnboardingShell } from "@/features/onboarding/components/OnboardingShell";
-import { claimInvitation, getOnboardingStatus } from "@/features/onboarding/api";
+import { claimInvitation, currentTermsAccepted, getOnboardingStatus } from "@/features/onboarding/api";
 import { appRoutes } from "@/shared/constants/appRoutes";
 
 export default function OnboardingPendingPage() {
@@ -14,6 +14,11 @@ export default function OnboardingPendingPage() {
   useEffect(() => {
     let mounted = true;
     void (async () => {
+      if (!(await currentTermsAccepted())) {
+        if (!mounted) return;
+        router.replace(appRoutes.onboardingTerms);
+        return;
+      }
       try {
         const claimed = await claimInvitation();
         if (!mounted) return;

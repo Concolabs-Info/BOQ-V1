@@ -104,12 +104,25 @@ def test_delete_company_requires_the_typed_name(monkeypatch):
     assert excinfo.value.field == "confirmName"
 
 
+def test_delete_company_excludes_the_actor_from_displacement(monkeypatch):
+    monkeypatch.setattr(account, "fetch_one", lambda sql, params=(): {"name": "Acme"})
+    seen = {}
+    monkeypatch.setattr(
+        account,
+        "teardown_company",
+        lambda company_id, except_user_id=None: seen.update(company_id=company_id, except_user_id=except_user_id),
+    )
+    account.delete_company(ADMIN, "acme", actor_user_id="user_admin")
+    assert seen == {"company_id": "c1", "except_user_id": "user_admin"}
+
+
 def test_delete_company_removes_projects_then_the_company(monkeypatch):
     monkeypatch.setattr(account, "fetch_one", lambda sql, params=(): {"name": "Acme"})
     monkeypatch.setattr(account, "fetch_all", lambda sql, params=(): [])
     conn = FakeConn()
     patch_tx(monkeypatch, conn)
     account.delete_company(ADMIN, "acme")
+    assert any("INSERT INTO former_member" in sql for sql, _ in conn.calls)
     assert any("DELETE FROM project" in sql for sql, _ in conn.calls)
     assert any("DELETE FROM company" in sql for sql, _ in conn.calls)
 
@@ -133,12 +146,19 @@ def test_delete_my_account_last_admin_tears_down_then_deletes_clerk_user(monkeyp
         lambda user_id: {"kind": "last-admin", "company_name": "Acme", "other_members": 0},
     )
     monkeypatch.setattr(account, "get_company_membership", lambda user_id: ADMIN)
-    seen = {"teardown": False, "clerk": None}
-    monkeypatch.setattr(account, "teardown_company", lambda company_id: seen.update(teardown=True))
+    seen = {"teardown": False, "clerk": None, "except_user_id": None, "execute": []}
+    monkeypatch.setattr(
+        account,
+        "teardown_company",
+        lambda company_id, except_user_id=None: seen.update(teardown=True, except_user_id=except_user_id),
+    )
+    monkeypatch.setattr(account, "execute", lambda sql, params=(): seen["execute"].append(sql))
     monkeypatch.setattr(account, "delete_user", lambda user_id: seen.update(clerk=user_id))
     account.delete_my_account(USER, confirm_name="Acme")
     assert seen["teardown"] is True
+    assert seen["except_user_id"] == "user_1"
     assert seen["clerk"] == "user_1"
+    assert any("deleted_at" in sql for sql in seen["execute"])
 
 
 def test_delete_my_account_free_member_leaves_the_company(monkeypatch):
@@ -147,16 +167,34 @@ def test_delete_my_account_free_member_leaves_the_company(monkeypatch):
     conn = FakeConn()
     patch_tx(monkeypatch, conn)
     seen = {}
+    monkeypatch.setattr(account, "execute", lambda sql, params=(): seen.setdefault("sql", sql))
     monkeypatch.setattr(account, "delete_user", lambda user_id: seen.setdefault("clerk", user_id))
     account.delete_my_account(USER)
     assert any("DELETE FROM company_member" in sql for sql, _ in conn.calls)
     assert any("INSERT INTO former_member" in sql for sql, _ in conn.calls)
     assert seen["clerk"] == "user_1"
+    assert "deleted_at" in seen["sql"]
+
+
+def test_delete_my_account_aborts_when_leave_fails(monkeypatch):
+    monkeypatch.setattr(account, "account_deletion_status", lambda user_id: {"kind": "free"})
+    monkeypatch.setattr(account, "get_company_membership", lambda user_id: QS)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("former_member missing company_name")
+
+    monkeypatch.setattr(account, "_leave_company", boom)
+    monkeypatch.setattr(account, "execute", lambda sql, params=(): (_ for _ in ()).throw(AssertionError("must not soft-delete")))
+    monkeypatch.setattr(account, "delete_user", lambda user_id: (_ for _ in ()).throw(AssertionError("must not delete Clerk")))
+    with pytest.raises(InvitationError) as excinfo:
+        account.delete_my_account(USER)
+    assert "leave your company" in excinfo.value.message
 
 
 def test_delete_my_account_surfaces_clerk_failure(monkeypatch):
     monkeypatch.setattr(account, "account_deletion_status", lambda user_id: {"kind": "free"})
     monkeypatch.setattr(account, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(account, "execute", lambda sql, params=(): None)
 
     def boom(user_id):
         raise ClerkApiError("nope")

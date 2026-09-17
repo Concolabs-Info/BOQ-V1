@@ -42,8 +42,16 @@ export function InviteStep({
         onDone();
         return;
       }
+      const existingCount = result.existing_accounts?.length ?? 0;
+      let existingNote = "";
+      if (existingCount === 1) {
+        existingNote = " One person already has an account and will join when they next sign in.";
+      } else if (existingCount > 1) {
+        existingNote = " Some people already have accounts and will join when they next sign in.";
+      }
       setNote(
-        `Sent ${result.sent}. Problems: ` + result.failures.map((failure) => `${failure.email} (${failure.reason})`).join(", "),
+        `Sent ${result.sent}.${existingNote} Problems: ` +
+          result.failures.map((failure) => `${failure.email} (${failure.reason})`).join(", "),
       );
     } catch {
       setNote("Something went wrong sending invites. Please try again.");

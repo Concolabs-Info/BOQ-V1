@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/shared/components/Button";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { ApiRequestError } from "@/shared/services/apiClient";
-import { claimInvitation } from "../api";
+import { claimInvitation, currentTermsAccepted, declinePendingInvites } from "../api";
 import type { ExistingCompany } from "../types";
 import { SignedInAs } from "./SignedInAs";
 
@@ -25,6 +25,10 @@ export function AcceptInviteStep({
   async function join() {
     setPending(true);
     setError(null);
+    if (!(await currentTermsAccepted())) {
+      router.replace(appRoutes.onboardingTerms);
+      return;
+    }
     try {
       const result = await claimInvitation();
       if (result.claimed || result.already_member) {
@@ -47,7 +51,7 @@ export function AcceptInviteStep({
     if (started.current) return;
     started.current = true;
     void join();
-  }, []);
+  }, [router]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -75,6 +79,23 @@ export function AcceptInviteStep({
           You can join now. An owner can add you to a project from Settings after.
         </p>
       )}
+      <button
+        type="button"
+        className="self-start text-sm font-medium text-slate-500 underline underline-offset-2 hover:text-slate-950"
+        disabled={pending}
+        onClick={() => {
+          void (async () => {
+            try {
+              await declinePendingInvites();
+            } catch {
+              // Local onboarding can continue even if revoke already happened.
+            }
+            router.replace(`${appRoutes.onboarding}?founder=1`);
+          })();
+        }}
+      >
+        Set up a new company with this account instead
+      </button>
       <SignedInAs />
     </div>
   );

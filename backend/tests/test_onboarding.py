@@ -51,7 +51,7 @@ def test_currency_defaults_to_usd():
 
 def test_status_gmail_is_manual_create(monkeypatch):
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
-    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "former_membership", lambda user_id: None)
     monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
     monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: None)
     status = onboarding.onboarding_status(GMAIL)
@@ -62,7 +62,7 @@ def test_status_gmail_is_manual_create(monkeypatch):
 
 def test_status_work_email_without_company_locks_domain(monkeypatch):
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
-    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "former_membership", lambda user_id: None)
     monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
     monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: None)
     status = onboarding.onboarding_status(USER)
@@ -74,7 +74,7 @@ def test_status_work_email_without_company_locks_domain(monkeypatch):
 def test_status_work_email_with_company_asks_to_join(monkeypatch):
     existing = {"id": "c1", "name": "Acme", "domain": "acme.com"}
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
-    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "former_membership", lambda user_id: None)
     monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
     monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: existing)
     status = onboarding.onboarding_status(USER)
@@ -85,7 +85,7 @@ def test_status_work_email_with_company_asks_to_join(monkeypatch):
 def test_status_founder_escape_is_manual(monkeypatch):
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
     monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
-    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: "Old Co")
+    monkeypatch.setattr(onboarding, "former_membership", lambda user_id: {"name": "Old Co", "reason": "company_deleted"})
     status = onboarding.onboarding_status(USER, as_founder=True)
     assert status.path == "CREATE_MANUAL"
     assert status.former_company_name is None
@@ -94,10 +94,21 @@ def test_status_founder_escape_is_manual(monkeypatch):
 def test_status_removed_member_is_called_out(monkeypatch):
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
     monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
-    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: "Old Co")
+    monkeypatch.setattr(onboarding, "former_membership", lambda user_id: {"name": "Old Co", "reason": "removed"})
     status = onboarding.onboarding_status(USER)
     assert status.path == "REMOVED"
     assert status.former_company_name == "Old Co"
+    assert status.former_reason == "removed"
+
+
+def test_status_company_deleted_is_called_out(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
+    monkeypatch.setattr(onboarding, "former_membership", lambda user_id: {"name": "Acme", "reason": "company_deleted"})
+    status = onboarding.onboarding_status(USER)
+    assert status.path == "REMOVED"
+    assert status.former_company_name == "Acme"
+    assert status.former_reason == "company_deleted"
 
 
 def test_status_member_without_project_continues_wizard(monkeypatch):
@@ -147,7 +158,7 @@ def test_status_pending_invite_is_accept_invite(monkeypatch):
 
 def test_status_pending_invite_beats_removed_and_join(monkeypatch):
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
-    monkeypatch.setattr(onboarding, "former_company_name", lambda user_id: "Old Co")
+    monkeypatch.setattr(onboarding, "former_membership", lambda user_id: {"name": "Old Co", "reason": "removed"})
     monkeypatch.setattr(
         onboarding,
         "pending_invite_for_email",
@@ -161,6 +172,16 @@ def test_status_pending_invite_beats_removed_and_join(monkeypatch):
     )
     status = onboarding.onboarding_status(USER, as_founder=True)
     assert status.path == "ACCEPT_INVITE"
+    assert status.former_company_name is None
+
+
+def test_status_skip_removed_uses_domain_path(monkeypatch):
+    monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "pending_invite_for_email", lambda email: None)
+    monkeypatch.setattr(onboarding, "former_membership", lambda user_id: {"name": "Old Co", "reason": "company_deleted"})
+    monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: None)
+    status = onboarding.onboarding_status(USER, skip_removed=True)
+    assert status.path == "CREATE_WITH_DOMAIN_LOCK"
     assert status.former_company_name is None
 
 
@@ -195,6 +216,9 @@ def test_create_company_manual_requires_registration_type(monkeypatch):
 def test_create_company_inserts_company_and_admin_member(monkeypatch):
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
     monkeypatch.setattr(onboarding, "find_company_by_domain", lambda domain: None)
+    monkeypatch.setattr(onboarding, "pending_invite_rows_for_email", lambda email: [{"id": "inv-1", "email": email, "clerk_invitation_id": "clerk_1"}])
+    seen = {"clerk": None}
+    monkeypatch.setattr(onboarding, "_revoke_clerk_invite", lambda row: seen.update(clerk=row["id"]))
     conn = FakeConn(company={"id": "c9", "name": "Acme"})
     patch_tx(monkeypatch, conn)
 
@@ -204,10 +228,14 @@ def test_create_company_inserts_company_and_admin_member(monkeypatch):
     assert any("INSERT INTO company_member" in sql for sql, _params in conn.calls)
     member_params = next(params for sql, params in conn.calls if "INSERT INTO company_member" in sql)
     assert member_params == ("c9", "user_1", "admin")
+    assert any("DELETE FROM former_member" in sql for sql, _params in conn.calls)
+    assert any("UPDATE invitation SET status = 'revoked'" in sql for sql, _params in conn.calls)
+    assert seen["clerk"] == "inv-1"
 
 
 def test_create_company_none_registration_flags_duplicate_review(monkeypatch):
     monkeypatch.setattr(onboarding, "get_company_membership", lambda user_id: None)
+    monkeypatch.setattr(onboarding, "pending_invite_rows_for_email", lambda email: [])
     conn = FakeConn()
     patch_tx(monkeypatch, conn)
 
@@ -235,6 +263,7 @@ def test_create_company_maps_domain_unique_violation(monkeypatch):
         return {"id": "c1", "name": "Acme", "domain": "acme.com"}
 
     monkeypatch.setattr(onboarding, "find_company_by_domain", find)
+    monkeypatch.setattr(onboarding, "pending_invite_rows_for_email", lambda email: [])
     conn = FakeConn(fail=onboarding.UniqueViolation('duplicate key value violates unique constraint "uq_company_domain_ci"'))
     patch_tx(monkeypatch, conn)
     with pytest.raises(onboarding.OnboardingError) as excinfo:
@@ -269,6 +298,16 @@ def test_create_first_project_inserts_project_and_member(monkeypatch):
     project_params = next(params for sql, params in conn.calls if "INSERT INTO project " in sql)
     assert project_params == ("Tower", "P-01", "City", "Colombo", "High-rise", "c1", USER.id)
     assert any("INSERT INTO project_member" in sql for sql, _params in conn.calls)
+
+
+def test_former_membership_uses_snapshot_when_company_is_gone(monkeypatch):
+    monkeypatch.setattr(
+        onboarding,
+        "fetch_one",
+        lambda sql, params=(): {"name": "Acme", "reason": "company_deleted"},
+    )
+    assert onboarding.former_membership("user_1") == {"name": "Acme", "reason": "company_deleted"}
+    assert onboarding.former_company_name("user_1") == "Acme"
 
 
 def test_create_first_project_requires_name(monkeypatch):

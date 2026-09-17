@@ -74,6 +74,45 @@ def test_upsert_app_user_returns_the_cached_row_without_calling_clerk(monkeypatc
     assert result == auth.CurrentUser(id="user_1", email="a@example.com", full_name="A")
 
 
+def test_upsert_app_user_keeps_deleted_at_when_clerk_user_is_gone(monkeypatch):
+    monkeypatch.setattr(
+        auth,
+        "fetch_one",
+        lambda sql, params=(): {
+            "id": "user_1",
+            "email": "a@example.com",
+            "full_name": "A",
+            "deleted_at": "2026-01-01",
+        },
+    )
+    monkeypatch.setattr(auth, "execute", lambda sql, params=(): (_ for _ in ()).throw(AssertionError("must not undelete")))
+    monkeypatch.setattr(auth, "fetch_clerk_user", lambda user_id: (_ for _ in ()).throw(ClerkApiError("Clerk API returned 404")))
+    with pytest.raises(ClerkApiError):
+        auth.upsert_app_user("user_1")
+
+
+def test_upsert_app_user_restores_when_clerk_still_has_the_user(monkeypatch):
+    monkeypatch.setattr(
+        auth,
+        "fetch_one",
+        lambda sql, params=(): {
+            "id": "user_1",
+            "email": "old@example.com",
+            "full_name": "A",
+            "deleted_at": "2026-01-01",
+            "terms_accepted_at": None,
+            "terms_version": None,
+        },
+    )
+    monkeypatch.setattr(auth, "fetch_clerk_user", lambda user_id: ClerkProfile(email="a@example.com", full_name="A"))
+    seen = {}
+    monkeypatch.setattr(auth, "execute", lambda sql, params=(): seen.update(sql=sql, params=params))
+    result = auth.upsert_app_user("user_1")
+    assert result.email == "a@example.com"
+    assert "deleted_at = NULL" in seen["sql"]
+    assert seen["params"] == ("a@example.com", "A", "user_1")
+
+
 def test_upsert_app_user_fetches_and_stores_a_new_user(monkeypatch):
     monkeypatch.setattr(auth, "fetch_one", lambda sql, params=(): None)
     monkeypatch.setattr(auth, "fetch_clerk_user", lambda user_id: ClerkProfile(email="b@example.com", full_name="B"))
@@ -124,4 +163,24 @@ def test_get_current_user_treats_a_deleted_clerk_user_as_unauthenticated(monkeyp
 
     with pytest.raises(HTTPException) as excinfo:
         auth.get_current_user(authorization="Bearer sometoken")
+    assert excinfo.value.status_code == 401
+
+
+def test_get_current_user_treats_a_soft_deleted_row_as_unauthenticated(monkeypatch):
+    class FakeSettings:
+        clerk_jwt_key = "fake-key"
+        clerk_issuer = ISSUER
+
+    monkeypatch.setattr(auth, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(auth, "verify_clerk_token", lambda token, jwt_key, issuer: {"sub": "user_1"})
+    monkeypatch.setattr(
+        auth,
+        "fetch_one",
+        lambda sql, params=(): {"id": "user_1", "email": "a@example.com", "full_name": "A", "deleted_at": "2026-01-01"},
+    )
+    monkeypatch.setattr(auth, "fetch_clerk_user", lambda user_id: (_ for _ in ()).throw(ClerkApiError("Clerk API returned 404")))
+    monkeypatch.setattr(auth, "execute", lambda sql, params=(): (_ for _ in ()).throw(AssertionError("must not undelete")))
+
+    with pytest.raises(HTTPException) as excinfo:
+        auth.get_current_user(authorization="Bearer leftover")
     assert excinfo.value.status_code == 401

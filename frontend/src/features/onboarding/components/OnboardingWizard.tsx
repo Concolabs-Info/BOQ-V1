@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { LoadingState } from "@/shared/components/LoadingState";
 import { appRoutes } from "@/shared/constants/appRoutes";
+import { fetchTermsMeta, hasAcceptedTerms } from "@/features/legal/termsClient";
+import { getPlatformContext } from "@/features/platform/services/platformService";
 import { getOnboardingStatus } from "../api";
 import { FLOW_STEPS, WIZARD_STEP_OFFSET, type CreatedProject, type OnboardingStatus, type WizardStep } from "../types";
 import { AcceptInviteStep } from "./AcceptInviteStep";
@@ -32,12 +34,18 @@ export function OnboardingWizard() {
 
   useEffect(() => {
     let mounted = true;
-    getOnboardingStatus(asFounder)
-      .then((next) => {
+    getOnboardingStatus(asFounder, afterDelete)
+      .then(async (next) => {
         if (!mounted) return;
         setStatus(next);
         if (next.path === "DONE") {
-          router.replace(appRoutes.projects);
+          try {
+            const [context, meta] = await Promise.all([getPlatformContext(), fetchTermsMeta()]);
+            if (!mounted) return;
+            router.replace(hasAcceptedTerms(context, meta) ? appRoutes.projects : appRoutes.onboardingTerms);
+          } catch {
+            if (mounted) router.replace(appRoutes.onboardingTerms);
+          }
           return;
         }
         if (next.path === "CONTINUE_WIZARD") setStep("project");
@@ -48,7 +56,7 @@ export function OnboardingWizard() {
     return () => {
       mounted = false;
     };
-  }, [asFounder, router]);
+  }, [asFounder, afterDelete, router]);
 
   if (error) {
     return (
@@ -67,7 +75,7 @@ export function OnboardingWizard() {
   }
 
   if (status.path === "REMOVED" && status.former_company_name && !afterDelete && !asFounder) {
-    return <RemovedFromCompany companyName={status.former_company_name} />;
+    return <RemovedFromCompany companyName={status.former_company_name} reason={status.former_reason} />;
   }
 
   if (status.path === "ACCEPT_INVITE") {
@@ -127,18 +135,18 @@ export function OnboardingWizard() {
           setFirstProject(project);
           setStep("invite");
         }}
-        onSkip={() => router.replace(appRoutes.projects)}
+        onSkip={() => router.replace(`${appRoutes.onboardingTerms}?from=setup`)}
       />
     );
   } else if (step === "invite") {
     heading = "Invite your team";
     sub = firstProject
-      ? `Optional. They'll get an email to join, and they'll only see ${firstProject.name} unless you change that.`
-      : "Optional. They'll get an email to join. You can add them to a project later from Settings.";
+      ? `Optional. People without an account get an email. Anyone who already has a Quanto account joins the next time they sign in, and they'll only see ${firstProject.name} unless you change that.`
+      : "Optional. People without an account get an email. Anyone who already has a Quanto account joins the next time they sign in.";
     body = (
       <InviteStep
         projects={firstProject ? [{ id: firstProject.id, name: firstProject.name }] : []}
-        onDone={() => router.replace(appRoutes.projects)}
+        onDone={() => router.replace(`${appRoutes.onboardingTerms}?from=setup`)}
       />
     );
   }

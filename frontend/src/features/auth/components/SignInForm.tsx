@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
-import { claimInvitationWithSession } from "@/features/onboarding/api";
 import { Button } from "@/shared/components/Button";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { AuthField } from "./AuthField";
@@ -29,7 +28,7 @@ export function SignInForm({
 }) {
   const clerk = useClerk();
   const ready = clerk.loaded;
-  const destination = invitationTicket ? appRoutes.projects : (redirectUrl ?? appRoutes.projects);
+  const destination = invitationTicket ? appRoutes.onboardingTerms : (redirectUrl ?? appRoutes.projects);
   const needsNoSession = Boolean(invitationTicket) || switchAccount;
 
   const [mode, setMode] = useState<Mode>("password");
@@ -51,9 +50,6 @@ export function SignInForm({
 
   async function enterSession(createdSessionId: string) {
     await clerk.setActive({ session: createdSessionId });
-    if (invitationTicket) {
-      await claimInvitationWithSession(() => clerk.session?.getToken() ?? Promise.resolve(null));
-    }
     land();
   }
 

@@ -35,7 +35,8 @@ export function CompanyDeleteCard({ companyName }: { companyName: string }) {
         <>
           This permanently removes <SettingsMark>the company</SettingsMark>,{" "}
           <SettingsMark>every project</SettingsMark>, and all memberships and invites. Drawings and takeoff work for this
-          company <SettingsMark>cannot be recovered</SettingsMark>.
+          company <SettingsMark>cannot be recovered</SettingsMark>. Other members keep their Quanto accounts, without a
+          role, and can be invited to a new company.
         </>
       }
       footerHint={

@@ -21,6 +21,7 @@ export type OnboardingStatus = {
   suggested_name: string;
   existing_company: ExistingCompany | null;
   former_company_name: string | null;
+  former_reason?: string | null;
   has_company: boolean;
   has_project: boolean;
   pending_project_count?: number;
@@ -37,11 +38,22 @@ export type CreatedProject = {
   name: string;
 };
 
-export const FLOW_STEPS = [
+export type FlowStep = {
+  title: string;
+  blurb: string;
+};
+
+export const FLOW_STEPS: readonly FlowStep[] = [
   { title: "Account", blurb: "Your name, email and password" },
   { title: "Company", blurb: "Name and country" },
   { title: "Project", blurb: "Your first job" },
   { title: "Invite team", blurb: "Optional teammates" },
-] as const;
+  { title: "Terms", blurb: "Read and agree to continue" },
+];
+
+export const INVITE_FLOW_STEPS: readonly FlowStep[] = [
+  { title: "Account", blurb: "Your name, email and password" },
+  { title: "Terms", blurb: "Read and agree to continue" },
+];
 
 export const WIZARD_STEP_OFFSET = 1;

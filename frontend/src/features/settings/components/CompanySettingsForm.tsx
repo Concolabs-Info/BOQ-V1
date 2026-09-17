@@ -135,17 +135,35 @@ export function CompanySettingsForm() {
     }
   }
 
+  let registrationLabel = "Not registered yet";
+  if (company.registration_type === "PV") {
+    registrationLabel = "Private limited (PV)";
+  } else if (company.registration_type === "BR") {
+    registrationLabel = "Business registration (BR)";
+  }
+
   return (
     <SettingsStack>
-      <form className="flex flex-col gap-5" onSubmit={(event) => void submit(event)}>
-        {error ? <ErrorMessage message={error} /> : null}
-        {note ? <p className="text-sm font-medium text-emerald-700">{note}</p> : null}
-        {!canManage ? <p className="text-sm text-slate-500">Ask an admin to change company details.</p> : null}
+      {error ? <ErrorMessage message={error} /> : null}
+      {note ? <p className="text-sm font-medium text-emerald-700">{note}</p> : null}
+      {!canManage ? (
+        <p className="text-sm leading-6 text-slate-500">You can view these details. Ask an owner if something should change.</p>
+      ) : null}
 
+      <form
+        className="flex flex-col gap-5"
+        onSubmit={(event) => {
+          if (!canManage) {
+            event.preventDefault();
+            return;
+          }
+          void submit(event);
+        }}
+      >
         <SettingsCard
           title="Company photo"
           description="Shown on the sidebar in place of the default mark."
-          footerHint="Square images work best. PNG, JPEG, or WebP, up to 5 MB."
+          footerHint={canManage ? "Square images work best. PNG, JPEG, or WebP, up to 5 MB." : undefined}
           footer={
             canManage ? (
               <div className="flex flex-wrap gap-2">
@@ -178,7 +196,7 @@ export function CompanySettingsForm() {
           title="Company name"
           titleId="co-name-heading"
           description="The name people see on invitations, the sidebar, and exports."
-          footerHint="Use the trading name your drawings are issued under."
+          footerHint={canManage ? "Use the trading name your drawings are issued under." : undefined}
           footer={
             canManage ? (
               <Button type="submit" className="rounded-xl" disabled={disabled}>
@@ -187,15 +205,19 @@ export function CompanySettingsForm() {
             ) : undefined
           }
         >
-          <input
-            id="co-name"
-            required
-            aria-labelledby="co-name-heading"
-            value={name}
-            disabled={disabled}
-            onChange={(event) => setName(event.target.value)}
-            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-          />
+          {canManage ? (
+            <input
+              id="co-name"
+              required
+              aria-labelledby="co-name-heading"
+              value={name}
+              disabled={disabled}
+              onChange={(event) => setName(event.target.value)}
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+            />
+          ) : (
+            <ReadValue>{name}</ReadValue>
+          )}
         </SettingsCard>
 
         <SettingsCard
@@ -211,22 +233,22 @@ export function CompanySettingsForm() {
             ) : undefined
           }
         >
-          <CountrySelect
-            id="co-country"
-            aria-labelledby="co-country-heading"
-            value={country}
-            disabled={disabled}
-            onChange={setCountry}
-          />
+          {canManage ? (
+            <CountrySelect
+              id="co-country"
+              aria-labelledby="co-country-heading"
+              value={country}
+              disabled={disabled}
+              onChange={setCountry}
+            />
+          ) : (
+            <ReadValue>{country}</ReadValue>
+          )}
         </SettingsCard>
 
         <SettingsCard title="Registration" description="How the company was registered during onboarding.">
           <p className="text-sm text-slate-700">
-            {company.registration_type === "PV"
-              ? "Private limited (PV)"
-              : company.registration_type === "BR"
-                ? "Business registration (BR)"
-                : "Not registered yet"}
+            {registrationLabel}
             {company.registration_number ? ` · ${company.registration_number}` : ""}
           </p>
           {company.domain ? <p className="mt-2 text-sm text-slate-500">Work email domain: {company.domain}</p> : null}
@@ -244,15 +266,19 @@ export function CompanySettingsForm() {
             ) : undefined
           }
         >
-          <input
-            id="co-tax"
-            aria-labelledby="co-tax-heading"
-            value={taxId}
-            disabled={disabled}
-            onChange={(event) => setTaxId(event.target.value)}
-            placeholder="TIN or VAT number"
-            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-          />
+          {canManage ? (
+            <input
+              id="co-tax"
+              aria-labelledby="co-tax-heading"
+              value={taxId}
+              disabled={disabled}
+              onChange={(event) => setTaxId(event.target.value)}
+              placeholder="TIN or VAT number"
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+            />
+          ) : (
+            <ReadValue>{taxId}</ReadValue>
+          )}
         </SettingsCard>
 
         <SettingsCard
@@ -267,18 +293,28 @@ export function CompanySettingsForm() {
             ) : undefined
           }
         >
-          <input
-            id="co-phone"
-            type="tel"
-            aria-labelledby="co-phone-heading"
-            value={phone}
-            disabled={disabled}
-            onChange={(event) => setPhone(event.target.value)}
-            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-          />
+          {canManage ? (
+            <input
+              id="co-phone"
+              type="tel"
+              aria-labelledby="co-phone-heading"
+              value={phone}
+              disabled={disabled}
+              onChange={(event) => setPhone(event.target.value)}
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+            />
+          ) : (
+            <ReadValue>{phone}</ReadValue>
+          )}
         </SettingsCard>
       </form>
       {canDelete ? <CompanyDeleteCard companyName={company.name} /> : null}
     </SettingsStack>
   );
+}
+
+function ReadValue({ children }: { children?: string | null }) {
+  const value = (children || "").trim();
+  if (!value) return <p className="text-sm leading-6 text-slate-500">Not set</p>;
+  return <p className="text-sm leading-6 text-slate-950">{value}</p>;
 }

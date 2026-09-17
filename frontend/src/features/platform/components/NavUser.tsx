@@ -4,6 +4,7 @@ import { Menu } from "@base-ui/react/menu";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { signOutAndGo } from "@/features/auth/hard-navigate";
 import { cn } from "@/shared/lib/cn";
+import { useAccess } from "@/features/platform/hooks/useAccess";
 
 export function ClerkAvatar({
   imageUrl,
@@ -50,10 +51,12 @@ function photoSrc(imageUrl?: string | null, cacheKey?: string | number | Date | 
 export function NavUser() {
   const { user, isLoaded } = useUser();
   const clerk = useClerk();
+  const { roleLabel } = useAccess();
   if (!isLoaded || !user) return null;
 
   const email = user.primaryEmailAddress?.emailAddress ?? "";
   const name = `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || email || "Your profile";
+  const subtitle = roleLabel || email;
 
   return (
     <Menu.Root>
@@ -61,7 +64,7 @@ export function NavUser() {
         <ClerkAvatar imageUrl={user.imageUrl} cacheKey={user.updatedAt} name={name} email={email} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-slate-950">{name}</span>
-          {email ? <span className="block truncate text-xs text-slate-500">{email}</span> : null}
+          {subtitle ? <span className="block truncate text-xs text-slate-500">{subtitle}</span> : null}
         </span>
         <ChevronsUpDown className="size-4 shrink-0 text-slate-400" />
       </Menu.Trigger>
@@ -72,6 +75,7 @@ export function NavUser() {
               <ClerkAvatar imageUrl={user.imageUrl} cacheKey={user.updatedAt} name={name} email={email} />
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-slate-950">{name}</p>
+                {roleLabel ? <p className="truncate text-xs text-slate-500">{roleLabel}</p> : null}
                 {email ? <p className="truncate text-xs text-slate-500">{email}</p> : null}
               </div>
             </div>

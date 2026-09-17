@@ -9,16 +9,24 @@ import { appRoutes } from "@/shared/constants/appRoutes";
 export function SettingsAccessGuard({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { ready, permissions } = useAccess();
+  const { ready, permissions, hasCompany } = useAccess();
 
   const section = settingsSectionFromPath(pathname);
-  const blocked = ready && section !== null && !canAccessSettingsSection(permissions, section);
+  const privileged = section !== null && section !== "account";
+  const allowed = !privileged || (ready && canAccessSettingsSection(permissions, section, { hasCompany }));
 
   useEffect(() => {
-    if (!blocked) return;
+    if (!ready || !privileged || allowed) return;
+    if (section === "companyOverview" && hasCompany) {
+      router.replace(appRoutes.organizationSettings);
+      return;
+    }
     router.replace(appRoutes.accountProfile);
-  }, [blocked, router]);
+  }, [allowed, hasCompany, privileged, ready, router, section]);
 
-  if (blocked) return null;
+  if (!allowed) {
+    return <div className="min-h-dvh bg-[#eef3f8]" aria-label="Loading settings" />;
+  }
+
   return children;
 }

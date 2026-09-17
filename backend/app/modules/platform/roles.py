@@ -290,11 +290,18 @@ def delete_custom_role(membership: CompanyMembership, role_id: str) -> None:
     execute("DELETE FROM company_role WHERE id = %s AND company_id = %s", (role_id, membership.company_id))
 
 
-def label_for_role(company_id: str, role: str) -> str:
+def role_identity(company_id: str, role: str) -> tuple[str, str]:
     found = custom_role_row(company_id, role)
     if found:
-        return found["name"]
-    return role_label(role)
+        return str(found["name"]), str(found["description"] or "")
+    if is_built_in_role(role):
+        return ROLE_LABELS[role], ROLE_DESCRIPTIONS[role]
+    return role_label(role), ""
+
+
+def label_for_role(company_id: str, role: str) -> str:
+    name, _description = role_identity(company_id, role)
+    return name
 
 
 # Keep a named export used by older imports.
@@ -308,6 +315,7 @@ __all__ = [
     "known_role",
     "label_for_role",
     "list_roles",
+    "role_identity",
     "permissions_for_membership",
     "update_custom_role",
     "update_role",

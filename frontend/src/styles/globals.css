@@ -71,6 +71,41 @@ select {
   border-radius: 20px;
 }
 
+.terms-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #c5ced9 transparent;
+}
+
+.terms-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.terms-scroll::-webkit-scrollbar-track {
+  margin-block: 12px;
+  background: transparent;
+}
+
+.terms-scroll::-webkit-scrollbar-thumb {
+  background: #c5ced9;
+  border-radius: 999px;
+}
+
+.terms-scroll::-webkit-scrollbar-button,
+.terms-scroll::-webkit-scrollbar-button:start:decrement,
+.terms-scroll::-webkit-scrollbar-button:end:increment,
+.terms-scroll::-webkit-scrollbar-button:vertical:start:increment,
+.terms-scroll::-webkit-scrollbar-button:vertical:end:decrement {
+  display: none;
+  height: 0;
+  width: 0;
+  background: transparent;
+}
+
+.terms-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .toolbar-section {
   display: inline-flex;
   align-items: center;

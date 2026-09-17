@@ -27,7 +27,7 @@ def test_status_returns_join_path(monkeypatch):
     monkeypatch.setattr(
         platform,
         "onboarding_status",
-        lambda user, as_founder=False: OnboardingStatus(
+        lambda user, as_founder=False, skip_removed=False: OnboardingStatus(
             path="REQUEST_TO_JOIN",
             domain="acme.com",
             suggested_name="Acme",
@@ -50,8 +50,9 @@ def test_status_passes_founder_flag(monkeypatch):
     _auth()
     seen = {}
 
-    def fake_status(user, as_founder=False):
+    def fake_status(user, as_founder=False, skip_removed=False):
         seen["as_founder"] = as_founder
+        seen["skip_removed"] = skip_removed
         return OnboardingStatus(
             path="CREATE_MANUAL",
             domain=None,
@@ -67,7 +68,34 @@ def test_status_passes_founder_flag(monkeypatch):
     _clear()
     assert response.status_code == 200
     assert seen["as_founder"] is True
+    assert seen["skip_removed"] is True
     assert response.json()["path"] == "CREATE_MANUAL"
+
+
+def test_status_passes_after_deleted_flag(monkeypatch):
+    _auth()
+    seen = {}
+
+    def fake_status(user, as_founder=False, skip_removed=False):
+        seen["as_founder"] = as_founder
+        seen["skip_removed"] = skip_removed
+        return OnboardingStatus(
+            path="CREATE_WITH_DOMAIN_LOCK",
+            domain="acme.com",
+            suggested_name="Acme",
+            existing_company=None,
+            former_company_name=None,
+            has_company=False,
+            has_project=False,
+        )
+
+    monkeypatch.setattr(platform, "onboarding_status", fake_status)
+    response = client.get("/api/v1/platform/onboarding/status?after_deleted=true")
+    _clear()
+    assert response.status_code == 200
+    assert seen["as_founder"] is False
+    assert seen["skip_removed"] is True
+    assert response.json()["path"] == "CREATE_WITH_DOMAIN_LOCK"
 
 
 def test_create_company_returns_201(monkeypatch):
@@ -156,6 +184,57 @@ def test_create_project_requires_name():
     response = client.post("/api/v1/platform/onboarding/project", json={"name": ""})
     _clear()
     assert response.status_code == 422
+
+
+def test_accept_terms_requires_authentication():
+    response = client.post("/api/v1/platform/onboarding/terms", json={"version": "2026-09-17"})
+    assert response.status_code == 401
+
+
+def test_accept_terms_stores_the_version(monkeypatch):
+    _auth()
+    seen = {}
+
+    def fake_accept(user_id, version):
+        seen["user_id"] = user_id
+        seen["version"] = version
+        return version
+
+    monkeypatch.setattr(platform, "accept_terms", fake_accept)
+    response = client.post("/api/v1/platform/onboarding/terms", json={"version": "2026-09-17"})
+    _clear()
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "terms_version": "2026-09-17"}
+    assert seen == {"user_id": "user_1", "version": "2026-09-17"}
+
+
+def test_accept_terms_requires_version():
+    _auth()
+    response = client.post("/api/v1/platform/onboarding/terms", json={"version": ""})
+    _clear()
+    assert response.status_code == 422
+
+
+def test_accept_terms_rejects_whitespace_version():
+    _auth()
+    response = client.post("/api/v1/platform/onboarding/terms", json={"version": "   "})
+    _clear()
+    assert response.status_code == 422
+
+
+def test_accept_terms_maps_stale_version(monkeypatch):
+    _auth()
+
+    def boom(user_id, version):
+        from app.modules.platform.terms import TermsError
+
+        raise TermsError("invalid", "Accept the current terms to continue.")
+
+    monkeypatch.setattr(platform, "accept_terms", boom)
+    response = client.post("/api/v1/platform/onboarding/terms", json={"version": "1999-01-01"})
+    _clear()
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "invalid"
 
 
 def test_create_project_requires_company(monkeypatch):

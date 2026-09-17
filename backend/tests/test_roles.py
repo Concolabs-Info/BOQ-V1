@@ -157,3 +157,27 @@ def test_permissions_for_membership_uses_custom_row(monkeypatch):
     )
     found = CompanyMembership(company_id="c1", company_name="Acme", role="custom_site_qs")
     assert roles.permissions_for_membership(found) == ["takeoff:view", "boq:view"]
+
+
+def test_role_identity_uses_built_in_copy(monkeypatch):
+    monkeypatch.setattr(roles, "fetch_one", lambda *args, **kwargs: None)
+    assert roles.role_identity("c1", "project_manager") == (
+        "Project Manager",
+        "Approves and submits, and does not touch measurements.",
+    )
+
+
+def test_role_identity_uses_custom_role_row(monkeypatch):
+    monkeypatch.setattr(
+        roles,
+        "fetch_one",
+        lambda *args, **kwargs: {
+            "id": "r1",
+            "key": "custom_site_qs",
+            "name": "Site QS",
+            "description": "Field QS",
+            "permissions": ["takeoff:view"],
+        },
+    )
+    assert roles.role_identity("c1", "custom_site_qs") == ("Site QS", "Field QS")
+    assert roles.label_for_role("c1", "custom_site_qs") == "Site QS"

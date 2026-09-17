@@ -4,8 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ...core.auth import CurrentUser
-from ...database.connection import fetch_one, transaction
-from .invitations import pending_invite_for_email
+from ...database.connection import execute, fetch_one, transaction
+from .invitations import pending_invite_for_email, pending_invite_rows_for_email, _revoke_clerk_invite
 from .membership import get_company_membership
 from .onboarding_path import (
     domain_of_email,
@@ -66,6 +66,7 @@ class OnboardingStatus:
     has_company: bool
     has_project: bool
     pending_project_count: int = 0
+    former_reason: str | None = None
 
 
 def currency_for_country(country: str) -> str:
@@ -84,13 +85,34 @@ def find_company_by_domain(domain: str) -> dict | None:
     return {"id": str(row["id"]), "name": row["name"], "domain": row["domain"]}
 
 
-def former_company_name(user_id: str) -> str | None:
+def former_membership(user_id: str) -> dict | None:
     row = fetch_one(
-        "SELECT c.name FROM former_member fm JOIN company c ON c.id = fm.company_id "
-        "WHERE fm.user_id = %s ORDER BY fm.removed_at DESC LIMIT 1",
+        """SELECT COALESCE(c.name, fm.company_name) AS name, fm.reason
+           FROM former_member fm
+           LEFT JOIN company c ON c.id = fm.company_id
+           WHERE fm.user_id = %s
+           ORDER BY fm.removed_at DESC
+           LIMIT 1""",
         (user_id,),
     )
-    return row["name"] if row else None
+    if not row:
+        return None
+    name = (row.get("name") or "").strip()
+    if not name:
+        return None
+    return {"name": name, "reason": row.get("reason") or "removed"}
+
+
+def former_company_name(user_id: str) -> str | None:
+    found = former_membership(user_id)
+    return found["name"] if found else None
+
+
+def clear_displacement(user_id: str, conn=None) -> None:
+    if conn is not None:
+        conn.execute("DELETE FROM former_member WHERE user_id = %s", (user_id,))
+        return
+    execute("DELETE FROM former_member WHERE user_id = %s", (user_id,))
 
 
 def company_project_count(company_id: str) -> int:
@@ -98,7 +120,13 @@ def company_project_count(company_id: str) -> int:
     return int(row["n"] if row else 0)
 
 
-def onboarding_status(user: CurrentUser, *, as_founder: bool = False) -> OnboardingStatus:
+def onboarding_status(
+    user: CurrentUser,
+    *,
+    as_founder: bool = False,
+    skip_removed: bool = False,
+) -> OnboardingStatus:
+    skip_removed = skip_removed or as_founder
     membership = get_company_membership(user.id)
     if membership:
         has_project = company_project_count(membership.company_id) > 0
@@ -130,17 +158,18 @@ def onboarding_status(user: CurrentUser, *, as_founder: bool = False) -> Onboard
             pending_project_count=int(pending.get("project_count") or 0),
         )
 
-    if not as_founder:
-        former = former_company_name(user.id)
+    if not skip_removed:
+        former = former_membership(user.id)
         if former:
             return OnboardingStatus(
                 path="REMOVED",
                 domain=None,
                 suggested_name="",
                 existing_company=None,
-                former_company_name=former,
+                former_company_name=former["name"],
                 has_company=False,
                 has_project=False,
+                former_reason=former["reason"],
             )
 
     if as_founder:
@@ -212,6 +241,7 @@ def create_company(
 
     needs_review = (not lock_domain) and reg_type == "NONE"
     currency = currency_for_country(clean_country)
+    open_invites = pending_invite_rows_for_email(user.email)
 
     try:
         with transaction() as conn:
@@ -227,6 +257,12 @@ def create_company(
                 "INSERT INTO company_member (company_id, user_id, role) VALUES (%s, %s, %s)",
                 (company["id"], user.id, "admin"),
             )
+            conn.execute(
+                "UPDATE invitation SET status = 'revoked' "
+                "WHERE lower(email) = lower(%s) AND status = 'pending'",
+                (user.email,),
+            )
+            clear_displacement(user.id, conn)
     except UniqueViolation as exc:
         text = str(exc).lower()
         if "uq_company_domain" in text or "company_domain" in text:
@@ -241,6 +277,9 @@ def create_company(
         if "company_member" in text or "user_id" in text:
             raise OnboardingError("already_member", "You already belong to a company.") from exc
         raise
+
+    for row in open_invites:
+        _revoke_clerk_invite(row)
 
     return CreatedCompany(id=str(company["id"]), name=company["name"])
 

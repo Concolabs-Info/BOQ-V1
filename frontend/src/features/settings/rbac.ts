@@ -112,6 +112,11 @@ export function roleLabel(role: string, customName?: string): string {
   return ROLE_LABELS[role as RoleKey] ?? role.replace(/^custom_/, "").replaceAll("_", " ");
 }
 
+export function roleDescription(role: string, custom?: string | null): string {
+  if (custom) return custom;
+  return ROLE_DESCRIPTIONS[role as RoleKey] ?? "";
+}
+
 export function isRoleKey(role: string): role is RoleKey {
   return isBuiltInRole(role);
 }

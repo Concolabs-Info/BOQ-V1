@@ -93,9 +93,9 @@ export function MembersManager() {
     setMemberFlash(null);
     setPendingFlash(null);
     try {
-      await action();
+      const custom = await action();
       await reload();
-      const flash = { kind: "ok" as const, text: success };
+      const flash = { kind: "ok" as const, text: typeof custom === "string" && custom ? custom : success };
       if (scope === "members") setMemberFlash(flash);
       else setPendingFlash(flash);
     } catch (next) {
@@ -134,11 +134,7 @@ export function MembersManager() {
       await reload();
       setInviteFlash({
         kind: result.failures.length ? "error" : "ok",
-        text: result.failures.length
-          ? `Sent ${result.sent}. Problems: ${result.failures.map((failure: { email: string; reason: string }) => `${failure.email} (${failure.reason})`).join(", ")}`
-          : picked.length
-            ? `Invitation sent to ${email}. They'll only see ${joinProjectNames(picked)}.`
-            : `Invitation sent to ${email}. Assign a project below whenever you're ready.`,
+        text: sentInviteMessage(email, result, picked),
       });
     } catch (next) {
       setInviteFlash({ kind: "error", text: settingsError(next) });
@@ -164,17 +160,7 @@ export function MembersManager() {
         ...add.map((id) => assignMemberProject(member.id, id)),
         ...remove.map((id) => unassignMemberProject(member.id, id)),
       ]);
-      if (unique.length === 0) {
-        setMemberFlash({ kind: "ok", text: "Removed from all projects." });
-      } else if (add.length === 1 && remove.length === 0) {
-        const name = projects.find((project) => project.id === add[0])?.name || "project";
-        setMemberFlash({ kind: "ok", text: `Added to ${name}.` });
-      } else if (remove.length === 1 && add.length === 0) {
-        const name = projects.find((project) => project.id === remove[0])?.name || "project";
-        setMemberFlash({ kind: "ok", text: `Removed from ${name}.` });
-      } else {
-        setMemberFlash({ kind: "ok", text: "Project access updated." });
-      }
+      setMemberFlash({ kind: "ok", text: projectAccessMessage(projects, previous, unique) });
     } catch (next) {
       setMembers((current) => current.map((row) => (row.id === member.id ? { ...row, workspace_ids: previous } : row)));
       setMemberFlash({ kind: "error", text: settingsError(next) });
@@ -193,7 +179,11 @@ export function MembersManager() {
     setPendingFlash(null);
     try {
       const next = await updateInvite(invite.id, patch);
-      setInvites((current) => current.map((row) => (row.id === invite.id ? next : row)));
+      setInvites((current) =>
+        current.map((row) =>
+          row.id === invite.id ? { ...row, ...next, existing_account: next.existing_account ?? row.existing_account } : row,
+        ),
+      );
       setPendingFlash({ kind: "ok", text: success });
     } catch (next) {
       setInvites((current) => current.map((row) => (row.id === invite.id ? previous : row)));
@@ -210,14 +200,7 @@ export function MembersManager() {
     const add = unique.filter((id) => !previous.includes(id));
     const remove = previous.filter((id) => !unique.includes(id));
     if (add.length === 0 && remove.length === 0) return;
-    let success = "Project access updated.";
-    if (unique.length === 0) success = "Removed from all projects.";
-    else if (add.length === 1 && remove.length === 0) {
-      success = `Added to ${projects.find((project) => project.id === add[0])?.name || "project"}.`;
-    } else if (remove.length === 1 && add.length === 0) {
-      success = `Removed from ${projects.find((project) => project.id === remove[0])?.name || "project"}.`;
-    }
-    void patchInvite(invite, { workspace_ids: unique }, success);
+    void patchInvite(invite, { workspace_ids: unique }, projectAccessMessage(projects, previous, unique));
   }
 
   const inviteRoleOptions = assignableRoleOptions(roles, inviteRole);
@@ -234,7 +217,13 @@ export function MembersManager() {
           description="They'll get an email to join. You can change their role and projects after you send this."
         >
           <form className="flex flex-col gap-4" onSubmit={(event) => void invite(event)}>
-            <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1.1fr)_13.5rem_minmax(0,1fr)]">
+            <div
+              className={
+                projects.length > 0
+                  ? "grid items-start gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(16.5rem,18rem)_minmax(0,1fr)]"
+                  : "grid items-start gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(16.5rem,18rem)]"
+              }
+            >
               <label className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-sm font-medium text-slate-950">Email</span>
                 <input
@@ -248,10 +237,10 @@ export function MembersManager() {
                   className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                 />
               </label>
-              <label className="flex flex-col gap-1.5">
+              <label className="flex min-w-0 flex-col gap-1.5 overflow-hidden">
                 <span className="text-sm font-medium text-slate-950">Role</span>
                 <Select value={inviteRole} disabled={busy} onValueChange={(next) => setInviteRole(String(next))}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full min-w-0">
                     <SelectValue>
                       {inviteRoleOptions.find((role) => role.key === inviteRole)?.name ?? roleLabel(inviteRole)}
                     </SelectValue>
@@ -265,18 +254,22 @@ export function MembersManager() {
                   </SelectContent>
                 </Select>
               </label>
-              <div className="flex min-w-0 flex-col gap-1.5">
-                <p className="text-sm font-medium text-slate-950">Projects</p>
-                <ProjectAccessField
-                  projects={projects}
-                  selectedIds={inviteProjects}
-                  disabled={busy}
-                  emptyHint=""
-                  onChange={setInviteProjects}
-                />
-              </div>
+              {projects.length > 0 ? (
+                <div className="flex min-w-0 flex-col gap-1.5">
+                  <p className="text-sm font-medium text-slate-950">Projects</p>
+                  <ProjectAccessField
+                    projects={projects}
+                    selectedIds={inviteProjects}
+                    disabled={busy}
+                    emptyHint=""
+                    onChange={setInviteProjects}
+                  />
+                </div>
+              ) : null}
             </div>
-            {projects.length > 0 && inviteProjects.length === 0 ? (
+            {projects.length === 0 ? (
+              <p className="text-sm leading-6 text-slate-500">Create a project first, then you can add people to it.</p>
+            ) : inviteProjects.length === 0 ? (
               <p className="text-sm leading-6 text-slate-500">Projects are optional. Assign them now or later from pending invitations.</p>
             ) : null}
             <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
@@ -297,15 +290,16 @@ export function MembersManager() {
         title="Members"
         description="Role is what they can do. Projects are which jobs they can open."
         action={memberFlash ? <SettingsStatus kind={memberFlash.kind} className="max-w-[16rem] text-right">{memberFlash.text}</SettingsStatus> : undefined}
+        contentClassName={members.length > 0 ? "px-0 pb-0 pt-4" : undefined}
       >
-        <div className="-mx-6 overflow-x-auto">
-          <table className="w-full min-w-[720px] table-fixed border-collapse text-left text-sm">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-sm">
+            <thead className="border-y border-slate-100 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="w-[18rem] px-6 py-3">Member</th>
-                <th className="w-[13.5rem] px-4 py-3">Role</th>
+                <th className="w-[18rem] py-3 pl-6 pr-4">Member</th>
+                <th className="w-[16.5rem] px-4 py-3">Role</th>
                 <th className="px-4 py-3">Projects</th>
-                <th className="w-24 px-6 py-3 text-right">Actions</th>
+                <th className="w-32 py-3 pl-4 pr-6 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -319,19 +313,14 @@ export function MembersManager() {
                 members.map((member) => {
                   const isSelf = Boolean(user && member.id === user.id);
                   const assigned = member.workspace_ids || [];
-                  const roleOptions: { key: string; name: string }[] = roles.length
-                    ? roles.map((role) => ({ key: role.key, name: role.name }))
-                    : [{ key: member.role, name: member.role_label || roleLabel(member.role) }];
-                  if (!roleOptions.some((role) => role.key === member.role)) {
-                    roleOptions.push({ key: member.role, name: member.role_label || roleLabel(member.role) });
-                  }
+                  const roleOptions = memberRoleOptions(roles, member);
                   return (
-                    <tr key={member.id}>
-                      <td className="px-6 py-3 align-middle">
+                    <tr key={member.id} className="[&:last-child>td]:pb-5">
+                      <td className="py-3.5 pl-6 pr-4 align-middle">
                         <p className="truncate font-medium text-slate-950">{member.full_name || member.email}</p>
                         <p className="truncate text-xs text-slate-500">{member.email}</p>
                       </td>
-                      <td className="px-4 py-3 align-middle">
+                      <td className="min-w-0 px-4 py-3.5 align-middle">
                         {canManage && !isSelf ? (
                           <Select
                             value={member.role}
@@ -345,7 +334,7 @@ export function MembersManager() {
                               void run(() => updateMemberRole(member.id, nextRole), "Role updated.", "members");
                             }}
                           >
-                            <SelectTrigger className="h-10 px-3">
+                            <SelectTrigger className="h-10 w-full min-w-0 px-3">
                               <SelectValue>
                                 {roleOptions.find((role) => role.key === member.role)?.name ?? member.role_label}
                               </SelectValue>
@@ -362,7 +351,7 @@ export function MembersManager() {
                           <span className="text-slate-700">{member.role_label || roleLabel(member.role)}</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 align-middle">
+                      <td className="px-4 py-3.5 align-middle">
                         {!isProjectScoped(member.role) ? (
                           <p className="text-sm text-slate-700">All projects</p>
                         ) : canManage ? (
@@ -378,7 +367,7 @@ export function MembersManager() {
                           <ProjectChipList projects={projects} ids={assigned} empty="No projects" />
                         )}
                       </td>
-                      <td className="px-6 py-3 text-right align-middle">
+                      <td className="py-3.5 pl-4 pr-6 text-right align-middle">
                         {canManage && !isSelf ? (
                           <button
                             type="button"
@@ -403,30 +392,34 @@ export function MembersManager() {
         title="Pending invitations"
         description="Waiting to join. You can still change their role or which jobs they can open."
         action={pendingFlash ? <SettingsStatus kind={pendingFlash.kind} className="max-w-[16rem] text-right">{pendingFlash.text}</SettingsStatus> : undefined}
+        contentClassName={invites.length > 0 ? "px-0 pb-0 pt-4" : undefined}
         footerHint={invites.length === 0 ? "Invites expire if they aren't accepted." : undefined}
       >
         {invites.length === 0 ? (
           <p className="text-sm text-slate-500">No pending invites.</p>
         ) : (
-          <div className="-mx-6 overflow-x-auto">
-            <table className="w-full min-w-[720px] table-fixed border-collapse text-left text-sm">
-              <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-sm">
+              <thead className="border-y border-slate-100 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="w-[18rem] px-6 py-3">Email</th>
-                  <th className="w-[13.5rem] px-4 py-3">Role</th>
+                  <th className="w-[18rem] py-3 pl-6 pr-4">Email</th>
+                  <th className="w-[16.5rem] px-4 py-3">Role</th>
                   <th className="px-4 py-3">Projects</th>
-                  <th className="w-36 px-6 py-3 text-right">Actions</th>
+                  <th className="w-40 py-3 pl-4 pr-6 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {invites.map((invite) => {
                   const roleOptions = assignableRoleOptions(roles, invite.role);
                   return (
-                    <tr key={invite.id}>
-                      <td className="px-6 py-3 align-middle">
+                    <tr key={invite.id} className="[&:last-child>td]:pb-5">
+                      <td className="py-3.5 pl-6 pr-4 align-middle">
                         <p className="truncate text-slate-950">{invite.email}</p>
+                        {invite.existing_account ? (
+                          <p className="mt-0.5 text-xs leading-5 text-slate-500">Already has an account — joins when they next open Quanto</p>
+                        ) : null}
                       </td>
-                      <td className="px-4 py-3 align-middle">
+                      <td className="min-w-0 px-4 py-3.5 align-middle">
                         {canManage ? (
                           <Select
                             value={invite.role}
@@ -435,7 +428,7 @@ export function MembersManager() {
                               void patchInvite(invite, { role: String(next) }, "Role updated.");
                             }}
                           >
-                            <SelectTrigger className="h-10 px-3">
+                            <SelectTrigger className="h-10 w-full min-w-0 px-3">
                               <SelectValue>
                                 {roleOptions.find((role) => role.key === invite.role)?.name ?? roleLabel(invite.role)}
                               </SelectValue>
@@ -454,7 +447,7 @@ export function MembersManager() {
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 align-middle">
+                      <td className="px-4 py-3.5 align-middle">
                         {canManage ? (
                           <MemberProjectControl
                             projects={projects}
@@ -466,14 +459,25 @@ export function MembersManager() {
                           <ProjectChipList projects={projects} ids={invite.workspace_ids} empty="None yet" />
                         )}
                       </td>
-                      <td className="px-6 py-3 text-right align-middle">
+                      <td className="py-3.5 pl-4 pr-6 text-right align-middle">
                         {canManage ? (
                           <div className="flex justify-end gap-3">
                             <button
                               type="button"
                               disabled={busy || busyMember === invite.id}
                               className="text-sm font-medium text-slate-600 hover:text-slate-950 disabled:opacity-40"
-                              onClick={() => void run(() => resendInvite(invite.id), "Invitation resent.", "pending")}
+                              onClick={() =>
+                                void run(async () => {
+                                  const result = await resendInvite(invite.id);
+                                  if (result.failures.length > 0 && result.sent === 0) {
+                                    throw new Error(result.failures.map((failure) => failure.reason).join(" "));
+                                  }
+                                  if ((result.existing_accounts || []).length > 0) {
+                                    return `${invite.email} already has an account. They'll join the next time they open Quanto.`;
+                                  }
+                                  return undefined;
+                                }, "Invitation resent.", "pending")
+                              }
                             >
                               Resend
                             </button>
@@ -500,22 +504,7 @@ export function MembersManager() {
       {confirm ? (
         <ConfirmOverlay
           pending={busy}
-          title={
-            confirm.kind === "promote"
-              ? "Promote to Owner / Admin"
-              : confirm.kind === "remove"
-                ? "Remove member"
-                : "Revoke invitation"
-          }
-          description={
-            confirm.kind === "promote"
-              ? `${confirm.member.full_name || confirm.member.email} will be able to manage members and company settings.`
-              : confirm.kind === "remove"
-                ? `${confirm.member.full_name || confirm.member.email} will lose access to this company.`
-                : `Revoke the invitation for ${confirm.invite.email}? They will no longer be able to join with that email.`
-          }
-          confirmLabel={confirm.kind === "promote" ? "Promote" : confirm.kind === "remove" ? "Remove" : "Revoke"}
-          danger={confirm.kind !== "promote"}
+          {...confirmCopy(confirm)}
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
             if (confirm.kind === "promote") {
@@ -530,6 +519,78 @@ export function MembersManager() {
       ) : null}
     </SettingsStack>
   );
+}
+
+function sentInviteMessage(
+  email: string,
+  result: { sent: number; existing_accounts?: string[]; failures: { email: string; reason: string }[] },
+  picked: string[],
+): string {
+  if (result.failures.length) {
+    return `Sent ${result.sent}. Problems: ${result.failures.map((failure) => `${failure.email} (${failure.reason})`).join(", ")}`;
+  }
+  const existing = (result.existing_accounts || []).some((item) => item.toLowerCase() === email.toLowerCase());
+  if (existing) {
+    return `${email} already has an account. They'll join the next time they open Quanto.`;
+  }
+  if (picked.length) {
+    return `Invitation sent to ${email}. They'll only see ${joinProjectNames(picked)}.`;
+  }
+  return `Invitation sent to ${email}. Assign a project below whenever you're ready.`;
+}
+
+function projectAccessMessage(
+  projects: { id: string; name: string }[],
+  previous: string[],
+  unique: string[],
+): string {
+  const add = unique.filter((id) => !previous.includes(id));
+  const remove = previous.filter((id) => !unique.includes(id));
+  if (unique.length === 0) return "Removed from all projects.";
+  if (add.length === 1 && remove.length === 0) {
+    return `Added to ${projects.find((project) => project.id === add[0])?.name || "project"}.`;
+  }
+  if (remove.length === 1 && add.length === 0) {
+    return `Removed from ${projects.find((project) => project.id === remove[0])?.name || "project"}.`;
+  }
+  return "Project access updated.";
+}
+
+function memberRoleOptions(roles: CompanyRole[], member: CompanyMember) {
+  const options = roles.length
+    ? roles.map((role) => ({ key: role.key, name: role.name }))
+    : [{ key: member.role, name: member.role_label || roleLabel(member.role) }];
+  if (!options.some((role) => role.key === member.role)) {
+    options.push({ key: member.role, name: member.role_label || roleLabel(member.role) });
+  }
+  return options;
+}
+
+function confirmCopy(confirm: Exclude<Confirm, null>) {
+  if (confirm.kind === "promote") {
+    const who = confirm.member.full_name || confirm.member.email;
+    return {
+      title: "Promote to Owner / Admin",
+      description: `${who} will be able to manage members and company settings.`,
+      confirmLabel: "Promote",
+      danger: false,
+    };
+  }
+  if (confirm.kind === "remove") {
+    const who = confirm.member.full_name || confirm.member.email;
+    return {
+      title: "Remove member",
+      description: `${who} will lose access to this company.`,
+      confirmLabel: "Remove",
+      danger: true,
+    };
+  }
+  return {
+    title: "Revoke invitation",
+    description: `Revoke the invitation for ${confirm.invite.email}? They will no longer be able to join with that email.`,
+    confirmLabel: "Revoke",
+    danger: true,
+  };
 }
 
 function assignableRoleOptions(roles: CompanyRole[], current?: string) {

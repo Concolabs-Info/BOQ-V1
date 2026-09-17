@@ -1,7 +1,7 @@
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ...modules.pre.schemas import ViewportDiscipline, ViewportSubject, ViewportViewKind
 
@@ -167,8 +167,12 @@ class PlatformContext(ApiModel):
     user: PlatformUser
     organization: PlatformOrganization | None = None
     membership_role: str | None = None
+    role_label: str | None = None
+    role_description: str | None = None
     permissions: list[str]
     is_super_admin: bool = False
+    terms_accepted: bool = False
+    terms_version: str | None = None
 
 
 class OnboardingCompanyIn(ApiModel):
@@ -194,6 +198,23 @@ class OnboardingProjectOut(ApiModel):
     name: str
 
 
+class AcceptTermsIn(ApiModel):
+    version: str = Field(min_length=1, max_length=64)
+
+    @field_validator("version")
+    @classmethod
+    def version_not_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Accept the current terms to continue.")
+        return cleaned
+
+
+class AcceptTermsOut(ApiModel):
+    ok: bool = True
+    terms_version: str
+
+
 class OnboardingExistingCompany(ApiModel):
     id: str
     name: str
@@ -206,6 +227,7 @@ class OnboardingStatusOut(ApiModel):
     suggested_name: str = ""
     existing_company: OnboardingExistingCompany | None = None
     former_company_name: str | None = None
+    former_reason: str | None = None
     has_company: bool
     has_project: bool
     pending_project_count: int = 0
@@ -228,6 +250,7 @@ class InviteFailureOut(ApiModel):
 
 class InviteBatchOut(ApiModel):
     sent: int
+    existing_accounts: list[str] = Field(default_factory=list)
     failures: list[InviteFailureOut] = Field(default_factory=list)
 
 
@@ -301,6 +324,7 @@ class PendingInviteOut(ApiModel):
     workspace_ids: list[str] = Field(default_factory=list)
     expires_at: str | None = None
     created_at: str | None = None
+    existing_account: bool = False
 
 
 class MemberDirectoryOut(ApiModel):

@@ -357,11 +357,12 @@ export function AccountSecurityCard() {
               </>
             ) : deletion.other_members > 0 ? (
               <>
-                Deleting anyway also deletes <SettingsMark>the company</SettingsMark>,{" "}
+                Deleting anyway also deletes <SettingsMark>the company</SettingsMark> and{" "}
+                <SettingsMark>every project</SettingsMark>. The other{" "}
                 <SettingsMark>
-                  {deletion.other_members} other {deletion.other_members === 1 ? "person" : "people"}
+                  {deletion.other_members} {deletion.other_members === 1 ? "person keeps their account" : "people keep their accounts"}
                 </SettingsMark>
-                , and <SettingsMark>every project</SettingsMark>.
+                , without a role, until someone invites them again.
               </>
             ) : (
               <>

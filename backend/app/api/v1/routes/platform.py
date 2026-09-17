@@ -14,7 +14,9 @@ from ....modules.platform.company import (
 )
 from ....modules.platform.invitations import (
     InvitationError,
+    SendInvitesResult,
     claim_invitation,
+    decline_pending_invites,
     list_pending_invitations,
     resend_invite,
     revoke_invite,
@@ -34,6 +36,7 @@ from ....modules.platform.roles import (
     delete_custom_role,
     list_roles,
     permissions_for_membership,
+    role_identity,
     update_role,
 )
 from ....modules.platform.onboarding import (
@@ -43,6 +46,7 @@ from ....modules.platform.onboarding import (
     create_first_project,
     onboarding_status,
 )
+from ....modules.platform.terms import TermsError, accept_terms
 from ..schemas import (
     CompanyOut,
     CompanyPatchIn,
@@ -60,6 +64,8 @@ from ..schemas import (
     MemberOut,
     MemberProjectIn,
     MemberRoleIn,
+    AcceptTermsIn,
+    AcceptTermsOut,
     OnboardingCompanyIn,
     OnboardingCompanyOut,
     OnboardingExistingCompany,
@@ -113,6 +119,7 @@ def _status_out(status: OnboardingStatus) -> OnboardingStatusOut:
         suggested_name=status.suggested_name,
         existing_company=existing,
         former_company_name=status.former_company_name,
+        former_reason=status.former_reason,
         has_company=status.has_company,
         has_project=status.has_project,
         pending_project_count=status.pending_project_count,
@@ -123,6 +130,7 @@ def _status_out(status: OnboardingStatus) -> OnboardingStatusOut:
 def get_me(current_user: CurrentUser = Depends(get_current_user)) -> PlatformContext:
     found = get_company_membership(current_user.id)
     role = found.role if found else "none"
+    label, description = role_identity(found.company_id, found.role) if found else (None, None)
 
     return PlatformContext(
         user=PlatformUser(id=current_user.id, email=current_user.email, full_name=current_user.full_name, role=role),
@@ -136,17 +144,40 @@ def get_me(current_user: CurrentUser = Depends(get_current_user)) -> PlatformCon
             if found else None
         ),
         membership_role=found.role if found else None,
+        role_label=label,
+        role_description=description or None,
         permissions=permissions_for_membership(found) if found else [],
         is_super_admin=False,
+        terms_accepted=current_user.terms_accepted_at is not None,
+        terms_version=current_user.terms_version,
     )
 
 
 @router.get("/platform/onboarding/status", response_model=OnboardingStatusOut)
 def get_onboarding_status(
     founder: bool = Query(default=False),
+    after_deleted: bool = Query(default=False),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> OnboardingStatusOut:
-    return _status_out(onboarding_status(current_user, as_founder=founder))
+    return _status_out(
+        onboarding_status(
+            current_user,
+            as_founder=founder,
+            skip_removed=founder or after_deleted,
+        )
+    )
+
+
+@router.post("/platform/onboarding/terms", response_model=AcceptTermsOut)
+def post_onboarding_terms(
+    body: AcceptTermsIn,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> AcceptTermsOut:
+    try:
+        version = accept_terms(current_user.id, body.version)
+    except TermsError as exc:
+        raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+    return AcceptTermsOut(ok=True, terms_version=version)
 
 
 @router.post("/platform/onboarding/company", response_model=OnboardingCompanyOut, status_code=201)
@@ -166,6 +197,11 @@ def post_onboarding_company(
     except OnboardingError as exc:
         raise _http_for(exc) from exc
     return OnboardingCompanyOut(id=created.id, name=created.name, role=created.role)
+
+
+@router.post("/platform/onboarding/invite/decline")
+def post_decline_pending_invite(current_user: CurrentUser = Depends(get_current_user)) -> dict:
+    return {"ok": True, "revoked": decline_pending_invites(current_user)}
 
 
 @router.post("/platform/onboarding/project", response_model=OnboardingProjectOut, status_code=201)
@@ -198,10 +234,7 @@ def post_invitations(
         membership,
         [row.model_dump() for row in body.invites],
     )
-    return InviteBatchOut(
-        sent=result.sent,
-        failures=[InviteFailureOut(email=item.email, reason=item.reason) for item in result.failures],
-    )
+    return _invite_batch_out(result)
 
 
 @router.post("/platform/invitations/claim", response_model=InviteClaimOut)
@@ -226,6 +259,14 @@ def _invite_http(exc: InvitationError) -> HTTPException:
     return HTTPException(
         status_code={"expired": 410, "already_member": 409}.get(exc.code, 400),
         detail={"code": exc.code, "message": exc.message, "field": exc.field},
+    )
+
+
+def _invite_batch_out(result: SendInvitesResult) -> InviteBatchOut:
+    return InviteBatchOut(
+        sent=result.sent,
+        existing_accounts=result.existing_accounts,
+        failures=[InviteFailureOut(email=item.email, reason=item.reason) for item in result.failures],
     )
 
 
@@ -283,10 +324,11 @@ def delete_company_logo(
 @router.delete("/platform/company", status_code=204)
 def delete_company_settings(
     body: CompanyDeleteIn,
+    current_user: CurrentUser = Depends(get_current_user),
     membership: CompanyMembership = Depends(require_permission("billing:manage")),
 ) -> None:
     try:
-        delete_company(membership, body.confirm_name)
+        delete_company(membership, body.confirm_name, actor_user_id=current_user.id)
     except InvitationError as exc:
         raise _invite_http(exc) from exc
 
@@ -384,10 +426,7 @@ def post_resend_invitation(
         result = resend_invite(current_user, membership, invitation_id)
     except InvitationError as exc:
         raise _invite_http(exc) from exc
-    return InviteBatchOut(
-        sent=result.sent,
-        failures=[InviteFailureOut(email=item.email, reason=item.reason) for item in result.failures],
-    )
+    return _invite_batch_out(result)
 
 
 @router.get("/platform/company/roles", response_model=RoleListOut)

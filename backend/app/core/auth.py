@@ -4,6 +4,7 @@ request."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 import jwt
 from fastapi import Header, HTTPException
@@ -22,6 +23,8 @@ class CurrentUser:
     id: str
     email: str
     full_name: str | None
+    terms_accepted_at: datetime | None = None
+    terms_version: str | None = None
 
 
 def verify_clerk_token(token: str, *, jwt_key: str, issuer: str) -> dict:
@@ -38,9 +41,34 @@ def verify_clerk_token(token: str, *, jwt_key: str, issuer: str) -> dict:
 
 
 def upsert_app_user(user_id: str) -> CurrentUser:
-    row = fetch_one("SELECT id, email, full_name FROM app_user WHERE id = %s", (user_id,))
+    row = fetch_one(
+        "SELECT id, email, full_name, terms_accepted_at, terms_version, deleted_at FROM app_user WHERE id = %s",
+        (user_id,),
+    )
     if row:
-        return CurrentUser(id=row["id"], email=row["email"], full_name=row["full_name"])
+        if row.get("deleted_at"):
+            # A leftover session JWT can still verify after delete_my_account.
+            # Only resurrect the row if Clerk still has this user; otherwise
+            # keep deleted_at so a later invite can email them as a new account.
+            profile = fetch_clerk_user(user_id)
+            execute(
+                "UPDATE app_user SET deleted_at = NULL, email = %s, full_name = %s WHERE id = %s",
+                (profile.email, profile.full_name, user_id),
+            )
+            return CurrentUser(
+                id=user_id,
+                email=profile.email,
+                full_name=profile.full_name,
+                terms_accepted_at=row.get("terms_accepted_at"),
+                terms_version=row.get("terms_version"),
+            )
+        return CurrentUser(
+            id=row["id"],
+            email=row["email"],
+            full_name=row["full_name"],
+            terms_accepted_at=row.get("terms_accepted_at"),
+            terms_version=row.get("terms_version"),
+        )
 
     profile = fetch_clerk_user(user_id)
     execute(

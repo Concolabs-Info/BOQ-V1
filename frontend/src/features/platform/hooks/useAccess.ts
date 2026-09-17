@@ -1,26 +1,57 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getCachedPlatformContext, getPlatformContext } from "@/features/platform/services/platformService";
+import {
+  cachePlatformContext,
+  getCachedPlatformContext,
+  getPlatformContext,
+  type PlatformContext,
+} from "@/features/platform/services/platformService";
 import {
   canAccessStage,
   hasPermission,
   workspaceHome,
   type WorkflowStage,
 } from "@/features/settings/access";
+import { roleDescription, roleLabel } from "@/features/settings/rbac";
 import { appRoutes } from "@/shared/constants/appRoutes";
 
+function roleFromContext(context: PlatformContext) {
+  const key = context.membership_role;
+  if (!key) return { label: null as string | null, description: null as string | null };
+  return {
+    label: context.role_label || roleLabel(key),
+    description: roleDescription(key, context.role_description) || null,
+  };
+}
+
 export function useAccess() {
-  const cached = typeof window === "undefined" ? null : getCachedPlatformContext();
-  const [permissions, setPermissions] = useState<string[] | null>(cached?.permissions ?? null);
-  const [ready, setReady] = useState(cached != null);
+  const [permissions, setPermissions] = useState<string[] | null>(null);
+  const [hasCompany, setHasCompany] = useState(false);
+  const [roleLabelText, setRoleLabelText] = useState<string | null>(null);
+  const [roleDescriptionText, setRoleDescriptionText] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+
+  function apply(context: PlatformContext) {
+    const role = roleFromContext(context);
+    setPermissions(context.permissions);
+    setHasCompany(Boolean(context.organization));
+    setRoleLabelText(role.label);
+    setRoleDescriptionText(role.description);
+  }
 
   useEffect(() => {
     let live = true;
+    const cached = getCachedPlatformContext();
+    if (cached) {
+      apply(cached);
+      setReady(true);
+    }
     getPlatformContext()
       .then((context) => {
         if (!live) return;
-        setPermissions(context.permissions);
+        cachePlatformContext(context);
+        apply(context);
         setReady(true);
       })
       .catch(() => {
@@ -48,5 +79,14 @@ export function useAccess() {
     return workspaceHome(projectId, list);
   }
 
-  return { ready, permissions: list, can, canStage, home };
+  return {
+    ready,
+    permissions: list,
+    hasCompany,
+    roleLabel: roleLabelText,
+    roleDescription: roleDescriptionText,
+    can,
+    canStage,
+    home,
+  };
 }

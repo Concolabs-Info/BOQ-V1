@@ -93,10 +93,11 @@ def remove_member(actor: CurrentUser, membership: CompanyMembership, target_user
             (membership.company_id, target_user_id),
         )
         conn.execute(
-            """INSERT INTO former_member (company_id, user_id)
-               VALUES (%s, %s)
-               ON CONFLICT (company_id, user_id) DO UPDATE SET removed_at = now()""",
-            (membership.company_id, target_user_id),
+            """INSERT INTO former_member (company_id, user_id, company_name, reason)
+               VALUES (%s, %s, %s, 'removed')
+               ON CONFLICT (company_id, user_id) DO UPDATE
+               SET removed_at = now(), company_name = EXCLUDED.company_name, reason = 'removed'""",
+            (membership.company_id, target_user_id, membership.company_name),
         )
 
 

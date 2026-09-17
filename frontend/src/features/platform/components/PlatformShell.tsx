@@ -25,9 +25,9 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
 
   const workspaceMatch = pathname.match(/^\/workspace\/([^/]+)/);
   const projectId = workspaceMatch?.[1] || null;
-  const { home, can } = useAccess();
+  const { ready, home, can } = useAccess();
   const projectHref = projectId ? home(projectId) : "";
-  const settingsHref = can("company:manage") ? appRoutes.organizationSettings : appRoutes.accountProfile;
+  const settingsHref = ready && can("company:manage") ? appRoutes.organizationSettings : appRoutes.accountProfile;
   const nav = [
     { title: "Projects", href: appRoutes.projects },
     ...(projectId ? [{ title: "Project", href: projectHref }] : []),

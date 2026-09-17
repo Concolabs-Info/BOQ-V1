@@ -8,16 +8,18 @@ export function OnboardingShell({
   heading,
   sub,
   mobileHint,
+  layout,
   children,
 }: {
   rail: ReactNode;
   heading: string;
   sub?: string;
   mobileHint?: string;
+  layout?: "form" | "document";
   children: ReactNode;
 }) {
   return (
-    <SplitPane rail={rail} heading={heading} sub={sub} mobileHint={mobileHint} from="onboarding">
+    <SplitPane rail={rail} heading={heading} sub={sub} mobileHint={mobileHint} from="onboarding" layout={layout}>
       {children}
     </SplitPane>
   );

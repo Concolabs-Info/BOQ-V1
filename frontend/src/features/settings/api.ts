@@ -35,6 +35,7 @@ export type PendingInvite = {
   workspace_ids: string[];
   expires_at: string | null;
   created_at: string | null;
+  existing_account?: boolean;
 };
 
 export type MemberDirectory = {
@@ -126,7 +127,7 @@ export function revokeInvite(invitationId: string) {
 }
 
 export function resendInvite(invitationId: string) {
-  return requestJson<{ sent: number; failures: { email: string; reason: string }[] }>(
+  return requestJson<{ sent: number; existing_accounts?: string[]; failures: { email: string; reason: string }[] }>(
     `/api/v1/platform/invitations/${encodeURIComponent(invitationId)}/resend`,
     {
       method: "POST",

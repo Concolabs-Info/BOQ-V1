@@ -23,6 +23,10 @@ def test_me_reports_no_organization_when_not_a_member(monkeypatch):
     assert body["membership_role"] is None
     assert body["permissions"] == []
     assert body["is_super_admin"] is False
+    assert body["terms_accepted"] is False
+    assert body["terms_version"] is None
+    assert body["role_label"] is None
+    assert body["role_description"] is None
 
 
 def test_me_reports_the_company_and_permissions_for_a_member(monkeypatch):
@@ -33,6 +37,11 @@ def test_me_reports_the_company_and_permissions_for_a_member(monkeypatch):
         lambda user_id: CompanyMembership(company_id="c1", company_name="Acme", role="admin"),
     )
     monkeypatch.setattr(platform, "permissions_for_membership", lambda found: ["company:manage"])
+    monkeypatch.setattr(
+        platform,
+        "role_identity",
+        lambda company_id, role: ("Owner / Admin", "Company director or ops manager. Full access."),
+    )
     try:
         response = client.get("/api/v1/platform/me")
     finally:
@@ -42,6 +51,8 @@ def test_me_reports_the_company_and_permissions_for_a_member(monkeypatch):
     body = response.json()
     assert body["organization"] == {"id": "c1", "name": "Acme", "status": "active", "membership_role": "admin", "logo_url": None}
     assert body["membership_role"] == "admin"
+    assert body["role_label"] == "Owner / Admin"
+    assert body["role_description"] == "Company director or ops manager. Full access."
     assert "company:manage" in body["permissions"]
 
 

@@ -9,9 +9,11 @@ import { LoadingState } from "@/shared/components/LoadingState";
 import { SettingsCard, SettingsStack } from "./SettingsCard";
 import { useClerkAccount } from "./useClerkAccount";
 import { ClerkAvatar } from "@/features/platform/components/NavUser";
+import { useAccess } from "@/features/platform/hooks/useAccess";
 
 export function AccountProfileForm() {
   const { user, loaded, refresh } = useClerkAccount();
+  const { roleLabel, roleDescription } = useAccess();
   const fileRef = useRef<HTMLInputElement>(null);
   const [firstName, setFirstName] = useState(user?.firstName ?? "");
   const [lastName, setLastName] = useState(user?.lastName ?? "");
@@ -190,18 +192,26 @@ export function AccountProfileForm() {
       >
         <input ref={fileRef} type="file" accept="image/*" className="sr-only" onChange={onPickPhoto} />
         {profileError ? <p className="mb-3 text-sm text-red-600">{profileError}</p> : null}
-        <div className="flex items-center gap-3">
-          <ClerkAvatar
-            imageUrl={localPhoto ?? (user.hasImage ? user.imageUrl : null)}
-            cacheKey={localPhoto ? null : user.updatedAt}
-            name={displayName}
-            email={user.primaryEmailAddress?.emailAddress}
-            className="size-14 text-base"
-          />
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-medium text-slate-950">{displayName}</p>
-            <p className="truncate text-xs text-slate-500">{user.primaryEmailAddress?.emailAddress}</p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <ClerkAvatar
+              imageUrl={localPhoto ?? (user.hasImage ? user.imageUrl : null)}
+              cacheKey={localPhoto ? null : user.updatedAt}
+              name={displayName}
+              email={user.primaryEmailAddress?.emailAddress}
+              className="size-14 text-base"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium text-slate-950">{displayName}</p>
+              <p className="truncate text-xs text-slate-500">{user.primaryEmailAddress?.emailAddress}</p>
+            </div>
           </div>
+          {roleLabel ? (
+            <div className="min-w-0 sm:max-w-sm sm:text-right">
+              <p className="truncate font-medium text-slate-950">{roleLabel}</p>
+              {roleDescription ? <p className="mt-0.5 text-sm leading-6 text-slate-500">{roleDescription}</p> : null}
+            </div>
+          ) : null}
         </div>
       </SettingsCard>
 

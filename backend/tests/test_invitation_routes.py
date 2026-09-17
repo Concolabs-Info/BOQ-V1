@@ -54,6 +54,7 @@ def test_send_invites_returns_sent_and_failures(monkeypatch):
     body = response.json()
     assert body["sent"] == 1
     assert body["failures"] == [{"email": "bad@x.com", "reason": "Pick an assignable role."}]
+    assert body["existing_accounts"] == []
 
 
 def test_claim_requires_authentication():
@@ -93,6 +94,19 @@ def test_claim_maps_expired(monkeypatch):
     assert response.json()["detail"]["code"] == "expired"
 
 
+def test_claim_maps_terms_required(monkeypatch):
+    _auth()
+
+    def boom(user, token=None):
+        raise InvitationError("terms", "Accept the current terms to continue.")
+
+    monkeypatch.setattr(platform, "claim_invitation", boom)
+    response = client.post("/api/v1/platform/invitations/claim", json={})
+    _clear()
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "terms"
+
+
 def test_patch_invite_updates_role_and_projects(monkeypatch):
     _auth()
     monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
@@ -120,6 +134,16 @@ def test_patch_invite_updates_role_and_projects(monkeypatch):
     assert response.status_code == 200
     assert response.json()["role"] == "chief_estimator"
     assert response.json()["workspace_ids"] == ["p1"]
+    assert response.json()["existing_account"] is False
+
+
+def test_decline_pending_invite_route(monkeypatch):
+    _auth()
+    monkeypatch.setattr(platform, "decline_pending_invites", lambda user: 2)
+    response = client.post("/api/v1/platform/onboarding/invite/decline")
+    _clear()
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "revoked": 2}
 
 
 def test_patch_invite_maps_invalid(monkeypatch):

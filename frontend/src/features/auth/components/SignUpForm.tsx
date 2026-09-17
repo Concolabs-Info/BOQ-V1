@@ -5,8 +5,7 @@ import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
 import { SplitPane } from "@/features/brand/SplitPane";
 import { BrandRailNote, OnboardingStepper } from "@/features/onboarding/components/OnboardingStepper";
-import { claimInvitationWithSession } from "@/features/onboarding/api";
-import { FLOW_STEPS } from "@/features/onboarding/types";
+import { FLOW_STEPS, INVITE_FLOW_STEPS } from "@/features/onboarding/types";
 import { Button } from "@/shared/components/Button";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { AuthField } from "./AuthField";
@@ -21,6 +20,7 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
   const clerk = useClerk();
   const ready = clerk.loaded;
   const joining = Boolean(invitationTicket);
+  const flowSteps = joining ? INVITE_FLOW_STEPS : FLOW_STEPS;
 
   const [step, setStep] = useState<"details" | "code">("details");
   const [firstName, setFirstName] = useState("");
@@ -82,8 +82,7 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
         });
         if (result.status === "complete" && result.createdSessionId) {
           await clerk.setActive({ session: result.createdSessionId });
-          await claimInvitationWithSession(() => clerk.session?.getToken() ?? Promise.resolve(null));
-          hardNavigate(appRoutes.projects);
+          hardNavigate(appRoutes.onboardingTerms);
           return;
         }
         setError("We couldn't finish joining. Try the invite link again.");
@@ -168,7 +167,7 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
   return (
     <SplitPane
       from="sign-up"
-      rail={isCode ? <OnboardingStepper current={0} /> : <BrandRailNote />}
+      rail={isCode ? <OnboardingStepper current={0} steps={flowSteps} /> : <BrandRailNote />}
       heading={
         isCode ? "Check your email" : joining ? "Accept your invitation" : "Let's get your company set up on Quanto"
       }
@@ -176,10 +175,10 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
         isCode
           ? `Enter the 6-digit code we sent to ${email}.`
           : joining
-            ? "Set your name and password to join the company. Your email is already confirmed."
+            ? "Set your name and password to join the company. You'll agree to the terms next. Your email is already confirmed."
             : "Start with your work email. We'll take it from there."
       }
-      mobileHint={isCode ? `Step 1 of ${FLOW_STEPS.length}` : undefined}
+      mobileHint={isCode ? `Step 1 of ${flowSteps.length}` : undefined}
     >
       {isCode ? (
         <div className="flex flex-col gap-5">
@@ -262,7 +261,7 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
             />
             <div id="clerk-captcha" className="empty:hidden" />
             <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
-              {busy ? (joining ? "Joining…" : "Creating account…") : joining ? "Join company" : "Continue"}
+              {busy ? "Creating account…" : "Continue"}
             </Button>
           </form>
           {joining && notice ? <p className="text-sm text-slate-500">{notice}</p> : null}

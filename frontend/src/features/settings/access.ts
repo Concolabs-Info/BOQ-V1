@@ -3,7 +3,7 @@ import { appRoutes } from "@/shared/constants/appRoutes";
 export const PRE_PERMISSIONS = ["pipeline:upload", "pipeline:configure", "pipeline:start_takeoff"] as const;
 
 export type WorkflowStage = "pre" | "takeoff" | "review" | "boq";
-export type SettingsSection = "company" | "members" | "roles" | "billing" | "account";
+export type SettingsSection = "company" | "companyOverview" | "members" | "roles" | "billing" | "account";
 
 export function hasPermission(permissions: readonly string[] | null | undefined, key: string) {
   return Boolean(permissions?.includes(key));
@@ -119,7 +119,8 @@ export function settingsSectionFromPath(pathname: string): SettingsSection | nul
   if (pathname.startsWith("/organization/members")) return "members";
   if (pathname.startsWith("/organization/roles")) return "roles";
   if (pathname.startsWith("/organization/billing")) return "billing";
-  if (pathname === "/organization" || pathname.startsWith("/organization/settings")) return "company";
+  if (pathname.startsWith("/organization/settings")) return "company";
+  if (pathname === "/organization") return "companyOverview";
   if (pathname.startsWith("/account/")) return "account";
   return null;
 }
@@ -127,9 +128,11 @@ export function settingsSectionFromPath(pathname: string): SettingsSection | nul
 export function canAccessSettingsSection(
   permissions: readonly string[] | null | undefined,
   section: SettingsSection,
+  options: { hasCompany?: boolean } = {},
 ) {
   if (section === "account") return true;
-  if (section === "company") return hasPermission(permissions, "company:manage");
+  if (section === "company") return Boolean(options.hasCompany);
+  if (section === "companyOverview") return hasPermission(permissions, "company:manage");
   if (section === "members" || section === "roles") return hasPermission(permissions, "members:manage");
   return hasPermission(permissions, "billing:manage");
 }
