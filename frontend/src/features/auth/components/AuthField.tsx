@@ -37,14 +37,14 @@ export function AuthField({
   const inputType = isPassword && reveal ? "text" : type;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col">
       <div className="flex items-baseline justify-between gap-3">
         <FieldLabel htmlFor={id} required={required}>
           {label}
         </FieldLabel>
         {hint}
       </div>
-      <div className="relative">
+      <div className="relative mt-1.5">
         <input
           id={id}
           type={inputType}
@@ -65,7 +65,7 @@ export function AuthField({
           </button>
         ) : null}
       </div>
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {error ? <p className="mt-1.5 text-sm leading-5 text-red-600">{error}</p> : null}
     </div>
   );
 }

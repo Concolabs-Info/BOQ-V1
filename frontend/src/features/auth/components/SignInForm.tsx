@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
+import { claimInvitationWithSession } from "@/features/onboarding/api";
 import { Button } from "@/shared/components/Button";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { AuthField } from "./AuthField";
@@ -10,6 +11,7 @@ import { AuthShell } from "./AuthShell";
 import { CodeField } from "./CodeField";
 import { SecuredByClerk } from "./SecuredByClerk";
 import { thrownErrText } from "../clerk-errors";
+import { passwordLengthPlaceholder } from "../password";
 import { hardNavigate } from "../hard-navigate";
 import { signOutIfSignedIn } from "../sign-out-if-signed-in";
 
@@ -49,6 +51,9 @@ export function SignInForm({
 
   async function enterSession(createdSessionId: string) {
     await clerk.setActive({ session: createdSessionId });
+    if (invitationTicket) {
+      await claimInvitationWithSession(() => clerk.session?.getToken() ?? Promise.resolve(null));
+    }
     land();
   }
 
@@ -414,12 +419,15 @@ export function SignInForm({
             label="New password"
             type="password"
             autoComplete="new-password"
-            placeholder="At least 8 characters"
+            placeholder={passwordLengthPlaceholder()}
             required
             value={newPassword}
-            onChange={(event) => setNewPassword(event.target.value)}
+            onChange={(event) => {
+              setNewPassword(event.target.value);
+              if (error) setError(null);
+            }}
+            error={error ?? undefined}
           />
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
           <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
             {busy ? "Updating…" : "Set new password"}
           </Button>

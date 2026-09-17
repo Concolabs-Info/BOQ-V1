@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
 import { SplitPane } from "@/features/brand/SplitPane";
 import { BrandRailNote, OnboardingStepper } from "@/features/onboarding/components/OnboardingStepper";
+import { claimInvitationWithSession } from "@/features/onboarding/api";
 import { FLOW_STEPS } from "@/features/onboarding/types";
 import { Button } from "@/shared/components/Button";
 import { appRoutes } from "@/shared/constants/appRoutes";
@@ -12,6 +13,7 @@ import { AuthField } from "./AuthField";
 import { CodeField } from "./CodeField";
 import { SecuredByClerk } from "./SecuredByClerk";
 import { thrownErrText } from "../clerk-errors";
+import { passwordLengthPlaceholder } from "../password";
 import { hardNavigate } from "../hard-navigate";
 import { signOutIfSignedIn } from "../sign-out-if-signed-in";
 
@@ -80,6 +82,7 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
         });
         if (result.status === "complete" && result.createdSessionId) {
           await clerk.setActive({ session: result.createdSessionId });
+          await claimInvitationWithSession(() => clerk.session?.getToken() ?? Promise.resolve(null));
           hardNavigate(appRoutes.projects);
           return;
         }
@@ -249,13 +252,15 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
               type="password"
               autoComplete="new-password"
               required
-              placeholder="At least 8 characters"
+              placeholder={passwordLengthPlaceholder()}
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              error={joining ? undefined : (error ?? undefined)}
+              onChange={(event) => {
+                setPassword(event.target.value);
+                if (error) setError(null);
+              }}
+              error={error ?? undefined}
             />
-            {joining && error ? <p className="text-sm text-red-600">{error}</p> : null}
-            <div id="clerk-captcha" />
+            <div id="clerk-captcha" className="empty:hidden" />
             <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
               {busy ? (joining ? "Joining…" : "Creating account…") : joining ? "Join company" : "Continue"}
             </Button>
