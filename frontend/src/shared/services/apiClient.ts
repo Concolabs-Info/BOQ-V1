@@ -68,6 +68,20 @@ export function setCachedJson<T>(path: string, value: T): void {
   }
 }
 
+export function clearAllCachedJson(): void {
+  if (!canUseStorage()) return;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < window.sessionStorage.length; i += 1) {
+      const key = window.sessionStorage.key(i);
+      if (key && key.startsWith(CACHE_PREFIX)) keys.push(key);
+    }
+    keys.forEach((key) => window.sessionStorage.removeItem(key));
+  } catch {
+    // cache is only used to keep the UI instant
+  }
+}
+
 export function removeCachedJson(path: string): void {
   if (!canUseStorage()) return;
   try {
