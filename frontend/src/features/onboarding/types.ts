@@ -6,7 +6,7 @@ export type OnboardingPath =
   | "REMOVED"
   | "DONE";
 
-export type WizardStep = "branch" | "invite" | "workspace";
+export type WizardStep = "branch" | "invite" | "project";
 
 export type ExistingCompany = {
   id: string;
@@ -39,7 +39,7 @@ export const FLOW_STEPS = [
   { title: "Account", blurb: "Your name, email and password" },
   { title: "Company", blurb: "Name and country" },
   { title: "Invite team", blurb: "Optional teammates" },
-  { title: "Project workspace", blurb: "Your first job" },
+  { title: "Project", blurb: "Your first job" },
 ] as const;
 
 export const WIZARD_STEP_OFFSET = 1;

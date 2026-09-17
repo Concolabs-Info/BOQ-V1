@@ -122,15 +122,40 @@ def test_create_company_maps_field_error(monkeypatch):
 
 def test_create_project_returns_201(monkeypatch):
     _auth()
-    monkeypatch.setattr(
-        platform,
-        "create_first_project",
-        lambda user, **kwargs: CreatedProject(id="p1", name=kwargs["name"]),
+    captured: dict = {}
+
+    def fake_create(user, **kwargs):
+        captured.update(kwargs)
+        return CreatedProject(id="p1", name=kwargs["name"])
+
+    monkeypatch.setattr(platform, "create_first_project", fake_create)
+    response = client.post(
+        "/api/v1/platform/onboarding/project",
+        json={
+            "name": "Tower",
+            "project_number": "P-01",
+            "client_name": "City",
+            "location": "Colombo",
+            "description": "High-rise",
+        },
     )
-    response = client.post("/api/v1/platform/onboarding/project", json={"name": "Tower"})
     _clear()
     assert response.status_code == 201
     assert response.json() == {"id": "p1", "name": "Tower"}
+    assert captured == {
+        "name": "Tower",
+        "project_number": "P-01",
+        "client_name": "City",
+        "location": "Colombo",
+        "description": "High-rise",
+    }
+
+
+def test_create_project_requires_name():
+    _auth()
+    response = client.post("/api/v1/platform/onboarding/project", json={"name": ""})
+    _clear()
+    assert response.status_code == 422
 
 
 def test_create_project_requires_company(monkeypatch):

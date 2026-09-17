@@ -103,3 +103,79 @@ def test_create_role_route(monkeypatch):
     _clear()
     assert response.status_code == 201
     assert response.json()["key"] == "custom_site_qs"
+
+
+def test_update_built_in_role_route(monkeypatch):
+    _auth()
+    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
+    seen = {}
+    monkeypatch.setattr(
+        platform,
+        "update_role",
+        lambda membership, role_id, **kwargs: seen.update(role_id=role_id, **kwargs) or {
+            "id": "r-qs",
+            "key": "qs",
+            "name": kwargs["name"],
+            "description": kwargs.get("description") or "",
+            "permissions": kwargs["permissions"],
+            "built_in": True,
+        },
+    )
+    response = client.patch(
+        "/api/v1/platform/company/roles/qs",
+        json={"name": "QS Lead", "description": "Field", "permissions": ["takeoff:view"]},
+    )
+    _clear()
+    assert response.status_code == 200
+    assert response.json()["built_in"] is True
+    assert seen["role_id"] == "qs"
+
+
+def test_account_deletion_status_route(monkeypatch):
+    _auth()
+    monkeypatch.setattr(
+        platform,
+        "account_deletion_status",
+        lambda user_id: {"kind": "last-admin", "company_name": "Acme", "other_members": 1},
+    )
+    response = client.get("/api/v1/platform/account/deletion-status")
+    _clear()
+    assert response.status_code == 200
+    assert response.json() == {"kind": "last-admin", "company_name": "Acme", "other_members": 1}
+
+
+def test_delete_account_route(monkeypatch):
+    _auth()
+    seen = {}
+    monkeypatch.setattr(
+        platform,
+        "delete_my_account",
+        lambda user, confirm_name=None: seen.update(user=user.id, confirm_name=confirm_name),
+    )
+    response = client.request("DELETE", "/api/v1/platform/account", json={"confirm_name": "Acme"})
+    _clear()
+    assert response.status_code == 204
+    assert seen == {"user": "user_1", "confirm_name": "Acme"}
+
+
+def test_delete_company_requires_billing_manage(monkeypatch):
+    _auth()
+    monkeypatch.setattr(
+        membership_mod,
+        "get_company_membership",
+        lambda user_id: CompanyMembership(company_id="c1", company_name="Acme", role="qs"),
+    )
+    response = client.request("DELETE", "/api/v1/platform/company", json={"confirm_name": "Acme"})
+    _clear()
+    assert response.status_code == 403
+
+
+def test_delete_company_route(monkeypatch):
+    _auth()
+    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
+    seen = {}
+    monkeypatch.setattr(platform, "delete_company", lambda membership, confirm_name: seen.update(confirm_name=confirm_name))
+    response = client.request("DELETE", "/api/v1/platform/company", json={"confirm_name": "Acme"})
+    _clear()
+    assert response.status_code == 204
+    assert seen["confirm_name"] == "Acme"

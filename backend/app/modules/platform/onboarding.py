@@ -1,4 +1,4 @@
-"""Create a company and first project for a Clerk user completing onboarding."""
+"""Create a company and first project during onboarding."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -226,6 +226,11 @@ def create_company(
     return CreatedCompany(id=str(company["id"]), name=company["name"])
 
 
+def _optional_text(value: str | None) -> str | None:
+    cleaned = (value or "").strip()
+    return cleaned or None
+
+
 def create_first_project(
     user: CurrentUser,
     *,
@@ -233,6 +238,7 @@ def create_first_project(
     client_name: str | None = None,
     location: str | None = None,
     project_number: str | None = None,
+    description: str | None = None,
 ) -> CreatedProject:
     membership = get_company_membership(user.id)
     if membership is None:
@@ -244,14 +250,15 @@ def create_first_project(
 
     with transaction() as conn:
         project = conn.execute(
-            """INSERT INTO project (name, project_number, client_name, location, company_id, created_by_user_id)
-               VALUES (%s, %s, %s, %s, %s, %s)
+            """INSERT INTO project (name, project_number, client_name, location, description, company_id, created_by_user_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)
                RETURNING id, name""",
             (
                 clean_name,
-                (project_number or "").strip() or None,
-                (client_name or "").strip() or None,
-                (location or "").strip() or None,
+                _optional_text(project_number),
+                _optional_text(client_name),
+                _optional_text(location),
+                _optional_text(description),
                 membership.company_id,
                 user.id,
             ),

@@ -10,7 +10,7 @@ from app.modules.platform.membership import CompanyMembership
 client = TestClient(app)
 USER = CurrentUser(id="user_1", email="owner@acme.com", full_name="A")
 ADMIN = CompanyMembership(company_id="c1", company_name="Acme", role="admin")
-VIEWER = CompanyMembership(company_id="c1", company_name="Acme", role="viewer")
+QS = CompanyMembership(company_id="c1", company_name="Acme", role="qs")
 
 
 def _auth():
@@ -28,7 +28,7 @@ def test_send_invites_requires_authentication():
 
 def test_send_invites_forbidden_without_members_manage(monkeypatch):
     _auth()
-    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: VIEWER)
+    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: QS)
     response = client.post("/api/v1/platform/invitations", json={"invites": [{"email": "a@x.com", "role": "qs"}]})
     _clear()
     assert response.status_code == 403

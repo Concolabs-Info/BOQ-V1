@@ -178,11 +178,8 @@ class OnboardingCompanyIn(ApiModel):
     lock_domain: bool = False
 
 
-class OnboardingProjectIn(ApiModel):
-    name: str = Field(min_length=1, max_length=160)
-    client_name: str | None = Field(default=None, max_length=160)
-    location: str | None = Field(default=None, max_length=240)
-    project_number: str | None = Field(default=None, max_length=80)
+class OnboardingProjectIn(CreateProject):
+    pass
 
 
 class OnboardingCompanyOut(ApiModel):
@@ -263,6 +260,20 @@ class CompanyPatchIn(ApiModel):
     country: str = Field(default="Sri Lanka", max_length=80)
     tax_id: str | None = Field(default=None, max_length=80)
     phone: str | None = Field(default=None, max_length=40)
+
+
+class CompanyDeleteIn(ApiModel):
+    confirm_name: str = Field(min_length=1, max_length=160)
+
+
+class AccountDeletionOut(ApiModel):
+    kind: Literal["free", "last-admin"]
+    company_name: str | None = None
+    other_members: int | None = None
+
+
+class AccountDeleteIn(ApiModel):
+    confirm_name: str | None = Field(default=None, max_length=160)
 
 
 class MemberOut(ApiModel):

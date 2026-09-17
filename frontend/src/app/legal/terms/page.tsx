@@ -18,7 +18,7 @@ export default function TermsPage({
       <h2>Accounts and companies</h2>
       <ul>
         <li>
-          Sign-in is handled by Clerk. A company on Quanto is stored in our database, not as a Clerk Organization.
+          You sign in with your email. Each company on Quanto is one construction firm.
         </li>
         <li>One company on Quanto represents one construction firm. You may not create duplicate companies for the same firm.</li>
         <li>You are responsible for keeping your sign-in credentials secure and for activity under your account.</li>

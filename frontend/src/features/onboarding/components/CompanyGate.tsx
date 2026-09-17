@@ -47,7 +47,6 @@ export function CompanyGate({ children }: { children: ReactNode }) {
             context = await getPlatformContext();
           }
         } catch {
-          // No pending invite, or it is no longer valid — fall through to onboarding.
         }
       }
       if (!mounted) return;

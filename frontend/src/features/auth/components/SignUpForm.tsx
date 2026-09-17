@@ -129,10 +129,10 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
       } else if (result.missingFields.length > 0) {
         const extra = result.missingFields.filter((field) => field !== "email_address");
         if (extra.some((field) => field.includes("organization"))) {
-          setError("Clerk Organizations must be off. Quanto stores the company in our database after this step.");
+          setError("We couldn't finish creating your account. Please try again.");
         } else {
           setError(
-            `Your Clerk instance still needs: ${result.missingFields.join(", ")}. Turn extra fields off in Clerk so email + password is enough.`,
+            "We need an email and password to create your account. Please try again.",
           );
         }
       } else {

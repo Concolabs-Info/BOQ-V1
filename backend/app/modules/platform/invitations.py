@@ -18,10 +18,11 @@ INVITE_TTL_DAYS = 14
 
 
 class InvitationError(Exception):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, field: str | None = None):
         super().__init__(message)
         self.code = code
         self.message = message
+        self.field = field
 
 
 @dataclass(frozen=True)
@@ -154,7 +155,13 @@ def send_invites(
                         (clerk_invite.id, created["id"]),
                     )
         except ClerkApiError as exc:
-            result.failures.append(InviteFailure(email=email, reason=str(exc)))
+            detail = str(exc).lower()
+            reason = (
+                "That email already has a pending invitation."
+                if "already" in detail
+                else "We couldn't send that invitation. Try again."
+            )
+            result.failures.append(InviteFailure(email=email, reason=reason))
             continue
         result.sent += 1
 

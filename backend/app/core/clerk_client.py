@@ -78,6 +78,19 @@ def fetch_clerk_user(user_id: str) -> ClerkProfile:
     return ClerkProfile(email=email, full_name=full_name)
 
 
+def delete_user(user_id: str) -> None:
+    """Delete a Clerk user. 404 means the account is already gone."""
+    user_id = _require_clerk_id(user_id, what="Clerk user id")
+    response = httpx.delete(
+        f"https://api.clerk.com/v1/users/{user_id}",
+        headers={"Authorization": f"Bearer {_secret_key()}"},
+        timeout=10.0,
+    )
+    if response.status_code in {200, 204, 404}:
+        return
+    raise ClerkApiError(_error_message(response))
+
+
 def create_invitation(
     email: str,
     *,

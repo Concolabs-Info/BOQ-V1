@@ -32,7 +32,7 @@ def test_require_permission_raises_403_when_role_lacks_it(monkeypatch):
     monkeypatch.setattr(
         membership,
         "get_company_membership",
-        lambda user_id: membership.CompanyMembership(company_id="c1", company_name="Acme", role="viewer"),
+        lambda user_id: membership.CompanyMembership(company_id="c1", company_name="Acme", role="qs"),
     )
     dependency = membership.require_permission("company:manage")
     with pytest.raises(HTTPException) as excinfo:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ....core.auth import CurrentUser, get_current_user
+from ....modules.platform.account import account_deletion_status, delete_company, delete_my_account
 from ....modules.platform.company import get_company, update_company
 from ....modules.platform.invitations import (
     InvitationError,
@@ -25,7 +26,7 @@ from ....modules.platform.roles import (
     delete_custom_role,
     list_roles,
     permissions_for_membership,
-    update_custom_role,
+    update_role,
 )
 from ....modules.platform.onboarding import (
     OnboardingError,
@@ -37,6 +38,9 @@ from ....modules.platform.onboarding import (
 from ..schemas import (
     CompanyOut,
     CompanyPatchIn,
+    CompanyDeleteIn,
+    AccountDeletionOut,
+    AccountDeleteIn,
     CustomRoleIn,
     InviteBatchIn,
     InviteBatchOut,
@@ -161,6 +165,7 @@ def post_onboarding_project(
             client_name=body.client_name,
             location=body.location,
             project_number=body.project_number,
+            description=body.description,
         )
     except OnboardingError as exc:
         raise _http_for(exc) from exc
@@ -205,7 +210,7 @@ def post_invitation_claim(
 def _invite_http(exc: InvitationError) -> HTTPException:
     return HTTPException(
         status_code={"expired": 410, "already_member": 409}.get(exc.code, 400),
-        detail={"code": exc.code, "message": exc.message},
+        detail={"code": exc.code, "message": exc.message, "field": exc.field},
     )
 
 
@@ -221,6 +226,33 @@ def patch_company_settings(
 ) -> CompanyOut:
     try:
         return CompanyOut(**update_company(membership, name=body.name, country=body.country, tax_id=body.tax_id, phone=body.phone))
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
+@router.delete("/platform/company", status_code=204)
+def delete_company_settings(
+    body: CompanyDeleteIn,
+    membership: CompanyMembership = Depends(require_permission("billing:manage")),
+) -> None:
+    try:
+        delete_company(membership, body.confirm_name)
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
+@router.get("/platform/account/deletion-status", response_model=AccountDeletionOut)
+def get_account_deletion_status(current_user: CurrentUser = Depends(get_current_user)) -> AccountDeletionOut:
+    return AccountDeletionOut(**account_deletion_status(current_user.id))
+
+
+@router.delete("/platform/account", status_code=204)
+def delete_account(
+    current_user: CurrentUser = Depends(get_current_user),
+    body: AccountDeleteIn | None = None,
+) -> None:
+    try:
+        delete_my_account(current_user, confirm_name=(body.confirm_name if body else None))
     except InvitationError as exc:
         raise _invite_http(exc) from exc
 
@@ -318,7 +350,7 @@ def patch_company_role(
     membership: CompanyMembership = Depends(require_permission("members:manage")),
 ) -> RoleOut:
     try:
-        return RoleOut(**update_custom_role(
+        return RoleOut(**update_role(
             membership,
             role_id,
             name=body.name,

@@ -245,15 +245,15 @@ export function OrganizationDashboardPage() {
           <Card className="mb-6">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Workspace</p>
             <h2 className="mt-2 text-xl font-semibold text-slate-950">{name}</h2>
-            <p className="mt-1 text-sm text-slate-500">One company per account. Invites are sent by Clerk.</p>
+            <p className="mt-1 text-sm text-slate-500">One company per account.</p>
           </Card>
           <div className="grid gap-5 md:grid-cols-2">
             <StatCard label="Members" value={String(memberCount)} />
-            <StatCard label="Pending Clerk invites" value={String(inviteCount)} />
+            <StatCard label="Pending invites" value={String(inviteCount)} />
           </div>
           <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            <ActionCard title="Members" description="Invite people with Clerk application invitations. Resend or revoke from the same list." href={appRoutes.organizationMembers} action="Manage" />
-            <ActionCard title="Roles" description="Built-in and custom roles stored in the company database." href={appRoutes.organizationRoles} action="Manage" />
+            <ActionCard title="Members" description="Invite people, change roles, and revoke pending invites." href={appRoutes.organizationMembers} action="Manage" />
+            <ActionCard title="Roles" description="Built-in and custom roles for your team." href={appRoutes.organizationRoles} action="Manage" />
             <ActionCard title="Company" description="Name, country, tax number, and phone." href={appRoutes.organizationSettings} action="Open" />
           </div>
         </>

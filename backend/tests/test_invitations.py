@@ -52,7 +52,7 @@ def test_hash_invite_token_is_stable():
 def test_resolve_invite_role_rejects_admin():
     assert invitations.resolve_invite_role("admin") == ""
     assert invitations.resolve_invite_role("qs") == "qs"
-    assert invitations.resolve_invite_role(None) == "viewer"
+    assert invitations.resolve_invite_role(None) == "qs"
 
 
 def test_send_invites_skips_blank_emails(monkeypatch):
@@ -114,7 +114,7 @@ def test_send_invites_records_clerk_failure(monkeypatch):
     patch_tx(monkeypatch, FakeConn())
     result = invitations.send_invites(ADMIN, MEMBERSHIP, [{"email": "join@acme.com", "role": "qs"}])
     assert result.sent == 0
-    assert result.failures[0].reason == "already invited"
+    assert result.failures[0].reason == "That email already has a pending invitation."
 
 
 def test_claim_returns_already_member(monkeypatch):

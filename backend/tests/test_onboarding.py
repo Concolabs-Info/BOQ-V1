@@ -214,10 +214,27 @@ def test_create_first_project_inserts_project_and_member(monkeypatch):
     )
     conn = FakeConn(project={"id": "p9", "name": "Tower"})
     patch_tx(monkeypatch, conn)
-    created = onboarding.create_first_project(USER, name="Tower", client_name="City")
+    created = onboarding.create_first_project(
+        USER,
+        name="Tower",
+        project_number="P-01",
+        client_name="City",
+        location="Colombo",
+        description="High-rise",
+    )
     assert created == onboarding.CreatedProject(id="p9", name="Tower")
     project_params = next(params for sql, params in conn.calls if "INSERT INTO project " in sql)
-    assert project_params[0] == "Tower"
-    assert project_params[2] == "City"
-    assert project_params[4] == "c1"
+    assert project_params == ("Tower", "P-01", "City", "Colombo", "High-rise", "c1", USER.id)
     assert any("INSERT INTO project_member" in sql for sql, _params in conn.calls)
+
+
+def test_create_first_project_requires_name(monkeypatch):
+    monkeypatch.setattr(
+        onboarding,
+        "get_company_membership",
+        lambda user_id: CompanyMembership(company_id="c1", company_name="Acme", role="admin"),
+    )
+    with pytest.raises(onboarding.OnboardingError) as excinfo:
+        onboarding.create_first_project(USER, name="   ")
+    assert excinfo.value.code == "invalid"
+    assert excinfo.value.field == "name"

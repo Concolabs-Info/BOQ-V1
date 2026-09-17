@@ -8,7 +8,8 @@ import pytest
 
 USER = CurrentUser(id="user_1", email="a@acme.com", full_name="A")
 ADMIN = CompanyMembership(company_id="c1", company_name="Acme", role="admin")
-VIEWER = CompanyMembership(company_id="c1", company_name="Acme", role="viewer")
+PROJECT_MANAGER = CompanyMembership(company_id="c1", company_name="Acme", role="project_manager")
+QA_CHECKER = CompanyMembership(company_id="c1", company_name="Acme", role="qa_checker")
 
 
 def test_upload_requires_pipeline_upload():
@@ -52,17 +53,17 @@ def test_enforce_allows_admin_on_owned_project(monkeypatch):
     assert result.role == "admin"
 
 
-def test_enforce_rejects_viewer_on_takeoff(monkeypatch):
-    monkeypatch.setattr(access, "get_company_membership", lambda user_id: VIEWER)
+def test_enforce_rejects_project_manager_on_takeoff_edit(monkeypatch):
+    monkeypatch.setattr(access, "get_company_membership", lambda user_id: PROJECT_MANAGER)
     monkeypatch.setattr(access, "_company_owns_project", lambda company_id, project_id: True)
-    monkeypatch.setattr(access, "_assigned_to_project", lambda user_id, project_id: True)
     with pytest.raises(HTTPException) as excinfo:
-        access.enforce_workspace_access(_request("/api/v1/projects/p1/takeoff/walls"), USER)
+        access.enforce_workspace_access(_request("/api/v1/projects/p1/takeoff/walls/analyze", method="POST"), USER)
     assert excinfo.value.status_code == 403
 
 
-def test_enforce_scopes_viewer_to_assigned_projects(monkeypatch):
-    monkeypatch.setattr(access, "get_company_membership", lambda user_id: VIEWER)
+def test_workspace_scoped_role_must_be_assigned(monkeypatch):
+    monkeypatch.setattr(access, "WORKSPACE_SCOPED_ROLES", frozenset({"qa_checker"}))
+    monkeypatch.setattr(access, "get_company_membership", lambda user_id: QA_CHECKER)
     monkeypatch.setattr(access, "_company_owns_project", lambda company_id, project_id: True)
     monkeypatch.setattr(access, "_assigned_to_project", lambda user_id, project_id: False)
     with pytest.raises(HTTPException) as excinfo:

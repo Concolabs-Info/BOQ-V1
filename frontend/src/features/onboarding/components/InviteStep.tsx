@@ -4,22 +4,13 @@ import { useState } from "react";
 import { AUTH_CONTROL_CLASS } from "@/features/auth/components/AuthField";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/shared/components/Button";
+import { ASSIGNABLE_ROLES, DEFAULT_INVITE_ROLE, roleLabel } from "@/features/settings/rbac";
 import { sendInvites } from "../api";
-
-const ROLE_LABELS: Record<string, string> = {
-  chief_estimator: "Chief Estimator",
-  qs: "Quantity Surveyor",
-  technician: "Takeoff Technician",
-  qa_checker: "QA Checker",
-  project_manager: "Project Manager",
-  site_engineer: "Site Engineer",
-  viewer: "Client / Viewer",
-};
 
 type Row = { email: string; role: string };
 
 export function InviteStep({ onDone }: { onDone: () => void }) {
-  const [rows, setRows] = useState<Row[]>([{ email: "", role: "viewer" }]);
+  const [rows, setRows] = useState<Row[]>([{ email: "", role: DEFAULT_INVITE_ROLE }]);
   const [note, setNote] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -64,13 +55,13 @@ export function InviteStep({ onDone }: { onDone: () => void }) {
               onChange={(event) => update(index, { email: event.target.value })}
             />
             <Select value={row.role} onValueChange={(next) => update(index, { role: String(next) })}>
-              <SelectTrigger className="sm:w-44">
-                <SelectValue>{ROLE_LABELS[row.role] ?? "Select a role"}</SelectValue>
+              <SelectTrigger className="sm:w-[15.5rem] sm:shrink-0">
+                <SelectValue>{roleLabel(row.role)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {Object.entries(ROLE_LABELS).map(([role, label]) => (
+                {ASSIGNABLE_ROLES.map((role) => (
                   <SelectItem key={role} value={role}>
-                    {label}
+                    {roleLabel(role)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -80,7 +71,7 @@ export function InviteStep({ onDone }: { onDone: () => void }) {
         <button
           type="button"
           className="self-start text-sm font-medium text-slate-500 hover:text-slate-950"
-          onClick={() => setRows((current) => [...current, { email: "", role: "viewer" }])}
+          onClick={() => setRows((current) => [...current, { email: "", role: DEFAULT_INVITE_ROLE }])}
         >
           + Add another
         </button>
@@ -90,7 +81,7 @@ export function InviteStep({ onDone }: { onDone: () => void }) {
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <Button type="button" pending={pending} className="h-11 rounded-xl" onClick={() => void send()}>
-          {pending ? "Sending…" : "Send invites"}
+          {pending ? "Sending…" : "Send invitations"}
         </Button>
         <Button type="button" variant="ghost" disabled={pending} className="h-11 rounded-xl" onClick={onDone}>
           Skip for now

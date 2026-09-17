@@ -30,6 +30,7 @@ export async function createOnboardingProject(payload: {
   client_name?: string;
   location?: string;
   project_number?: string;
+  description?: string;
 }) {
   const created = await requestJson<CreatedProject>("/api/v1/platform/onboarding/project", {
     method: "POST",

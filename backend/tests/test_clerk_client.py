@@ -122,3 +122,24 @@ def test_revoke_invitation_ignores_404(monkeypatch):
     monkeypatch.setattr(clerk_client, "get_settings", lambda: FakeSettings())
     monkeypatch.setattr(clerk_client.httpx, "post", lambda *a, **k: FakeResponse(404, {}))
     clerk_client.revoke_invitation("inv_123")
+
+
+def test_delete_user_calls_clerk_delete(monkeypatch):
+    monkeypatch.setattr(clerk_client, "get_settings", lambda: FakeSettings())
+    seen = {}
+
+    def fake_delete(url, headers=None, timeout=None):
+        seen["url"] = url
+        seen["headers"] = headers
+        return FakeResponse(200, {})
+
+    monkeypatch.setattr(clerk_client.httpx, "delete", fake_delete)
+    clerk_client.delete_user("user_123")
+    assert seen["url"] == "https://api.clerk.com/v1/users/user_123"
+    assert seen["headers"]["Authorization"] == "Bearer sk_test_123"
+
+
+def test_delete_user_treats_404_as_already_gone(monkeypatch):
+    monkeypatch.setattr(clerk_client, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(clerk_client.httpx, "delete", lambda *a, **k: FakeResponse(404, {}))
+    clerk_client.delete_user("user_123")

@@ -118,7 +118,7 @@ export function MembersManager() {
       setNote(
         result.failures.length
           ? `Sent ${result.sent}. Problems: ${result.failures.map((failure: { email: string; reason: string }) => `${failure.email} (${failure.reason})`).join(", ")}`
-          : "Clerk invitation sent.",
+          : "Invitation sent.",
       );
     } catch (next) {
       setError(settingsError(next));
@@ -143,7 +143,7 @@ export function MembersManager() {
       {canManage ? (
         <SettingsCard
           title="Invite a member"
-          description="Clerk sends the invitation email. They join this company after they sign up with that address."
+          description="They'll get an email with a link to join your company."
         >
           <form className="flex flex-col gap-4" onSubmit={(event) => void invite(event)}>
             <div className="flex flex-col gap-3 sm:flex-row">
@@ -157,7 +157,7 @@ export function MembersManager() {
                 className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
               />
               <Select value={inviteRole} disabled={busy} onValueChange={(next) => setInviteRole(String(next))}>
-                <SelectTrigger className="sm:w-52">
+                <SelectTrigger className="sm:w-[15.5rem] sm:shrink-0">
                   <SelectValue>
                     {(roles.find((role) => role.key === inviteRole)?.name) ?? roleLabel(inviteRole)}
                   </SelectValue>
@@ -195,7 +195,7 @@ export function MembersManager() {
               </fieldset>
             ) : null}
             <Button type="submit" disabled={busy} className="h-11 w-fit rounded-xl">
-              {busy ? "Sending…" : "Send Clerk invitation"}
+              {busy ? "Sending…" : "Send invitation"}
             </Button>
           </form>
         </SettingsCard>
@@ -203,7 +203,7 @@ export function MembersManager() {
 
       <SettingsCard
         title="Members"
-        description="Company role controls what they can do. Invitees join after they accept the Clerk email."
+        description="Roles control what each person can do."
       >
         <div className="-mx-6 overflow-x-auto">
           <table className="w-full min-w-[640px] border-collapse text-left text-sm">
@@ -325,9 +325,9 @@ export function MembersManager() {
       </SettingsCard>
 
       <SettingsCard
-        title="Pending Clerk invitations"
-        description="People who have been invited but have not joined yet. Resend revokes the previous Clerk invite and sends a new one."
-        footerHint={invites.length === 0 ? "Invites expire if they are not accepted." : undefined}
+        title="Pending invitations"
+        description="These people haven't joined yet. You can resend or cancel an invite."
+        footerHint={invites.length === 0 ? "Invites expire if they aren't accepted." : undefined}
       >
         {invites.length === 0 ? (
           <p className="text-sm text-slate-500">No pending invites.</p>
@@ -356,7 +356,7 @@ export function MembersManager() {
                             variant="secondary"
                             disabled={busy}
                             className="rounded-xl"
-                            onClick={() => void run(() => resendInvite(invite.id), "Clerk invitation resent.")}
+                            onClick={() => void run(() => resendInvite(invite.id), "Invitation resent.")}
                           >
                             Resend
                           </Button>
@@ -395,7 +395,7 @@ export function MembersManager() {
               ? `${confirm.member.full_name || confirm.member.email} will be able to manage members and company settings.`
               : confirm.kind === "remove"
                 ? `${confirm.member.full_name || confirm.member.email} will lose access to this company.`
-                : `Revoke the Clerk invitation for ${confirm.invite.email}? They will no longer be able to join with that email.`
+                : `Revoke the invitation for ${confirm.invite.email}? They will no longer be able to join with that email.`
           }
           confirmLabel={confirm.kind === "promote" ? "Promote" : confirm.kind === "remove" ? "Remove" : "Revoke"}
           danger={confirm.kind !== "promote"}
@@ -406,7 +406,7 @@ export function MembersManager() {
             } else if (confirm.kind === "remove") {
               void run(() => removeMember(confirm.member.id), "Member removed.");
             } else {
-              void run(() => revokeInvite(confirm.invite.id), "Clerk invitation revoked.");
+              void run(() => revokeInvite(confirm.invite.id), "Invitation revoked.");
             }
           }}
         />

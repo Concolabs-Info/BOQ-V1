@@ -145,6 +145,30 @@ export function deleteCompanyRole(roleId: string) {
   });
 }
 
+export type AccountDeletionStatus =
+  | { kind: "free"; company_name?: null; other_members?: null }
+  | { kind: "last-admin"; company_name: string; other_members: number };
+
+export function getAccountDeletionStatus() {
+  return requestJson<AccountDeletionStatus>("/api/v1/platform/account/deletion-status", { skipCache: true });
+}
+
+export function deleteMyAccount(payload?: { confirm_name?: string }) {
+  return requestJson<void>("/api/v1/platform/account", {
+    method: "DELETE",
+    body: JSON.stringify(payload ?? {}),
+    skipCache: true,
+  });
+}
+
+export function deleteCompany(payload: { confirm_name: string }) {
+  return requestJson<void>("/api/v1/platform/company", {
+    method: "DELETE",
+    body: JSON.stringify(payload),
+    skipCache: true,
+  });
+}
+
 export function assignMemberProject(userId: string, projectId: string) {
   return requestJson<void>(`/api/v1/platform/company/members/${encodeURIComponent(userId)}/projects`, {
     method: "POST",

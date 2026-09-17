@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode, type SVGProps } from "react";
 import { appRoutes } from "@/shared/constants/appRoutes";
+import { NavUser } from "./NavUser";
 
 const DESKTOP_NAV_KEY = "quanto:navigation:collapsed";
 let rememberedDesktopCollapsed: boolean | null = null;
@@ -23,7 +24,7 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
   const projectId = workspaceMatch?.[1] || null;
   const nav = [
     { title: "Projects", href: appRoutes.projects },
-    ...(projectId ? [{ title: "Project workspace", href: appRoutes.pre(projectId, "upload") }] : []),
+    ...(projectId ? [{ title: "Project", href: appRoutes.pre(projectId, "upload") }] : []),
   ];
   const settingsActive = pathname.startsWith("/organization") || pathname.startsWith("/account");
 
@@ -36,7 +37,7 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
       <p className="px-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Workspace</p>
       <div className="mt-3 space-y-1">
         {nav.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "/") || (item.title === "Project workspace" && projectId !== null && pathname.includes(`/workspace/${projectId}/`) && !pathname.endsWith("/review") && !pathname.includes("/boq"));
+          const active = pathname === item.href || pathname.startsWith(item.href + "/") || (item.title === "Project" && projectId !== null && pathname.includes(`/workspace/${projectId}/`) && !pathname.endsWith("/review") && !pathname.includes("/boq"));
           return <Link key={item.title} href={item.href} onClick={() => setMobileOpen(false)} className={active ? "flex items-center rounded-xl border-l-2 border-blue-600 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700" : "flex items-center rounded-xl border-l-2 border-transparent px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"}>{item.title}</Link>;
         })}
       </div>
@@ -44,17 +45,28 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
     <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Production</p>
       <p className="mt-2 text-sm font-semibold text-slate-900">Live project data</p>
-      <p className="mt-1 text-xs leading-5 text-slate-500">Pre and production Takeoff modules are connected to the project API, PostgreSQL and drawing storage.</p><button type="button" onClick={() => { window.location.reload(); }} className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700">Reload project</button>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Drawings, takeoff, and the bill stay with this project.</p><button type="button" onClick={() => { window.location.reload(); }} className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700">Reload project</button>
     </div>
   </>;
-  const settingsLink = (
-    <Link
-      href={appRoutes.organizationSettings}
-      onClick={() => setMobileOpen(false)}
-      className={settingsActive ? "flex items-center rounded-xl border-l-2 border-blue-600 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700" : "flex items-center rounded-xl border-l-2 border-transparent px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"}
-    >
-      Settings
-    </Link>
+  const settingsFooter = (
+    <div className="mt-4 shrink-0 border-t border-slate-200 pt-4">
+      <Link
+        href={appRoutes.organizationSettings}
+        onClick={() => setMobileOpen(false)}
+        className={
+          settingsActive
+            ? "flex items-center gap-2 rounded-xl bg-blue-50 px-3 py-2.5 text-sm font-semibold text-blue-700"
+            : "flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+        }
+      >
+        <SettingsIcon className="size-4 shrink-0" />
+        <span className="flex-1">Settings</span>
+        <ChevronRightIcon className="size-4 shrink-0 text-slate-400" />
+      </Link>
+      <div className="mt-2">
+        <NavUser />
+      </div>
+    </div>
   );
 
   return <main className="autoboq-ui h-dvh overflow-hidden bg-[#eef3f8] text-slate-950">
@@ -62,10 +74,10 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
       <aside aria-hidden={desktopCollapsed} className={`hidden shrink-0 overflow-hidden bg-white xl:block ${desktopCollapsed ? "w-0 border-r-0 border-transparent" : "w-[280px] border-r border-slate-200"}`}>
         <div className={`flex h-full w-[280px] flex-col px-5 py-6 ${desktopCollapsed ? "pointer-events-none opacity-0" : "opacity-100"}`}>
           <div className="min-h-0 flex-1 overflow-y-auto">{navigation}</div>
-          <div className="mt-4 shrink-0 border-t border-slate-200 pt-4">{settingsLink}</div>
+          {settingsFooter}
         </div>
       </aside>
-      {mobileOpen ? <div className="fixed inset-0 z-50 xl:hidden"><button aria-label="Close navigation" className="absolute inset-0 bg-slate-950/35" onClick={() => setMobileOpen(false)} /><aside className="relative flex h-full w-[290px] flex-col border-r border-slate-200 bg-white px-5 py-6 shadow-2xl"><button className="ml-auto block rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600" onClick={() => setMobileOpen(false)}>Close</button><div className="mt-4 min-h-0 flex-1 overflow-y-auto">{navigation}</div><div className="mt-4 shrink-0 border-t border-slate-200 pt-4">{settingsLink}</div></aside></div> : null}
+      {mobileOpen ? <div className="fixed inset-0 z-50 xl:hidden"><button aria-label="Close navigation" className="absolute inset-0 bg-slate-950/35" onClick={() => setMobileOpen(false)} /><aside className="relative flex h-full w-[290px] flex-col border-r border-slate-200 bg-white px-5 py-6 shadow-2xl"><button className="ml-auto block rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600" onClick={() => setMobileOpen(false)}>Close</button><div className="mt-4 min-h-0 flex-1 overflow-y-auto">{navigation}</div>{settingsFooter}</aside></div> : null}
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className={officeHeader ? "flex h-[58px] shrink-0 items-stretch gap-3 border-b border-slate-300 bg-[#f8f9fb] px-2" : `flex min-h-[72px] shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 ${flushContent ? "lg:px-7" : "lg:px-8"}`}>
           <div className={officeHeader ? "flex shrink-0 items-center gap-2 border-r border-slate-300 pr-3" : "flex shrink-0 items-center gap-3"}>
@@ -84,3 +96,5 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
 function HexLogoIcon(props: SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 40 40" fill="none" aria-hidden="true" {...props}><rect x="1" y="1" width="38" height="38" rx="12" fill="#0f172a"/><path d="M12 13h16v4H17v4h9v4h-9v4h11" stroke="white" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
 function MenuIcon(props: SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}><path d="M4 7h16M4 12h16M4 17h16"/></svg>; }
 function SidebarIcon(props: SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M9 4v16"/></svg>; }
+function SettingsIcon(props: SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>; }
+function ChevronRightIcon(props: SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}><path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round"/></svg>; }

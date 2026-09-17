@@ -17,12 +17,13 @@ import { OnboardingShell } from "./OnboardingShell";
 import { RemovedFromCompany } from "./RemovedFromCompany";
 import { SignedInAs } from "./SignedInAs";
 
-const STEP_INDEX: Record<WizardStep, number> = { branch: 0, invite: 1, workspace: 2 };
+const STEP_INDEX: Record<WizardStep, number> = { branch: 0, invite: 1, project: 2 };
 
 export function OnboardingWizard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const asFounder = searchParams.get("founder") === "1";
+  const afterDelete = searchParams.get("after") === "deleted";
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [step, setStep] = useState<WizardStep>("branch");
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +38,7 @@ export function OnboardingWizard() {
           router.replace(appRoutes.projects);
           return;
         }
-        if (next.path === "CONTINUE_WIZARD") setStep("invite");
+        if (next.path === "CONTINUE_WIZARD") setStep("project");
       })
       .catch((caught) => {
         if (mounted) setError(caught instanceof Error ? caught.message : "Onboarding could not be loaded.");
@@ -63,7 +64,7 @@ export function OnboardingWizard() {
     );
   }
 
-  if (status.path === "REMOVED" && status.former_company_name) {
+  if (status.path === "REMOVED" && status.former_company_name && !afterDelete && !asFounder) {
     return <RemovedFromCompany companyName={status.former_company_name} />;
   }
 
@@ -72,8 +73,12 @@ export function OnboardingWizard() {
     return (
       <OnboardingShell
         rail={<BrandRailNote />}
-        heading={`${label} is already on Quanto`}
-        sub="Send a request to join. An admin approves it from their members list."
+        heading={afterDelete ? `${label} is still on Quanto` : `${label} is already on Quanto`}
+        sub={
+          afterDelete
+            ? "Your previous company was deleted. Send a request to join this one. An admin approves it from their members list."
+            : "Send a request to join. An admin approves it from their members list."
+        }
       >
         <div className="flex flex-col gap-6">
           <JoinCompany company={status.existing_company} domain={status.domain} />
@@ -84,21 +89,27 @@ export function OnboardingWizard() {
   }
 
   const current = WIZARD_STEP_OFFSET + STEP_INDEX[step];
-  let heading = "Set up your company";
-  let sub = "A few details to get started. Billing and tax info come later.";
+  let heading = afterDelete ? "Create a new company" : "Set up your company";
+  let sub = afterDelete
+    ? "Your previous company was deleted. A few details to get started again."
+    : "A few details to get started. Billing and tax info come later.";
   let body = <CreateCompanyManual onCreated={() => setStep("invite")} />;
 
   if (step === "branch" && status.path === "CREATE_WITH_DOMAIN_LOCK") {
-    heading = `Set up ${status.suggested_name || "your company"}`;
-    sub = "You'll be the owner. We matched your work email domain.";
+    heading = afterDelete
+      ? `Set up ${status.suggested_name || "your company"} again`
+      : `Set up ${status.suggested_name || "your company"}`;
+    sub = afterDelete
+      ? "Your previous company was deleted. Create a new one to keep working on projects."
+      : "You'll be the owner. We matched your work email domain.";
     body = <CreateCompanyLocked suggestedName={status.suggested_name} onCreated={() => setStep("invite")} />;
   } else if (step === "invite") {
     heading = "Invite your team";
-    sub = "Optional. You can do this anytime from Settings.";
-    body = <InviteStep onDone={() => setStep("workspace")} />;
-  } else if (step === "workspace") {
-    heading = "Create your first project workspace";
-    sub = "One project workspace per construction job.";
+    sub = "Optional. They'll get an email with a link to join. You can also do this later from Settings.";
+    body = <InviteStep onDone={() => setStep("project")} />;
+  } else if (step === "project") {
+    heading = "Create your first project";
+    sub = "Same details as a new project later. Only the name is required.";
     body = <FirstProjectStep />;
   }
 

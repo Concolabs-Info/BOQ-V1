@@ -14,8 +14,16 @@ import {
   updateCompanyRole,
   type CompanyRole,
 } from "../api";
-import { CUSTOM_PERMISSION_GROUPS, PERMISSION_GROUPS, PERMISSION_MATRIX, ROLE_LABELS, ROLES } from "../rbac";
+import { CUSTOM_PERMISSION_GROUPS } from "../rbac";
 import { SettingsCard, SettingsStack } from "./SettingsCard";
+
+function accessSummary(permissions: string[]) {
+  const groups = CUSTOM_PERMISSION_GROUPS.filter((group) => group.keys.some((item) => permissions.includes(item.key)));
+  if (groups.length === 0) return "No access yet";
+  if (groups.length === 1) return groups[0].title;
+  if (groups.length === 2) return `${groups[0].title} and ${groups[1].title}`;
+  return `${groups[0].title}, ${groups[1].title}, and ${groups.length - 2} more`;
+}
 
 export function RolesManager() {
   const [roles, setRoles] = useState<CompanyRole[]>([]);
@@ -58,53 +66,30 @@ export function RolesManager() {
 
       <SettingsCard
         title="Built-in roles"
-        description="These stay in Quanto’s database. Clerk is not used for roles."
+        description="People get one of these when you invite them. Open a role to change what they can do."
         footerHint="Owner / Admin is a promotion from the members list, not an invite option."
       >
         <ul className="divide-y divide-slate-100 rounded-2xl border border-slate-200">
           {builtIn.map((role) => (
-            <li key={role.key} className="px-5 py-4">
-              <p className="text-sm font-semibold text-slate-950">{role.name}</p>
-              <p className="mt-1 text-sm leading-6 text-slate-500">{role.description}</p>
+            <li key={role.key} className="flex items-start justify-between gap-3 px-5 py-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-950">{role.name}</p>
+                <p className="mt-1 text-sm leading-6 text-slate-500">{role.description}</p>
+                <p className="mt-1 text-xs text-slate-400">{accessSummary(role.permissions)}</p>
+              </div>
+              {canManage ? (
+                <Button type="button" variant="secondary" className="rounded-xl" onClick={() => setEditor(role)}>
+                  Edit
+                </Button>
+              ) : null}
             </li>
           ))}
         </ul>
-        <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="min-w-[720px] w-full border-collapse text-left text-xs">
-            <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Permission</th>
-                {ROLES.map((role) => (
-                  <th key={role} className="px-2 py-3 text-center">
-                    {ROLE_LABELS[role]}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {PERMISSION_GROUPS.flatMap((group) =>
-                group.keys.map((item, index) => (
-                  <tr key={item.key} className="border-t border-slate-100">
-                    <td className="px-4 py-2.5 text-slate-700">
-                      {index === 0 ? <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{group.title}</span> : null}
-                      {item.name}
-                    </td>
-                    {ROLES.map((role) => (
-                      <td key={role} className="px-2 py-2.5 text-center text-slate-500">
-                        {PERMISSION_MATRIX[item.key]?.includes(role) ? "•" : ""}
-                      </td>
-                    ))}
-                  </tr>
-                )),
-              )}
-            </tbody>
-          </table>
-        </div>
       </SettingsCard>
 
       <SettingsCard
         title="Custom roles"
-        description="Create company-specific roles in Postgres. People get them when you invite or reassign them."
+        description="Add roles that match how your company works. People get them when you invite or reassign them."
         action={
           canManage ? (
             <Button type="button" className="rounded-xl" onClick={() => setEditor("create")}>
@@ -122,7 +107,7 @@ export function RolesManager() {
                 <div>
                   <p className="text-sm font-semibold text-slate-950">{role.name}</p>
                   <p className="mt-1 text-sm leading-6 text-slate-500">{role.description || "Custom role"}</p>
-                  <p className="mt-1 text-xs text-slate-400">{role.permissions.length} permissions</p>
+                  <p className="mt-1 text-xs text-slate-400">{accessSummary(role.permissions)}</p>
                 </div>
                 {canManage ? (
                   <Button type="button" variant="secondary" className="rounded-xl" onClick={() => setEditor(role)}>
@@ -137,6 +122,7 @@ export function RolesManager() {
 
       {editor ? (
         <RoleEditor
+          key={editor === "create" ? "create" : editor.id}
           role={editor === "create" ? null : editor}
           pending={busy}
           onClose={() => setEditor(null)}
@@ -161,7 +147,7 @@ export function RolesManager() {
             }
           }}
           onDelete={
-            editor === "create"
+            editor === "create" || editor.built_in
               ? undefined
               : async () => {
                   setBusy(true);
@@ -200,6 +186,7 @@ function RoleEditor({
   const [name, setName] = useState(role?.name ?? "");
   const [description, setDescription] = useState(role?.description ?? "");
   const [selected, setSelected] = useState<string[]>(role?.permissions ?? []);
+  const isAdmin = role?.key === "admin";
 
   function toggle(key: string, checked: boolean) {
     setSelected((current) => (checked ? [...current, key] : current.filter((item) => item !== key)));
@@ -207,7 +194,10 @@ function RoleEditor({
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    void onSave({ name, description: description || undefined, permissions: selected });
+    const permissions = isAdmin
+      ? Array.from(new Set([...selected, "company:manage", "members:manage", "billing:manage"]))
+      : selected;
+    void onSave({ name, description: description || undefined, permissions });
   }
 
   return (
@@ -217,8 +207,10 @@ function RoleEditor({
         onSubmit={submit}
       >
         <div className="border-b border-slate-100 px-6 py-5">
-          <h3 className="text-lg font-semibold text-slate-950">{role ? "Edit role" : "New role"}</h3>
-          <p className="mt-1 text-sm text-slate-500">Saved on this company in Postgres. Clerk is not involved.</p>
+          <h3 className="text-lg font-semibold text-slate-950">{role ? `Edit ${role.name}` : "New role"}</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Choose what this role can do. Billing stays with owners and admins.
+          </p>
         </div>
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
           <div>
@@ -248,20 +240,29 @@ function RoleEditor({
               <fieldset key={group.title}>
                 <legend className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{group.title}</legend>
                 <div className="mt-2 space-y-1">
-                  {group.keys.map((item) => (
-                    <label key={item.key} className="flex items-center gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={selected.includes(item.key)}
-                        disabled={pending}
-                        onChange={(event) => toggle(item.key, event.target.checked)}
-                      />
-                      {item.name}
-                    </label>
-                  ))}
+                  {group.keys.map((item) => {
+                    const locked = isAdmin && (item.key === "company:manage" || item.key === "members:manage");
+                    return (
+                      <label key={item.key} className="flex items-center gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={locked || selected.includes(item.key)}
+                          disabled={pending || locked}
+                          onChange={(event) => toggle(item.key, event.target.checked)}
+                        />
+                        {item.name}
+                      </label>
+                    );
+                  })}
                 </div>
               </fieldset>
             ))}
+            {isAdmin ? (
+              <label className="flex items-center gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-700">
+                <input type="checkbox" checked disabled />
+                Manage billing
+              </label>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-col gap-2 border-t border-slate-100 px-6 py-4">

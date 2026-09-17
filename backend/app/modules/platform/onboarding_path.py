@@ -1,8 +1,4 @@
-"""Email-domain routing for founder onboarding.
-
-Ported from the quanto-onboard onboarding-path rules. Clerk Organizations are
-not used; a matching domain in our company table is what triggers join-vs-create.
-"""
+"""Email-domain routing for founder onboarding."""
 from __future__ import annotations
 
 from dataclasses import dataclass

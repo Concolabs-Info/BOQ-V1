@@ -9,47 +9,35 @@ ROLES: list[str] = [
     "admin",
     "chief_estimator",
     "qs",
-    "technician",
     "qa_checker",
     "project_manager",
-    "site_engineer",
-    "viewer",
 ]
 
 ROLE_LABELS: dict[str, str] = {
     "admin": "Owner / Admin",
     "chief_estimator": "Chief Estimator",
     "qs": "Quantity Surveyor",
-    "technician": "Takeoff Technician",
     "qa_checker": "QA Checker",
     "project_manager": "Project Manager",
-    "site_engineer": "Site Engineer",
-    "viewer": "Client / Viewer",
 }
 
 ROLE_DESCRIPTIONS: dict[str, str] = {
     "admin": "Company director or ops manager. Full access.",
     "chief_estimator": "Senior QS. Sets rates and final sign-off.",
     "qs": "Quantity Surveyor. Takeoff, bill items, and export. Rates and team admin stay with the Chief Estimator and Owner.",
-    "technician": "Junior QS. Runs the upload to takeoff pipeline.",
     "qa_checker": "Independently verifies quantities before finalization.",
     "project_manager": "Approves and submits, and does not touch measurements.",
-    "site_engineer": "Downstream user of the finished BOQ on site.",
-    "viewer": "External party. Read-only, scoped to assigned projects.",
 }
 
 # Promoting to admin is a confirmed role change, not an invite option.
 ASSIGNABLE_ROLES: list[str] = [
     "chief_estimator",
     "qs",
-    "technician",
     "qa_checker",
     "project_manager",
-    "site_engineer",
-    "viewer",
 ]
 
-DEFAULT_INVITE_ROLE = "viewer"
+DEFAULT_INVITE_ROLE = "qs"
 
 PERMISSIONS: dict[str, str] = {
     "pipeline_upload": "pipeline:upload",
@@ -72,18 +60,15 @@ PERMISSIONS: dict[str, str] = {
 }
 
 PERMISSION_MATRIX: dict[str, list[str]] = {
-    "pipeline:upload": ["admin", "chief_estimator", "qs", "technician"],
-    "pipeline:configure": ["admin", "chief_estimator", "qs", "technician"],
-    "pipeline:start_takeoff": ["admin", "chief_estimator", "qs", "technician"],
-    "takeoff:edit": ["admin", "chief_estimator", "qs", "technician"],
+    "pipeline:upload": ["admin", "chief_estimator", "qs"],
+    "pipeline:configure": ["admin", "chief_estimator", "qs"],
+    "pipeline:start_takeoff": ["admin", "chief_estimator", "qs"],
+    "takeoff:edit": ["admin", "chief_estimator", "qs"],
     "takeoff:resolve_dispute": ["admin", "chief_estimator", "qa_checker"],
-    "takeoff:view": ["admin", "chief_estimator", "qs", "technician", "qa_checker", "project_manager"],
+    "takeoff:view": ["admin", "chief_estimator", "qs", "qa_checker", "project_manager"],
     "review:confirm": ["admin", "chief_estimator", "qa_checker"],
-    "review:view": ["admin", "chief_estimator", "qs", "technician", "qa_checker", "project_manager"],
-    "boq:view": [
-        "admin", "chief_estimator", "qs", "technician",
-        "qa_checker", "project_manager", "site_engineer", "viewer",
-    ],
+    "review:view": ["admin", "chief_estimator", "qs", "qa_checker", "project_manager"],
+    "boq:view": ["admin", "chief_estimator", "qs", "qa_checker", "project_manager"],
     "boq:rates_manage": ["admin", "chief_estimator"],
     "boq:add_item": ["admin", "chief_estimator", "qs"],
     "boq:templates_manage": ["admin", "chief_estimator"],
@@ -98,7 +83,8 @@ ALL_PERMISSIONS: list[str] = list(PERMISSION_MATRIX.keys())
 CUSTOM_ROLE_PERMISSIONS: list[str] = [key for key in ALL_PERMISSIONS if key != "billing:manage"]
 CUSTOM_ROLE_PREFIX = "custom_"
 MAX_CUSTOM_ROLES = 20
-WORKSPACE_SCOPED_ROLES = frozenset({"site_engineer", "viewer"})
+# Built-ins are company-wide. Custom roles are too: company_role has no scoped flag yet.
+WORKSPACE_SCOPED_ROLES: frozenset[str] = frozenset()
 
 
 def is_built_in_role(role: str) -> bool:

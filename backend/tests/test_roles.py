@@ -55,6 +55,86 @@ def test_delete_custom_role_blocked_when_assigned(monkeypatch):
     assert "Reassign" in excinfo.value.message
 
 
+def test_list_roles_overlays_built_in_override(monkeypatch):
+    monkeypatch.setattr(
+        roles,
+        "fetch_all",
+        lambda sql, params=(): [
+            {"id": "r-qs", "key": "qs", "name": "QS Lead", "description": "Field", "permissions": ["takeoff:view"]},
+            {"id": "r1", "key": "custom_site_qs", "name": "Site QS", "description": "Field QS", "permissions": ["takeoff:view", "boq:view"]},
+        ],
+    )
+    result = roles.list_roles("c1")
+    qs = next(item for item in result if item["key"] == "qs")
+    assert qs["built_in"] is True
+    assert qs["id"] == "r-qs"
+    assert qs["name"] == "QS Lead"
+    custom = [item for item in result if not item["built_in"]]
+    assert [item["key"] for item in custom] == ["custom_site_qs"]
+
+
+def test_update_built_in_role_inserts_company_override(monkeypatch):
+    seen = {}
+
+    def fake_one(sql, params=()):
+        if "INSERT INTO company_role" in sql:
+            seen["sql"] = sql
+            seen["params"] = params
+            return {"id": "r-qs", "key": params[1], "name": params[2], "description": params[3], "permissions": ["takeoff:view"]}
+        return None
+
+    monkeypatch.setattr(roles, "fetch_one", fake_one)
+    updated = roles.update_role(
+        MEMBERSHIP,
+        "qs",
+        name="QS Lead",
+        description="Field",
+        permissions=["takeoff:view", "billing:manage"],
+    )
+    assert updated["built_in"] is True
+    assert updated["key"] == "qs"
+    assert updated["name"] == "QS Lead"
+    assert "billing:manage" not in updated["permissions"]
+    assert "INSERT INTO company_role" in seen["sql"]
+    assert seen["params"][1] == "qs"
+
+
+def test_update_admin_keeps_locked_permissions(monkeypatch):
+    def fake_one(sql, params=()):
+        if "INSERT INTO company_role" in sql:
+            return {
+                "id": "r-admin",
+                "key": params[1],
+                "name": params[2],
+                "description": params[3],
+                "permissions": ["takeoff:view"],
+            }
+        return None
+
+    monkeypatch.setattr(roles, "fetch_one", fake_one)
+    updated = roles.update_role(MEMBERSHIP, "admin", name="Owner", description=None, permissions=["takeoff:view"])
+    assert updated["built_in"] is True
+    for key in ("company:manage", "members:manage", "billing:manage", "takeoff:view"):
+        assert key in updated["permissions"]
+
+
+def test_permissions_for_membership_uses_built_in_override(monkeypatch):
+    monkeypatch.setattr(
+        roles,
+        "custom_role_row",
+        lambda company_id, key: {"permissions": ["takeoff:view"]} if key == "qs" else None,
+    )
+    found = CompanyMembership(company_id="c1", company_name="Acme", role="qs")
+    assert roles.permissions_for_membership(found) == ["takeoff:view"]
+
+
+def test_delete_built_in_role_rejected(monkeypatch):
+    monkeypatch.setattr(roles, "fetch_one", lambda sql, params=(): {"id": "r-qs", "key": "qs"})
+    with pytest.raises(InvitationError) as excinfo:
+        roles.delete_custom_role(MEMBERSHIP, "r-qs")
+    assert "cannot be deleted" in excinfo.value.message
+
+
 def test_permissions_for_membership_uses_custom_row(monkeypatch):
     monkeypatch.setattr(
         roles,

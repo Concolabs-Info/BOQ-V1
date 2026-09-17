@@ -2,11 +2,8 @@ export const ROLES = [
   "admin",
   "chief_estimator",
   "qs",
-  "technician",
   "qa_checker",
   "project_manager",
-  "site_engineer",
-  "viewer",
 ] as const;
 
 export type RoleKey = (typeof ROLES)[number];
@@ -15,35 +12,26 @@ export const ROLE_LABELS: Record<RoleKey, string> = {
   admin: "Owner / Admin",
   chief_estimator: "Chief Estimator",
   qs: "Quantity Surveyor",
-  technician: "Takeoff Technician",
   qa_checker: "QA Checker",
   project_manager: "Project Manager",
-  site_engineer: "Site Engineer",
-  viewer: "Client / Viewer",
 };
 
 export const ROLE_DESCRIPTIONS: Record<RoleKey, string> = {
   admin: "Company director or ops manager. Full access.",
   chief_estimator: "Senior QS. Sets rates and final sign-off.",
   qs: "Quantity Surveyor. Takeoff, bill items, and export. Rates and team admin stay with the Chief Estimator and Owner.",
-  technician: "Junior QS. Runs the upload to takeoff pipeline.",
   qa_checker: "Independently verifies quantities before finalization.",
   project_manager: "Approves and submits, and does not touch measurements.",
-  site_engineer: "Downstream user of the finished BOQ on site.",
-  viewer: "External party. Read-only, scoped to assigned projects.",
 };
 
 export const ASSIGNABLE_ROLES: RoleKey[] = [
   "chief_estimator",
   "qs",
-  "technician",
   "qa_checker",
   "project_manager",
-  "site_engineer",
-  "viewer",
 ];
 
-export const DEFAULT_INVITE_ROLE: RoleKey = "viewer";
+export const DEFAULT_INVITE_ROLE: RoleKey = "qs";
 
 export const PERMISSION_GROUPS: { title: string; keys: { key: string; name: string }[] }[] = [
   {
@@ -86,15 +74,15 @@ export const PERMISSION_GROUPS: { title: string; keys: { key: string; name: stri
 ];
 
 export const PERMISSION_MATRIX: Record<string, RoleKey[]> = {
-  "pipeline:upload": ["admin", "chief_estimator", "qs", "technician"],
-  "pipeline:configure": ["admin", "chief_estimator", "qs", "technician"],
-  "pipeline:start_takeoff": ["admin", "chief_estimator", "qs", "technician"],
-  "takeoff:edit": ["admin", "chief_estimator", "qs", "technician"],
+  "pipeline:upload": ["admin", "chief_estimator", "qs"],
+  "pipeline:configure": ["admin", "chief_estimator", "qs"],
+  "pipeline:start_takeoff": ["admin", "chief_estimator", "qs"],
+  "takeoff:edit": ["admin", "chief_estimator", "qs"],
   "takeoff:resolve_dispute": ["admin", "chief_estimator", "qa_checker"],
-  "takeoff:view": ["admin", "chief_estimator", "qs", "technician", "qa_checker", "project_manager"],
+  "takeoff:view": ["admin", "chief_estimator", "qs", "qa_checker", "project_manager"],
   "review:confirm": ["admin", "chief_estimator", "qa_checker"],
-  "review:view": ["admin", "chief_estimator", "qs", "technician", "qa_checker", "project_manager"],
-  "boq:view": ["admin", "chief_estimator", "qs", "technician", "qa_checker", "project_manager", "site_engineer", "viewer"],
+  "review:view": ["admin", "chief_estimator", "qs", "qa_checker", "project_manager"],
+  "boq:view": ["admin", "chief_estimator", "qs", "qa_checker", "project_manager"],
   "boq:rates_manage": ["admin", "chief_estimator"],
   "boq:add_item": ["admin", "chief_estimator", "qs"],
   "boq:templates_manage": ["admin", "chief_estimator"],
@@ -128,4 +116,3 @@ export const CUSTOM_PERMISSION_GROUPS = PERMISSION_GROUPS.map((group) => ({
   ...group,
   keys: group.keys.filter((item) => item.key !== "billing:manage"),
 }));
-
