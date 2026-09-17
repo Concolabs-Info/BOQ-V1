@@ -16,9 +16,9 @@ export function FieldError({ message }: { message?: string }) {
 
 export function FieldLabel({ htmlFor, children, required = false }: { htmlFor?: string; children: ReactNode; required?: boolean }) {
   return (
-    <label htmlFor={htmlFor} className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+    <label htmlFor={htmlFor} className="flex items-center gap-1 text-sm font-medium text-slate-950">
       {children}
-      {required ? <span className="ml-1 text-blue-600">*</span> : null}
+      {required ? <span className="text-red-600">*</span> : null}
     </label>
   );
 }

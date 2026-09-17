@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { AUTH_CONTROL_CLASS } from "@/features/auth/components/AuthField";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/shared/components/Button";
 import { sendInvites } from "../api";
 
@@ -57,21 +59,22 @@ export function InviteStep({ onDone }: { onDone: () => void }) {
             <input
               type="email"
               placeholder="name@company.com"
-              className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+              className={`${AUTH_CONTROL_CLASS} flex-1`}
               value={row.email}
               onChange={(event) => update(index, { email: event.target.value })}
             />
-            <select
-              value={row.role}
-              onChange={(event) => update(index, { role: event.target.value })}
-              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-100 sm:w-44"
-            >
-              {Object.entries(ROLE_LABELS).map(([role, label]) => (
-                <option key={role} value={role}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            <Select value={row.role} onValueChange={(next) => update(index, { role: String(next) })}>
+              <SelectTrigger className="sm:w-44">
+                <SelectValue>{ROLE_LABELS[row.role] ?? "Select a role"}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(ROLE_LABELS).map(([role, label]) => (
+                  <SelectItem key={role} value={role}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         ))}
         <button
@@ -86,7 +89,7 @@ export function InviteStep({ onDone }: { onDone: () => void }) {
       {note ? <p className="text-sm leading-6 text-slate-500">{note}</p> : null}
 
       <div className="flex flex-col gap-3 sm:flex-row">
-        <Button type="button" disabled={pending} className="h-11 rounded-xl" onClick={() => void send()}>
+        <Button type="button" pending={pending} className="h-11 rounded-xl" onClick={() => void send()}>
           {pending ? "Sending…" : "Send invites"}
         </Button>
         <Button type="button" variant="ghost" disabled={pending} className="h-11 rounded-xl" onClick={onDone}>

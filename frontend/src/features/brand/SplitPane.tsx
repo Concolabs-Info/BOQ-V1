@@ -21,10 +21,10 @@ export function SplitPane({
 }) {
   const query = from ? `?from=${from}` : "";
   return (
-    <div className="flex h-dvh min-h-0 w-full flex-col overflow-y-auto bg-[#eef3f8] font-[var(--autoboq-font-sans)] md:flex-row md:gap-2 md:p-2">
-      <aside className="hidden w-full shrink-0 flex-col overflow-hidden rounded-2xl bg-slate-950 px-8 py-9 text-white md:flex md:w-[340px] lg:w-[376px]">
+    <div className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-[#eef3f8] font-[var(--autoboq-font-sans)] md:flex-row md:gap-2 md:p-2">
+      <aside className="hidden min-h-0 w-full shrink-0 flex-col overflow-hidden rounded-2xl bg-slate-950 px-8 py-9 text-white md:flex md:w-[340px] lg:w-[376px]">
         <BrandLockup dark />
-        <div className="mt-16 flex-1">{rail}</div>
+        <div className="mt-16 min-h-0 flex-1 overflow-hidden">{rail}</div>
         <div className="flex items-center justify-between text-xs text-slate-500">
           <Link href={`/legal/terms${query}`} className="hover:text-slate-300">
             Terms of Service
@@ -35,7 +35,7 @@ export function SplitPane({
         </div>
       </aside>
 
-      <div className="flex flex-1 flex-col items-center justify-center bg-white px-6 py-12 md:rounded-2xl">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-12">
         <div className="flex w-full max-w-md flex-col gap-6">
           <div className="flex flex-col gap-2 md:hidden">
             <BrandLockup />

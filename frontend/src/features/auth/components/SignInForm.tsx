@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
 import { Button } from "@/shared/components/Button";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { AuthField } from "./AuthField";
+import { AuthShell } from "./AuthShell";
+import { CodeField } from "./CodeField";
 import { SecuredByClerk } from "./SecuredByClerk";
 import { thrownErrText } from "../clerk-errors";
 import { hardNavigate } from "../hard-navigate";
@@ -184,11 +186,11 @@ export function SignInForm({
     }
   }
 
-  async function submitMfa(event: FormEvent) {
-    event.preventDefault();
+  async function submitMfa(event?: FormEvent, nextCode = code) {
+    event?.preventDefault();
     setError(null);
-    if (!ready) return;
-    const entered = code.trim();
+    if (!ready || busy) return;
+    const entered = nextCode.trim();
     if (entered.length < 6) {
       setError("Enter the 6-digit code.");
       return;
@@ -211,11 +213,11 @@ export function SignInForm({
     }
   }
 
-  async function submitEmailCode(event: FormEvent) {
-    event.preventDefault();
+  async function submitEmailCode(event?: FormEvent, nextCode = code) {
+    event?.preventDefault();
     setError(null);
-    if (!ready) return;
-    const entered = code.trim();
+    if (!ready || busy) return;
+    const entered = nextCode.trim();
     if (entered.length < 6) {
       setError("Enter the 6-digit code from your email.");
       return;
@@ -282,35 +284,60 @@ export function SignInForm({
     setCode("");
   }
 
-  if (ready && clerk.session && !invitationTicket && !switchAccount) {
-    return <p className="text-sm text-slate-500">You&apos;re already signed in. Taking you to your workspace…</p>;
+  const alreadyIn = ready && clerk.session && !invitationTicket && !switchAccount;
+
+  let title = invitationTicket ? "Accept your invitation" : "Welcome back to Quanto";
+  let subtitle = invitationTicket
+    ? "Signing you in to join the company."
+    : switchAccount
+      ? "Sign in with a different account."
+      : redirectUrl
+        ? "Sign in to pick up where you left off."
+        : "Sign in to your company workspace.";
+
+  if (alreadyIn) {
+    subtitle = "You're already signed in. Taking you to your workspace…";
+  } else if (mode === "mfa") {
+    if (mfaKind === "totp") {
+      title = "Two-step verification";
+      subtitle = "Enter the 6-digit code from your authenticator app.";
+    } else if (mfaKind === "phone_code") {
+      title = "Check your phone";
+      subtitle = "We texted a code to the phone on your account.";
+    } else {
+      title = "Verify this device";
+      subtitle = email ? `We emailed a 6-digit code to ${email}.` : "We emailed a 6-digit code to confirm it's you.";
+    }
+  } else if (mode === "email-code") {
+    title = "Check your email";
+    subtitle = email ? `We emailed a 6-digit code to ${email}.` : "Enter the 6-digit code we sent you.";
+  } else if (mode === "reset-request") {
+    title = "Reset your password";
+    subtitle = notice ?? "Enter your email and we'll send a code.";
+  } else if (mode === "reset-code") {
+    title = "Set a new password";
+    subtitle = `We sent a code to ${email}. Enter it with a new password.`;
   }
 
-  if (mode === "mfa") {
-    return (
+  let body: ReactNode;
+
+  if (alreadyIn) {
+    body = null;
+  } else if (mode === "mfa") {
+    body = (
       <div className="flex flex-col gap-5">
-        <p className="text-sm text-slate-500">
-          {notice ??
-            (mfaKind === "totp"
-              ? "Enter the 6-digit code from your authenticator app."
-              : mfaKind === "email_code"
-                ? `Enter the 6-digit code we emailed to ${email}.`
-                : "Enter the code we sent to your phone.")}
-        </p>
         <form onSubmit={(event) => void submitMfa(event)} className="flex flex-col gap-4">
-          <AuthField
+          <CodeField
             id="mfa-code"
-            label="Verification code"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            placeholder="123456"
             required
             value={code}
-            onChange={(event) => setCode(event.target.value)}
+            onChange={setCode}
+            onComplete={(next) => void submitMfa(undefined, next)}
             error={error ?? undefined}
             autoFocus
+            disabled={busy}
           />
-          <Button type="submit" disabled={busy || !ready} className="h-11 w-full rounded-xl">
+          <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
             {busy ? "Verifying…" : "Verify and sign in"}
           </Button>
         </form>
@@ -320,26 +347,21 @@ export function SignInForm({
         <SecuredByClerk />
       </div>
     );
-  }
-
-  if (mode === "email-code") {
-    return (
+  } else if (mode === "email-code") {
+    body = (
       <div className="flex flex-col gap-5">
-        <p className="text-sm text-slate-500">{notice ?? `We emailed a 6-digit code to ${email}. Enter it to finish signing in.`}</p>
         <form onSubmit={(event) => void submitEmailCode(event)} className="flex flex-col gap-4">
-          <AuthField
+          <CodeField
             id="email-code"
-            label="Verification code"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            placeholder="123456"
             required
             value={code}
-            onChange={(event) => setCode(event.target.value)}
+            onChange={setCode}
+            onComplete={(next) => void submitEmailCode(undefined, next)}
             error={error ?? undefined}
             autoFocus
+            disabled={busy}
           />
-          <Button type="submit" disabled={busy || !ready} className="h-11 w-full rounded-xl">
+          <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
             {busy ? "Verifying…" : "Verify and sign in"}
           </Button>
         </form>
@@ -349,12 +371,9 @@ export function SignInForm({
         <SecuredByClerk />
       </div>
     );
-  }
-
-  if (mode === "reset-request") {
-    return (
+  } else if (mode === "reset-request") {
+    body = (
       <div className="flex flex-col gap-5">
-        <p className="text-sm text-slate-500">{notice ?? "Enter your email and we'll send a code to reset your password."}</p>
         <form onSubmit={(event) => void requestReset(event)} className="flex flex-col gap-4">
           <AuthField
             id="email"
@@ -367,7 +386,7 @@ export function SignInForm({
             autoFocus
           />
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          <Button type="submit" disabled={busy || !ready} className="h-11 w-full rounded-xl">
+          <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
             {busy ? "Sending…" : "Send reset code"}
           </Button>
         </form>
@@ -377,25 +396,18 @@ export function SignInForm({
         <SecuredByClerk />
       </div>
     );
-  }
-
-  if (mode === "reset-code") {
-    return (
+  } else if (mode === "reset-code") {
+    body = (
       <div className="flex flex-col gap-5">
-        <p className="text-sm text-slate-500">
-          We sent a code to <span className="font-medium text-slate-950">{email}</span>. Enter it with a new password.
-        </p>
         <form onSubmit={(event) => void submitReset(event)} className="flex flex-col gap-4">
-          <AuthField
+          <CodeField
             id="code"
             label="Reset code"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            placeholder="123456"
             required
             value={code}
-            onChange={(event) => setCode(event.target.value)}
+            onChange={setCode}
             autoFocus
+            disabled={busy}
           />
           <AuthField
             id="new-password"
@@ -408,63 +420,69 @@ export function SignInForm({
             onChange={(event) => setNewPassword(event.target.value)}
           />
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          <Button type="submit" disabled={busy || !ready} className="h-11 w-full rounded-xl">
+          <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
             {busy ? "Updating…" : "Set new password"}
           </Button>
         </form>
         <SecuredByClerk />
       </div>
     );
+  } else {
+    body = (
+      <div className="flex flex-col gap-5">
+        <form onSubmit={(event) => void submitPassword(event)} className="flex flex-col gap-4">
+          <AuthField
+            id="email"
+            label="Work email"
+            type="email"
+            autoComplete="email"
+            required
+            placeholder="you@company.com"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoFocus
+          />
+          <AuthField
+            id="password"
+            label="Password"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            error={error ?? undefined}
+            hint={
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("reset-request");
+                  setError(null);
+                  setNotice(null);
+                }}
+                className="text-sm text-slate-500 hover:text-slate-950"
+              >
+                Forgot password?
+              </button>
+            }
+          />
+          <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
+            {busy ? "Signing in…" : "Sign in"}
+          </Button>
+        </form>
+        <p className="text-sm text-slate-500">
+          New to Quanto?{" "}
+          <Link href="/sign-up" className="font-medium text-blue-700 hover:underline">
+            Create an account
+          </Link>
+        </p>
+        <SecuredByClerk />
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <form onSubmit={(event) => void submitPassword(event)} className="flex flex-col gap-4">
-        <AuthField
-          id="email"
-          label="Work email"
-          type="email"
-          autoComplete="email"
-          required
-          placeholder="you@company.com"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          autoFocus
-        />
-        <AuthField
-          id="password"
-          label="Password"
-          type="password"
-          autoComplete="current-password"
-          required
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          error={error ?? undefined}
-          hint={
-            <button
-              type="button"
-              onClick={() => {
-                setMode("reset-request");
-                setError(null);
-                setNotice(null);
-              }}
-              className="text-xs text-slate-500 hover:text-slate-950"
-            >
-              Forgot password?
-            </button>
-          }
-        />
-        <Button type="submit" disabled={busy || !ready} className="h-11 w-full rounded-xl">
-          {busy ? "Signing in…" : "Sign in"}
-        </Button>
-      </form>
-      <p className="text-sm text-slate-500">
-        New to Quanto?{" "}
-        <Link href="/sign-up" className="font-medium text-blue-700 hover:underline">
-          Create an account
-        </Link>
-      </p>
-      <SecuredByClerk />
-    </div>
+    <AuthShell title={title} subtitle={subtitle} from="sign-in">
+      {body}
+    </AuthShell>
   );
 }

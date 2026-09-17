@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
-import { AuthShell } from "@/features/auth/components/AuthShell";
 import { SignInForm } from "@/features/auth/components/SignInForm";
 import { firstParam, safeInternalPath } from "@/features/auth/url";
 import { appRoutes } from "@/shared/constants/appRoutes";
@@ -26,21 +25,5 @@ export default async function SignInPage({
     redirect(redirectUrl ?? appRoutes.projects);
   }
 
-  return (
-    <AuthShell
-      title={ticket ? "Accept your invitation" : "Welcome back to Quanto"}
-      from="sign-in"
-      subtitle={
-        ticket
-          ? "Signing you in to join the company."
-          : wantsSwitch
-            ? "Sign in with a different account."
-            : redirectUrl
-              ? "Sign in to pick up where you left off."
-              : "Sign in to your company workspace."
-      }
-    >
-      <SignInForm redirectUrl={redirectUrl} invitationTicket={ticket} switchAccount={wantsSwitch} />
-    </AuthShell>
-  );
+  return <SignInForm redirectUrl={redirectUrl} invitationTicket={ticket} switchAccount={wantsSwitch} />;
 }

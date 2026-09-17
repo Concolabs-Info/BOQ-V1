@@ -9,6 +9,7 @@ import { FLOW_STEPS } from "@/features/onboarding/types";
 import { Button } from "@/shared/components/Button";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { AuthField } from "./AuthField";
+import { CodeField } from "./CodeField";
 import { SecuredByClerk } from "./SecuredByClerk";
 import { thrownErrText } from "../clerk-errors";
 import { hardNavigate } from "../hard-navigate";
@@ -100,16 +101,16 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
     }
   }
 
-  async function submitCode(event: FormEvent) {
-    event.preventDefault();
+  async function submitCode(event?: FormEvent, nextCode = code) {
+    event?.preventDefault();
     setError(null);
     setNotice(null);
-    const entered = code.trim();
+    const entered = nextCode.trim();
     if (entered.length < 6) {
       setError("Enter the 6-digit code from your email.");
       return;
     }
-    if (!ready) return;
+    if (!ready || busy) return;
 
     setBusy(true);
     try {
@@ -180,22 +181,20 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
       {isCode ? (
         <div className="flex flex-col gap-5">
           <form onSubmit={(event) => void submitCode(event)} className="flex flex-col gap-4">
-            <AuthField
+            <CodeField
               id="code"
-              label="Verification code"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              placeholder="123456"
               required
               value={code}
-              onChange={(event) => {
-                setCode(event.target.value);
+              onChange={(next) => {
+                setCode(next);
                 setError(null);
               }}
+              onComplete={(next) => void submitCode(undefined, next)}
               error={error ?? undefined}
               autoFocus
+              disabled={busy}
             />
-            <Button type="submit" disabled={busy || !ready} className="h-11 w-full rounded-xl">
+            <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
               {busy ? "Verifying…" : "Verify email"}
             </Button>
           </form>
@@ -257,7 +256,7 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
             />
             {joining && error ? <p className="text-sm text-red-600">{error}</p> : null}
             <div id="clerk-captcha" />
-            <Button type="submit" disabled={busy || !ready} className="h-11 w-full rounded-xl">
+            <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
               {busy ? (joining ? "Joining…" : "Creating account…") : joining ? "Join company" : "Continue"}
             </Button>
           </form>
