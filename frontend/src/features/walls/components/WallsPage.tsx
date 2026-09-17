@@ -11,6 +11,8 @@ import { Button } from "@/shared/components/Button";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { useOptimisticMutationQueue } from "@/shared/hooks/useOptimisticMutationQueue";
+import { useAccess } from "@/features/platform/hooks/useAccess";
+import { actionReason } from "@/features/settings/access";
 import {
   assignOpening,
   autoFixWalls,
@@ -32,6 +34,9 @@ const key = (projectId: string, floorId: string | null) => ["walls", projectId, 
 type WallTool = "select" | "pan" | "edit" | "add";
 
 export function WallsPage({ projectId }: { projectId: string }) {
+  const { can } = useAccess();
+  const canEdit = can("takeoff:edit");
+  const editReason = actionReason("takeoff:edit");
   const client = useQueryClient();
   const autoRequestedRef = useRef(new Set<string>());
   const [floorId, setFloorId] = useState<string | null>(null);
@@ -80,6 +85,12 @@ export function WallsPage({ projectId }: { projectId: string }) {
     setTool("select");
     setShowIssues(false);
   }, [floorId]);
+
+  useEffect(() => {
+    if (canEdit) return;
+    setAddStart(null);
+    setTool((current) => (current === "add" || current === "edit" ? "select" : current));
+  }, [canEdit]);
 
   const floor = state?.floors.find((item) => item.id === floorId) || null;
   const imageUrl = useAssetUrl(floor?.drawing_url);
@@ -158,7 +169,7 @@ export function WallsPage({ projectId }: { projectId: string }) {
   }
 
   async function addWallPoint(point: Point) {
-    if (tool !== "add" || !floorId || saving) return;
+    if (!canEdit || tool !== "add" || !floorId || saving) return;
     if (!addStart) {
       setAddStart(point);
       return;
@@ -175,6 +186,7 @@ export function WallsPage({ projectId }: { projectId: string }) {
   }
 
   function selectTool(next: WallTool) {
+    if (!canEdit && (next === "add" || next === "edit")) return;
     setTool(next);
     if (next !== "add") setAddStart(null);
   }
@@ -254,8 +266,8 @@ export function WallsPage({ projectId }: { projectId: string }) {
             <div className="flex items-center gap-2">
               <Button variant={tool === "select" ? "primary" : "secondary"} onClick={() => selectTool("select")}>Select</Button>
               <Button variant={tool === "pan" ? "primary" : "secondary"} onClick={() => selectTool("pan")}>Hand</Button>
-              <Button variant={tool === "add" ? "primary" : "secondary"} disabled={!floor || saving} onClick={() => selectTool("add")}>Add wall</Button>
-              <Button variant={tool === "edit" ? "primary" : "secondary"} disabled={!selected} onClick={() => selectTool("edit")}>Edit centerline</Button>
+              <Button variant={tool === "add" ? "primary" : "secondary"} disabled={!canEdit || !floor || saving} title={!canEdit ? editReason : undefined} onClick={() => selectTool("add")}>Add wall</Button>
+              <Button variant={tool === "edit" ? "primary" : "secondary"} disabled={!canEdit || !selected} title={!canEdit ? editReason : undefined} onClick={() => selectTool("edit")}>Edit centerline</Button>
             </div>
             <div className="flex items-center gap-2">
               {blockingCount ? <Button variant="secondary" onClick={() => setShowIssues((value) => !value)}>{showIssues ? "Hide issues" : `Show ${blockingCount} issue${blockingCount === 1 ? "" : "s"}`}</Button> : null}

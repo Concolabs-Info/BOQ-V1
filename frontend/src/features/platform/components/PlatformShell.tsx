@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode, type SVGProps } from "react";
 import { useAssetUrl } from "@/features/floor-plans/hooks/useAssetUrl";
 import { COMPANY_LOGO_CHANGED, getPlatformContext } from "@/features/platform/services/platformService";
 import { appRoutes } from "@/shared/constants/appRoutes";
+import { useAccess } from "@/features/platform/hooks/useAccess";
 import { NavUser } from "./NavUser";
 
 const DESKTOP_NAV_KEY = "quanto:navigation:collapsed";
@@ -24,9 +25,12 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
 
   const workspaceMatch = pathname.match(/^\/workspace\/([^/]+)/);
   const projectId = workspaceMatch?.[1] || null;
+  const { home, can } = useAccess();
+  const projectHref = projectId ? home(projectId) : "";
+  const settingsHref = can("company:manage") ? appRoutes.organizationSettings : appRoutes.accountProfile;
   const nav = [
     { title: "Projects", href: appRoutes.projects },
-    ...(projectId ? [{ title: "Project", href: appRoutes.pre(projectId, "upload") }] : []),
+    ...(projectId ? [{ title: "Project", href: projectHref }] : []),
   ];
   const settingsActive = pathname.startsWith("/organization") || pathname.startsWith("/account");
 
@@ -53,7 +57,7 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
   const settingsFooter = (
     <div className="mt-4 shrink-0 border-t border-slate-200 pt-4">
       <Link
-        href={appRoutes.organizationSettings}
+        href={settingsHref}
         onClick={() => setMobileOpen(false)}
         className={
           settingsActive

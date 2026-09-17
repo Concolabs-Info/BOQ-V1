@@ -14,6 +14,8 @@ import { ReviewViewTabs } from "./ReviewViewTabs";
 import { useDemoStore } from "@/features/demo/store";
 import { useStructuralStore } from "@/features/quanto/structuralStore";
 import { useSpecialStore } from "@/features/quanto/specialStore";
+import { useAccess } from "@/features/platform/hooks/useAccess";
+import { actionReason } from "@/features/settings/access";
 
 const categories = ["all", "column", "beam", "slab", "stair", "door", "window", "wall", "floor_finish", "wall_finish", "roof", "ceiling", "needs_review"] as const;
 type Category = typeof categories[number];
@@ -88,6 +90,8 @@ function statusClass(status: ReviewItem["status"]): string {
 }
 
 export function ReviewPage({ projectId }: { projectId: string }) {
+  const { can } = useAccess();
+  const canConfirm = can("review:confirm");
   const client = useQueryClient();
   const [floorId, setFloorId] = useState<string | null>(null);
   const [category, setCategory] = useState<Category>("all");
@@ -215,10 +219,19 @@ export function ReviewPage({ projectId }: { projectId: string }) {
               ))}
             </div>
             <div className="flex gap-2">
-              <Button variant="secondary" disabled={!checked.size || editQueue.saving} onClick={() => void confirmSelected()}>
+              <Button
+                variant="secondary"
+                title={canConfirm ? undefined : actionReason("review:confirm")}
+                disabled={!canConfirm || !checked.size || editQueue.saving}
+                onClick={() => void confirmSelected()}
+              >
                 {editQueue.saving && checked.size ? "Confirming…" : `Confirm selected${checked.size ? ` (${checked.size})` : ""}`}
               </Button>
-              <Button disabled={editQueue.saving || scopeRemaining <= 0} onClick={() => void confirmAll()}>
+              <Button
+                title={canConfirm ? undefined : actionReason("review:confirm")}
+                disabled={!canConfirm || editQueue.saving || scopeRemaining <= 0}
+                onClick={() => void confirmAll()}
+              >
                 {editQueue.saving ? "Confirming…" : scopeRemaining <= 0 ? "All confirmed ✓" : "Confirm all"}
               </Button>
             </div>
@@ -283,6 +296,7 @@ export function ReviewPage({ projectId }: { projectId: string }) {
             <ReviewDetails
               item={selected}
               saving={false}
+              canEdit={canConfirm}
               onEdit={(field, value) => queueEdit(
                 () => updateReviewField(projectId, selected.id, field, value),
                 (current) => ({...current,items:current.items.map((item)=>item.id===selected.id?{...item,data:{...item.data,[field]:value},status:"confirmed"}:item)}),
@@ -310,7 +324,7 @@ function Summary({ label, value, tone = "slate" }: { label: string; value: numbe
   return <div className={`rounded-xl border border-slate-200 px-4 py-3 ${tones[tone]}`}><p className="text-xs font-semibold uppercase tracking-wide opacity-65">{label}</p><p className="mt-1 text-2xl font-semibold">{value}</p></div>;
 }
 
-function ReviewDetails({ item, saving, onEdit }: { item: ReviewItem; saving: boolean; onEdit: (field: string, value: unknown) => Promise<void> }) {
+function ReviewDetails({ item, saving, canEdit, onEdit }: { item: ReviewItem; saving: boolean; canEdit: boolean; onEdit: (field: string, value: unknown) => Promise<void> }) {
   const editable = item.entity_type === "wall"
     ? ["classification", "wall_type", "thickness_mm", "side_1_finish", "side_2_finish"]
     : item.entity_type === "roof_plane"
@@ -355,11 +369,13 @@ function ReviewDetails({ item, saving, onEdit }: { item: ReviewItem; saving: boo
                 className="input mt-1 w-full"
                 defaultValue={item.data[field] == null ? "" : String(item.data[field])}
                 onBlur={(event) => {
+                  if (!canEdit) return;
                   const raw = event.target.value;
                   const next = field.endsWith("_mm") ? Number(raw) : raw;
                   if (raw !== String(item.data[field] ?? "")) void onEdit(backendField, next);
                 }}
-                disabled={saving}
+                disabled={saving || !canEdit}
+                title={canEdit ? undefined : actionReason("review:confirm")}
               />
             </label>
           );

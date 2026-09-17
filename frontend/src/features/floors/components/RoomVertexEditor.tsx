@@ -2,6 +2,7 @@
 
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Point } from "@/features/drawing/types";
+import { useTakeoffGeometryAllowed } from "@/features/quanto/takeoffGeometryAccess";
 
 function sourcePoint(event: ReactPointerEvent<SVGElement>): Point | null {
   const svg = event.currentTarget.ownerSVGElement;
@@ -21,6 +22,7 @@ export function RoomVertexEditor({
   onSelect: (index: number) => void;
   onMove: (index: number, point: Point) => void;
 }) {
+  const geometryAllowed = useTakeoffGeometryAllowed();
   return (
     <g>
       {points.map((point, index) => (
@@ -33,9 +35,10 @@ export function RoomVertexEditor({
           stroke="white"
           strokeWidth={2}
           vectorEffect="non-scaling-stroke"
-          className="cursor-move"
+          className={geometryAllowed ? "cursor-move" : "cursor-not-allowed"}
           onClick={(event) => { event.stopPropagation(); onSelect(index); }}
           onPointerDown={(event) => {
+            if (!geometryAllowed) return;
             event.stopPropagation();
             onSelect(index);
             event.currentTarget.setPointerCapture(event.pointerId);

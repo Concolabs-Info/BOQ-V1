@@ -21,6 +21,8 @@ import { usePreStore, viewportRequiredForTakeoff, viewportRequiresScale, type Pr
 import { usePreProjectSync } from "@/features/pre/hooks/usePreProjectSync";
 import { preApi, renderUrl } from "@/features/pre/services/preApi";
 import { appRoutes } from "@/shared/constants/appRoutes";
+import { useAccess } from "@/features/platform/hooks/useAccess";
+import { actionReason } from "@/features/settings/access";
 import type {
   DemoStatus,
   Point,
@@ -135,6 +137,8 @@ export function PrePage({
 }
 
 function UploadScreen({ projectId }: { projectId: string }) {
+  const { can } = useAccess();
+  const canUpload = can("pipeline:upload");
   const router = useRouter();
   const sheets = usePreStore((s) => s.sheets);
   const toggle = usePreStore((s) => s.toggleSheet);
@@ -161,6 +165,7 @@ function UploadScreen({ projectId }: { projectId: string }) {
   }, [sheets.length, phase, uploadedFileName]);
 
   async function beginUpload(file?: File) {
+    if (!canUpload) return;
     if (!file || (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf")) {
       setUploadError("Choose a PDF file to continue.");
       return;
@@ -219,23 +224,28 @@ function UploadScreen({ projectId }: { projectId: string }) {
         <div
           onDrop={(e) => {
             e.preventDefault();
+            if (!canUpload) return;
             beginUpload(e.dataTransfer.files[0]);
           }}
           onDragOver={(e) => e.preventDefault()}
-          className="flex min-h-[540px] w-full flex-col items-center justify-center rounded-3xl border-2 border-dashed border-blue-200 bg-blue-50/40 px-6 text-center transition hover:bg-blue-50"
+          className={`flex min-h-[540px] w-full flex-col items-center justify-center rounded-3xl border-2 border-dashed px-6 text-center ${canUpload ? "border-blue-200 bg-blue-50/40 transition hover:bg-blue-50" : "cursor-not-allowed border-slate-200 bg-slate-50"}`}
+          title={canUpload ? undefined : actionReason("pipeline:upload")}
         >
           <span className="text-5xl text-blue-600">＋</span>
           <h3 className="mt-5 text-2xl font-semibold text-slate-950">
             Upload your PDF
           </h3>
           <p className="mt-2 text-sm text-slate-500">
-            Drag and drop a drawing package, or choose a PDF from your device.
+            {canUpload
+              ? "Drag and drop a drawing package, or choose a PDF from your device."
+              : actionReason("pipeline:upload")}
           </p>
-          <label className="mt-6 cursor-pointer rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700">
+          <label className={`mt-6 rounded-xl px-5 py-3 text-sm font-semibold text-white ${canUpload ? "cursor-pointer bg-blue-600 hover:bg-blue-700" : "cursor-not-allowed bg-slate-300"}`}>
             <input
               type="file"
               accept="application/pdf,.pdf"
               className="sr-only"
+              disabled={!canUpload}
               onChange={(e) => beginUpload(e.target.files?.[0])}
             />
             Upload PDF
@@ -2633,6 +2643,8 @@ function SpecificationEditor({
 }
 
 function StartScreen({ projectId }: { projectId: string }) {
+  const { can } = useAccess();
+  const canStart = can("pipeline:start_takeoff");
   const router = useRouter();
   const viewports = usePreStore((state) => state.viewports);
   const sheets = usePreStore((state) => state.sheets);
@@ -2746,8 +2758,9 @@ function StartScreen({ projectId }: { projectId: string }) {
         {frozen ? <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm font-medium text-emerald-700">Setup saved and ready for Takeoff.</p> : null}
         <button
           onClick={() => { void beginTakeoff(); }}
-          disabled={starting}
-          className="mt-6 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white disabled:bg-slate-300"
+          disabled={starting || !canStart}
+          title={canStart ? undefined : actionReason("pipeline:start_takeoff")}
+          className="mt-6 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           {starting ? "Preparing Takeoff…" : "Start takeoff"}
         </button>

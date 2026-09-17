@@ -5,6 +5,7 @@ import { DrawingCanvas } from "@/features/drawing/components/DrawingCanvas";
 import type { Point } from "@/features/drawing/types";
 import { drawingSvgTransform } from "@/features/drawings/components/DrawingOverlayControls";
 import type { RoofComponent, RoofDrawing, RoofEdge, RoofOpening, RoofPlane } from "../types";
+import { useTakeoffGeometryAllowed } from "@/features/quanto/takeoffGeometryAccess";
 
 const edgeColours: Record<string, string> = {
   ridge: "#7c3aed", hip: "#2563eb", valley: "#dc2626", eave: "#15803d",
@@ -28,11 +29,12 @@ export function RoofPlanCanvas({ drawing, imageUrl, overlayImageUrl, overlayOpac
   onPoint: (point: Point) => void; onPlane: (id: string, additive: boolean) => void; onEdge: (id: string) => void;
   onVertices: (planeId: string, points: Point[]) => void;
 }) {
+  const geometryAllowed = useTakeoffGeometryAllowed();
   const [drag, setDrag] = useState<{ planeId: string; index: number; points: Point[]; pointerId: number } | null>(null);
   useEffect(() => setDrag(null), [drawing?.host_floor_id]);
   if (!drawing) return <div className="flex h-full items-center justify-center p-8 text-center text-sm text-slate-500">Select a floor with a plan drawing.</div>;
   const transform = drawingSvgTransform(drawing.roof_drawing);
-  return <DrawingCanvas key={drawing.host_floor_id} imageUrl={imageUrl} width={drawing.drawing_width} height={drawing.drawing_height} tool={drawingMode ? "draw" : "select"} onCanvasClick={onPoint} className="min-h-[590px] flex-1">
+  return <DrawingCanvas key={drawing.host_floor_id} imageUrl={imageUrl} width={drawing.drawing_width} height={drawing.drawing_height} tool={drawingMode && geometryAllowed ? "draw" : "select"} onCanvasClick={geometryAllowed ? onPoint : undefined} className="min-h-[590px] flex-1">
     {overlayImageUrl ? <image href={overlayImageUrl} x={0} y={0} width={drawing.drawing_width} height={drawing.drawing_height} preserveAspectRatio="none" opacity={overlayOpacity} transform={transform} className="pointer-events-none" /> : null}
     {planes.map((plane) => {
       const selected = selectedPlaneIds.has(plane.id); const planePoints = drag?.planeId === plane.id ? drag.points : plane.geometry.points;
@@ -41,7 +43,7 @@ export function RoofPlanCanvas({ drawing, imageUrl, overlayImageUrl, overlayOpac
         <polygon points={svgPoints(planePoints)} fill={plane.display_colour || "#60a5fa"} fillOpacity={selected ? 0.48 : 0.28} stroke={selected ? "#1d4ed8" : plane.status === "confirmed" ? "#047857" : "#d97706"} strokeDasharray={plane.status === "confirmed" ? undefined : "7 4"} strokeWidth={selected ? 4 : 2} vectorEffect="non-scaling-stroke" />
         <text x={centre.x} y={centre.y} textAnchor="middle" dominantBaseline="middle" fill="#0f172a" fontSize={13} fontWeight={700} paintOrder="stroke" stroke="white" strokeWidth={4} className="pointer-events-none">{plane.name || "Roof plane"}{plane.pitch_degrees != null ? ` · ${Number(plane.pitch_degrees).toFixed(1)}°` : " · pitch ?"}</text>
         {plane.slope_direction_degrees != null ? <g className="pointer-events-none"><line x1={centre.x} y1={centre.y + 18} x2={arrow.x} y2={arrow.y} stroke="#0f172a" strokeWidth={2.5} vectorEffect="non-scaling-stroke" /><circle cx={arrow.x} cy={arrow.y} r={3} fill="#0f172a" /></g> : null}
-        {selected && !drawingMode ? planePoints.map((point, index) => <circle key={`${plane.id}-${index}`} cx={point.x} cy={point.y} r={6} fill="white" stroke="#1d4ed8" strokeWidth={3} vectorEffect="non-scaling-stroke" className="cursor-move" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); setDrag({ planeId: plane.id, index, points: planePoints.map((item) => ({ ...item })), pointerId: event.pointerId }); }} onPointerMove={(event) => { if (!drag || drag.pointerId !== event.pointerId || drag.planeId !== plane.id) return; const point = sourcePoint(event); if (!point) return; setDrag({ ...drag, points: drag.points.map((item, itemIndex) => itemIndex === drag.index ? point : item) }); }} onPointerUp={(event) => { if (!drag || drag.pointerId !== event.pointerId) return; event.stopPropagation(); const points = drag.points; setDrag(null); onVertices(plane.id, points); }} />) : null}
+        {selected && !drawingMode && geometryAllowed ? planePoints.map((point, index) => <circle key={`${plane.id}-${index}`} cx={point.x} cy={point.y} r={6} fill="white" stroke="#1d4ed8" strokeWidth={3} vectorEffect="non-scaling-stroke" className="cursor-move" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); setDrag({ planeId: plane.id, index, points: planePoints.map((item) => ({ ...item })), pointerId: event.pointerId }); }} onPointerMove={(event) => { if (!drag || drag.pointerId !== event.pointerId || drag.planeId !== plane.id) return; const point = sourcePoint(event); if (!point) return; setDrag({ ...drag, points: drag.points.map((item, itemIndex) => itemIndex === drag.index ? point : item) }); }} onPointerUp={(event) => { if (!drag || drag.pointerId !== event.pointerId) return; event.stopPropagation(); const points = drag.points; setDrag(null); onVertices(plane.id, points); }} />) : null}
       </g>;
     })}
     {edges.map((edge) => <polyline key={edge.id} points={svgPoints(edge.geometry.points)} fill="none" stroke={selectedEdgeId === edge.id ? "#0f172a" : edgeColours[edge.edge_type] || edgeColours.unknown} strokeDasharray={edge.edge_type === "unknown" ? "7 5" : undefined} strokeWidth={selectedEdgeId === edge.id ? 6 : 3} vectorEffect="non-scaling-stroke" className="cursor-pointer" onClick={(event) => { event.stopPropagation(); onEdge(edge.id); }}><title>{edge.edge_type.replaceAll("_", " ")} · {Number(edge.true_length_m || 0).toFixed(2)} m</title></polyline>)}

@@ -5,6 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { usePreStore } from "@/features/pre/state/preStore";
+import { useAccess } from "@/features/platform/hooks/useAccess";
+import { STAGE_BLOCKED_REASON } from "@/features/settings/access";
 
 export const PRE_STEPS = [
   ["upload", "Upload"],
@@ -34,6 +36,11 @@ type ExpandableSection = "pre" | "takeoff" | null;
 export function QuantoWorkflowNav({ projectId, office = false }: { projectId: string; office?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { canStage } = useAccess();
+  const preAllowed = canStage("pre");
+  const takeoffAllowed = canStage("takeoff");
+  const reviewAllowed = canStage("review");
+  const boqAllowed = canStage("boq");
   const viewports = usePreStore((state) => state.viewports);
   const sheets = usePreStore((state) => state.sheets);
   const updateViewport = usePreStore((state) => state.updateViewport);
@@ -86,10 +93,12 @@ export function QuantoWorkflowNav({ projectId, office = false }: { projectId: st
         state={preOpen ? "current" : preComplete ? "complete" : "pending"}
         expanded={expandedSection === "pre"}
         office={office}
+        locked={!preAllowed}
+        lockReason={STAGE_BLOCKED_REASON.pre}
         onCurrentClick={() => setExpandedSection((current) => current === "pre" ? null : "pre")}
       />
 
-      {preOpen && expandedSection === "pre" ? (
+      {preAllowed && preOpen && expandedSection === "pre" ? (
         <SubTabsScroller office={office}>
           {PRE_STEPS.map(([key, label], index) => (
             <SubLink
@@ -110,10 +119,12 @@ export function QuantoWorkflowNav({ projectId, office = false }: { projectId: st
         state={takeoffOpen ? "current" : takeoffComplete ? "complete" : "pending"}
         expanded={expandedSection === "takeoff"}
         office={office}
+        locked={!takeoffAllowed}
+        lockReason={STAGE_BLOCKED_REASON.takeoff}
         onCurrentClick={() => setExpandedSection((current) => current === "takeoff" ? null : "takeoff")}
       />
 
-      {takeoffOpen && expandedSection === "takeoff" ? (
+      {takeoffAllowed && takeoffOpen && expandedSection === "takeoff" ? (
         <SubTabsScroller office={office}>
           {TAKEOFF_ELEMENTS.map(([key, label], index) => (
             <SubLink
@@ -132,12 +143,16 @@ export function QuantoWorkflowNav({ projectId, office = false }: { projectId: st
         label="Review"
         state={reviewActive ? "current" : boqActive ? "complete" : "pending"}
         office={office}
+        locked={!reviewAllowed}
+        lockReason={STAGE_BLOCKED_REASON.review}
       />
       <MainLink
         href={appRoutes.workflowStep(projectId, "boq")}
         label="BOQ"
         state={boqActive ? "current" : "pending"}
         office={office}
+        locked={!boqAllowed}
+        lockReason={STAGE_BLOCKED_REASON.boq}
       />
       {showPlansGuard ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="plans-confirm-title">
@@ -183,6 +198,8 @@ function MainLink({
   state,
   expanded,
   office = false,
+  locked = false,
+  lockReason,
   onCurrentClick,
 }: {
   href: string;
@@ -190,8 +207,20 @@ function MainLink({
   state: ProgressState;
   expanded?: boolean;
   office?: boolean;
+  locked?: boolean;
+  lockReason?: string;
   onCurrentClick?: () => void;
 }) {
+  const lockedClass = office
+    ? "flex h-full shrink-0 cursor-not-allowed items-center border-b-2 border-transparent px-4 text-[11px] font-bold uppercase tracking-wide text-slate-400"
+    : "flex h-9 shrink-0 cursor-not-allowed items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-400";
+  if (locked) {
+    return (
+      <span title={lockReason} aria-disabled="true" className={lockedClass}>
+        {label}
+      </span>
+    );
+  }
   const className = office
     ? state === "current"
       ? "flex h-full shrink-0 items-center border-b-2 border-blue-600 bg-white px-4 text-[11px] font-bold uppercase tracking-wide text-blue-700"

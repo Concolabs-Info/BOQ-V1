@@ -8,9 +8,14 @@ import { Button } from "@/shared/components/Button";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { LoadingState } from "@/shared/components/LoadingState";
 import { appRoutes } from "@/shared/constants/appRoutes";
+import { useAccess } from "@/features/platform/hooks/useAccess";
+import { actionReason } from "@/features/settings/access";
 import type { ProjectResponse, ProjectStatus } from "@/shared/types/apiTypes";
 
 export function ProjectOverviewPage({ projectId }: { projectId: string }) {
+  const { home, can } = useAccess();
+  const canEdit = can("pipeline:upload");
+  const editReason = actionReason("project:edit");
   const [project, setProject] = useState<ProjectResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -32,7 +37,7 @@ export function ProjectOverviewPage({ projectId }: { projectId: string }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!project) return;
+    if (!project || !canEdit) return;
     setIsSaving(true);
     setError(null);
     setSavedMessage(null);
@@ -62,16 +67,17 @@ export function ProjectOverviewPage({ projectId }: { projectId: string }) {
         <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_330px]">
           <form onSubmit={submit} className="rounded-[28px] border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
             <div className="grid gap-5 sm:grid-cols-2">
-              <Field label="Project name" value={project.name} onChange={(value) => setProject({ ...project, name: value })} required />
-              <Field label="Project number" value={project.project_number || ""} onChange={(value) => setProject({ ...project, project_number: value || null })} />
-              <Field label="Client" value={project.client_name || ""} onChange={(value) => setProject({ ...project, client_name: value || null })} />
-              <Field label="Location" value={project.location || ""} onChange={(value) => setProject({ ...project, location: value || null })} />
-              <label className="block sm:col-span-2">
+              <Field label="Project name" value={project.name} onChange={(value) => setProject({ ...project, name: value })} required disabled={!canEdit} title={canEdit ? undefined : editReason} />
+              <Field label="Project number" value={project.project_number || ""} onChange={(value) => setProject({ ...project, project_number: value || null })} disabled={!canEdit} title={canEdit ? undefined : editReason} />
+              <Field label="Client" value={project.client_name || ""} onChange={(value) => setProject({ ...project, client_name: value || null })} disabled={!canEdit} title={canEdit ? undefined : editReason} />
+              <Field label="Location" value={project.location || ""} onChange={(value) => setProject({ ...project, location: value || null })} disabled={!canEdit} title={canEdit ? undefined : editReason} />
+              <label className="block sm:col-span-2" title={canEdit ? undefined : editReason}>
                 <span className="text-sm font-semibold text-slate-700">Status</span>
                 <select
                   value={project.status}
+                  disabled={!canEdit}
                   onChange={(event) => setProject({ ...project, status: event.target.value as ProjectStatus })}
-                  className="mt-3 h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  className="mt-3 h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
                 >
                   <option value="active">Active</option>
                   <option value="on_hold">On hold</option>
@@ -80,21 +86,22 @@ export function ProjectOverviewPage({ projectId }: { projectId: string }) {
                 </select>
               </label>
             </div>
-            <label className="mt-5 block">
+            <label className="mt-5 block" title={canEdit ? undefined : editReason}>
               <span className="text-sm font-semibold text-slate-700">Description</span>
               <textarea
                 value={project.description || ""}
+                disabled={!canEdit}
                 onChange={(event) => setProject({ ...project, description: event.target.value || null })}
                 rows={5}
                 maxLength={1000}
-                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
               />
             </label>
             <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
               <Link href={appRoutes.projects} className="text-sm font-semibold text-slate-600 hover:text-blue-700">Back to projects</Link>
               <div className="flex items-center gap-3">
                 {savedMessage ? <span className="text-sm font-medium text-emerald-700">{savedMessage}</span> : null}
-                <Button disabled={isSaving || !project.name.trim()} className="rounded-xl px-6">
+                <Button disabled={!canEdit || isSaving || !project.name.trim()} title={canEdit ? undefined : editReason} className="rounded-xl px-6">
                   {isSaving ? "Saving" : "Save details"}
                 </Button>
               </div>
@@ -107,10 +114,10 @@ export function ProjectOverviewPage({ projectId }: { projectId: string }) {
               <h2 className="mt-3 text-lg font-semibold text-slate-950">Project workspace</h2>
               <p className="mt-2 text-sm leading-6 text-slate-500">Open the current AutoBOQ workflow foundation for this project.</p>
               <Link
-                href={appRoutes.workflowUpload(project.id)}
+                href={home(project.id)}
                 className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-xl bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-blue-700"
               >
-                Open PDF Generation
+                Open workspace
               </Link>
             </section>
 
@@ -129,15 +136,16 @@ export function ProjectOverviewPage({ projectId }: { projectId: string }) {
   );
 }
 
-function Field({ label, value, onChange, required = false }: { label: string; value: string; onChange: (value: string) => void; required?: boolean }) {
+function Field({ label, value, onChange, required = false, disabled = false, title }: { label: string; value: string; onChange: (value: string) => void; required?: boolean; disabled?: boolean; title?: string }) {
   return (
-    <label className="block">
+    <label className="block" title={title}>
       <span className="text-sm font-semibold text-slate-700">{label}</span>
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         required={required}
-        className="mt-3 h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+        disabled={disabled}
+        className="mt-3 h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
       />
     </label>
   );

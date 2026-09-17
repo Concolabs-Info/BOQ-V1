@@ -45,6 +45,7 @@ import type {
 } from "./types";
 import type { BoqDocumentSetup, BoqExport, BoqRow } from "@/features/boq/types";
 import { requestGuardedAction, useEditSessionStore } from "@/features/quanto/editing/editSessionStore";
+import { canMutateTakeoffGeometry } from "@/features/quanto/takeoffGeometryAccess";
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
@@ -72,6 +73,7 @@ const quotaSafeBrowserStorage = createJSONStorage(() => ({
   },
 }));
 function stageLiveChange<T>(key: string, title: string, original: T, restore: (value: T) => void): boolean {
+  if (!canMutateTakeoffGeometry() && !key.startsWith("pre:") && !key.startsWith("boq:")) return false;
   const edit = useEditSessionStore.getState();
   if (edit.saving) return false;
   if (edit.key === key) return true;
@@ -270,7 +272,9 @@ export const useDemoStore = create<DemoState>()(
       setSelectedEntity: (id) => { if (id === get().selectedEntityId && get().selectedEntityIds.length <= 1) return; requestGuardedAction(() => set({ selectedEntityId: id, selectedEntityIds: id ? [id] : [], rightTab: id ? "item" : get().rightTab }), "select another item"); },
       setSelectedEntities: (ids) => { const unique=[...new Set(ids)]; requestGuardedAction(() => set({ selectedEntityIds: unique, selectedEntityId: unique.at(-1)||null, rightTab: unique.length ? "item" : get().rightTab }), "change selection"); },
       toggleSelectedEntity: (id) => { const current=get().selectedEntityIds; const next=current.includes(id)?current.filter((value)=>value!==id):[...current,id]; requestGuardedAction(() => set({ selectedEntityIds:next,selectedEntityId:next.at(-1)||null,rightTab:next.length?"item":get().rightTab }), "change selection"); },
-      translateEntities: (ids, dx, dy) => set((st) => {
+      translateEntities: (ids, dx, dy) => {
+        if (!canMutateTakeoffGeometry()) return;
+        set((st) => {
         const selected=new Set(ids),movePoint=(point:{x:number;y:number})=>({x:point.x+dx,y:point.y+dy}),moveRings=(rings:{x:number;y:number}[][])=>rings.map((ring)=>ring.map(movePoint));
         return {
           openings:st.openings.map((item)=>selected.has(item.id)&&!item.locked?{...item,bbox:{...item.bbox,x:item.bbox.x+dx,y:item.bbox.y+dy}}:item),
@@ -280,7 +284,8 @@ export const useDemoStore = create<DemoState>()(
           roofZones:st.roofZones.map((item)=>selected.has(item.id)&&!item.locked?{...item,points:item.points.map(movePoint),deducts:moveRings(item.deducts)}:item),
           workbookConfirmed:{},
         };
-      }),
+      });
+      },
       setLeftCollapsed: (value) => set({ leftCollapsed: value }),
       setRightTab: (tab) => set({ rightTab: tab }),
       toggleSheet: (id) =>
@@ -643,7 +648,8 @@ export const useDemoStore = create<DemoState>()(
         if (!stageLiveChange("boq:setup", "BOQ setup", original, (value) => set({ boqSetup: value }))) return;
         set({ boqSetup: setup });
       },
-      captureGeometryUndo: () =>
+      captureGeometryUndo: () => {
+        if (!canMutateTakeoffGeometry()) return;
         set((st) => ({
           geometryUndo: [
             ...st.geometryUndo.slice(-19),
@@ -656,9 +662,11 @@ export const useDemoStore = create<DemoState>()(
             },
           ],
           geometryRedo: [],
-        })),
+        }));
+      },
       undoGeometry: () =>
         set((st) => {
+          if (!canMutateTakeoffGeometry()) return {};
           const snap = st.geometryUndo.at(-1);
           if (!snap) return {};
           return {
@@ -678,6 +686,7 @@ export const useDemoStore = create<DemoState>()(
         }),
       redoGeometry: () =>
         set((st) => {
+          if (!canMutateTakeoffGeometry()) return {};
           const snap = (st.geometryRedo || []).at(-1);
           if (!snap) return {};
           return {

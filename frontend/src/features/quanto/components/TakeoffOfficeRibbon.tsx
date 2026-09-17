@@ -16,6 +16,8 @@ import {
 } from "../takeoffCommands";
 import { usePdfSnapModes } from "../snapping/pdfVectorSnap";
 import { friendlyRoomLabel } from "../friendlyLabels";
+import { useAccess } from "@/features/platform/hooks/useAccess";
+import { actionReason, isTakeoffViewCommand } from "@/features/settings/access";
 
 type RibbonTab =
   | "home"
@@ -106,6 +108,9 @@ const contextual: Record<string, RibbonGroup> = {
 };
 
 export function TakeoffOfficeRibbon({ projectId, element, view, elementName }: { projectId: string; element: string; view: string; elementName: string }) {
+  const { can } = useAccess();
+  const canEdit = can("takeoff:edit");
+  const editReason = actionReason("takeoff:edit");
   const search = useSearchParams();
   const floorPartSuffix = element === "floor" && search.get("floorPart")
     ? `?floorPart=${encodeURIComponent(search.get("floorPart") || "areas")}`
@@ -125,18 +130,29 @@ export function TakeoffOfficeRibbon({ projectId, element, view, elementName }: {
     return items.flatMap((group) => group.commands.map((command) => ({ tab, group: group.label, command })));
   }), [context]);
   function run(tab:RibbonTab,group:string,command:RibbonCommand){
+    if(!canEdit && !isTakeoffViewCommand(tab, command.label)){
+      dispatchTakeoffStatus({ message: editReason });
+      return;
+    }
     const id=commandId(tab,group,command.label);setActive(tab);setActiveCommand(id);
     dispatchTakeoffStatus({ message: command.label });
     if(command.label==="Snap settings"){setSnapSettingsOpen(true);return;}
     dispatchTakeoffCommand({id,label:command.label,tab,group,element});
   }
   function runQuickAction(label: "Undo" | "Redo" | "Delete") {
+    if (!canEdit) {
+      dispatchTakeoffStatus({ message: editReason });
+      return;
+    }
     dispatchTakeoffStatus({ message: label });
     dispatchTakeoffCommand({ id: commandId("home", "Quick actions", label), label, tab: "home", group: "Quick actions", element });
   }
   function runViewAction(label: "Zoom in" | "Zoom out" | "Fit page" | "Full screen") {
     dispatchTakeoffCommand({ id: commandId("view", "Zoom", label), label, tab: "view", group: "Zoom", element });
   }
+  useEffect(() => {
+    if (!canEdit && (active === "draw" || active === "edit")) setActive("home");
+  }, [active, canEdit]);
   useEffect(() => {
     const listener = (event: Event) => setDrawingView((event as CustomEvent<TakeoffViewState>).detail);
     window.addEventListener(TAKEOFF_VIEW_EVENT, listener);
@@ -169,7 +185,27 @@ export function TakeoffOfficeRibbon({ projectId, element, view, elementName }: {
     <><div aria-label={`${elementName} takeoff ribbon`} className="shrink-0 border-b border-slate-300 bg-white shadow-[0_1px_0_rgba(15,23,42,0.04)]">
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end border-b border-slate-200 bg-[#f8f9fb] px-2 pt-1">
         <div className="flex min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {tabs.map(([key, label]) => <button key={key} type="button" onClick={() => setActive(key)} className={active === key ? "shrink-0 border-b-2 border-blue-600 bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-blue-700" : "shrink-0 border-b-2 border-transparent px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600 hover:bg-white hover:text-slate-950"}>{label}</button>)}
+          {tabs.map(([key, label]) => {
+            const tabLocked = !canEdit && (key === "draw" || key === "edit");
+            return (
+              <button
+                key={key}
+                type="button"
+                disabled={tabLocked}
+                title={tabLocked ? editReason : undefined}
+                onClick={() => { if (!tabLocked) setActive(key); }}
+                className={
+                  tabLocked
+                    ? "shrink-0 cursor-not-allowed border-b-2 border-transparent px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400"
+                    : active === key
+                      ? "shrink-0 border-b-2 border-blue-600 bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-blue-700"
+                      : "shrink-0 border-b-2 border-transparent px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600 hover:bg-white hover:text-slate-950"
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
         <div aria-label="Zoom controls" className="mb-1 flex h-[34px] shrink-0 items-center overflow-hidden rounded-md border border-slate-300 bg-white text-[10px] font-semibold text-slate-700">
           <button type="button" title="Zoom out (Ctrl+-)" aria-label="Zoom out" onClick={() => runViewAction("Zoom out")} className="h-full px-2.5 text-sm hover:bg-slate-100">−</button>
@@ -180,7 +216,7 @@ export function TakeoffOfficeRibbon({ projectId, element, view, elementName }: {
         </div>
         <div className="flex min-w-0 items-center">
           <div aria-label="Quick actions" className="mb-1 ml-2 flex shrink-0 items-center overflow-hidden rounded-md border border-slate-300 bg-white">
-            {(["Undo", "Redo", "Delete"] as const).map((label) => <button key={label} type="button" title={`${label}${label === "Undo" ? " (Ctrl+Z)" : label === "Redo" ? " (Ctrl+Y)" : " (Delete)"}`} aria-label={label} onClick={() => runQuickAction(label)} className={label === "Delete" ? "flex h-8 items-center gap-1.5 border-l border-slate-200 px-2.5 text-[10px] font-semibold text-red-600 hover:bg-red-50" : "flex h-8 items-center gap-1.5 border-l border-slate-200 px-2.5 text-[10px] font-semibold text-slate-700 first:border-l-0 hover:bg-slate-100"}><span className="text-base leading-none" aria-hidden="true">{commandEmoji(label)}</span><span>{label}</span></button>)}
+            {(["Undo", "Redo", "Delete"] as const).map((label) => <button key={label} type="button" disabled={!canEdit} title={!canEdit ? editReason : `${label}${label === "Undo" ? " (Ctrl+Z)" : label === "Redo" ? " (Ctrl+Y)" : " (Delete)"}`} aria-label={label} onClick={() => runQuickAction(label)} className={label === "Delete" ? "flex h-8 items-center gap-1.5 border-l border-slate-200 px-2.5 text-[10px] font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" : "flex h-8 items-center gap-1.5 border-l border-slate-200 px-2.5 text-[10px] font-semibold text-slate-700 first:border-l-0 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"}><span className="text-base leading-none" aria-hidden="true">{commandEmoji(label)}</span><span>{label}</span></button>)}
           </div>
           <div className="mb-1 ml-auto flex shrink-0 items-center rounded-md border border-slate-300 bg-white p-0.5">
             {[["dimension", "Drawing"], ["workbook", "Workbook"], ["3d", "3D"]].map(([key, label]) => <Link key={key} href={`${appRoutes.takeoff(projectId, element, key)}${floorPartSuffix}`} className={view === key ? "rounded bg-slate-800 px-3 py-1.5 text-[10px] font-bold text-white" : "rounded px-3 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100"}>{label}</Link>)}
@@ -188,9 +224,9 @@ export function TakeoffOfficeRibbon({ projectId, element, view, elementName }: {
         </div>
       </div>
       <div className="flex h-[108px] w-full min-w-0 overflow-x-auto bg-[#f4f6f8] px-2 py-1.5 [scrollbar-width:thin]">
-        {groups.map((group, groupIndex) => <div key={group.label} style={{ flexGrow: Math.max(1, group.commands.length), flexBasis: 0 }} className={`flex min-w-max flex-col border-r border-slate-300 px-2 last:border-r-0 ${groupTint(groupIndex)}`}><div className="flex min-h-0 w-full flex-1 items-start justify-around gap-1">{group.commands.map((command) => { const id = commandId(active, group.label, command.label); return <button key={`${group.label}-${command.label}`} type="button" title={command.label} aria-pressed={activeCommand === id} onClick={() => run(active,group.label,command)} className={`${command.wide ? "min-w-[72px]" : "min-w-[56px]"} group flex h-[74px] flex-col items-center justify-center gap-1 rounded px-1 text-[10px] font-medium leading-tight text-slate-700 hover:bg-white hover:shadow-sm ${activeCommand === id ? "bg-white text-blue-700 shadow-sm ring-1 ring-blue-200" : ""}`}><CommandVisual command={command} /><span className="max-w-[68px] text-center">{command.label}</span></button>; })}</div><p className="mt-auto border-t border-slate-200/80 pt-0.5 text-center text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">{group.label}</p></div>)}
+        {groups.map((group, groupIndex) => <div key={group.label} style={{ flexGrow: Math.max(1, group.commands.length), flexBasis: 0 }} className={`flex min-w-max flex-col border-r border-slate-300 px-2 last:border-r-0 ${groupTint(groupIndex)}`}><div className="flex min-h-0 w-full flex-1 items-start justify-around gap-1">{group.commands.map((command) => { const id = commandId(active, group.label, command.label); const allowed = canEdit || isTakeoffViewCommand(active, command.label); return <button key={`${group.label}-${command.label}`} type="button" disabled={!allowed} title={allowed ? command.label : editReason} aria-pressed={activeCommand === id} onClick={() => run(active,group.label,command)} className={`${command.wide ? "min-w-[72px]" : "min-w-[56px]"} group flex h-[74px] flex-col items-center justify-center gap-1 rounded px-1 text-[10px] font-medium leading-tight text-slate-700 hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-40 ${activeCommand === id ? "bg-white text-blue-700 shadow-sm ring-1 ring-blue-200" : ""}`}><CommandVisual command={command} /><span className="max-w-[68px] text-center">{command.label}</span></button>; })}</div><p className="mt-auto border-t border-slate-200/80 pt-0.5 text-center text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">{group.label}</p></div>)}
       </div>
-    </div>{commandOpen?<div className="fixed inset-0 z-[150] flex items-start justify-center bg-slate-950/25 pt-[11vh] backdrop-blur-[1px]" onMouseDown={()=>setCommandOpen(false)}><div className="w-[560px] max-w-[92vw] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onMouseDown={(event)=>event.stopPropagation()}><div className="border-b border-slate-200 p-3"><input autoFocus value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search all Takeoff commands…" className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none focus:border-blue-300"/></div><div className="max-h-[440px] overflow-y-auto p-2">{availableCommands.filter((item)=>`${item.command.label} ${item.group} ${item.tab}`.toLowerCase().includes(query.toLowerCase())).map((item)=><button key={`${item.tab}-${item.group}-${item.command.label}`} onClick={()=>{run(item.tab,item.group,item.command);setCommandOpen(false);setQuery("");}} className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left hover:bg-slate-50"><span><span className="block text-sm font-semibold text-slate-700">{item.command.label}</span><span className="text-[10px] uppercase tracking-wide text-slate-400">{item.tab} · {item.group}</span></span><CommandVisual command={item.command}/></button>)}</div></div></div>:null}{snapSettingsOpen?<div className="fixed inset-0 z-[160] flex items-start justify-center bg-slate-950/30 pt-[14vh]" onMouseDown={()=>setSnapSettingsOpen(false)}><div className="w-[380px] rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl" onMouseDown={(event)=>event.stopPropagation()}><div className="flex items-start justify-between"><div><h3 className="text-base font-bold text-slate-900">Object snap settings</h3><p className="mt-1 text-xs leading-5 text-slate-500">Choose which PDF and takeoff geometry targets the cursor may acquire.</p></div><button onClick={()=>setSnapSettingsOpen(false)} className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100">✕</button></div><div className="mt-4 space-y-2">{(["endpoint","midpoint","intersection","nearest","grid"] as const).map((kind)=><label key={kind} className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5"><span className="text-sm font-semibold capitalize text-slate-700">{kind}</span><input type="checkbox" checked={snapModes.modes[kind]} onChange={(event)=>snapModes.setMode(kind,event.target.checked)} className="h-4 w-4 accent-blue-600"/></label>)}</div><p className="mt-4 text-[11px] leading-5 text-slate-500">Hold Alt while drawing to temporarily suppress snapping. F3 toggles Snap on or off.</p></div></div>:null}{contextMenu?<div className="fixed z-[170] w-52 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl" style={{left:contextMenu.x,top:contextMenu.y}} onPointerDown={(event)=>event.stopPropagation()}>{contextCommands.map((label,index)=><div key={label}>{index===4||label==="Lock"?<div className="my-1 border-t border-slate-100"/>:null}<button className={label==="Delete"?"w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-red-600 hover:bg-red-50":"w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"} onClick={()=>{dispatchTakeoffCommand({id:commandId("edit","Context",label),label,tab:"edit",group:"Context",element});dispatchTakeoffStatus({message:label});setContextMenu(null);}}>{commandEmoji(label)||"•"}<span className="ml-2">{label}</span></button></div>)}</div>:null}</>
+    </div>{commandOpen?<div className="fixed inset-0 z-[150] flex items-start justify-center bg-slate-950/25 pt-[11vh] backdrop-blur-[1px]" onMouseDown={()=>setCommandOpen(false)}><div className="w-[560px] max-w-[92vw] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onMouseDown={(event)=>event.stopPropagation()}><div className="border-b border-slate-200 p-3"><input autoFocus value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search all Takeoff commands…" className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none focus:border-blue-300"/></div><div className="max-h-[440px] overflow-y-auto p-2">{availableCommands.filter((item)=>`${item.command.label} ${item.group} ${item.tab}`.toLowerCase().includes(query.toLowerCase())).map((item)=><button key={`${item.tab}-${item.group}-${item.command.label}`} onClick={()=>{run(item.tab,item.group,item.command);setCommandOpen(false);setQuery("");}} className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left hover:bg-slate-50"><span><span className="block text-sm font-semibold text-slate-700">{item.command.label}</span><span className="text-[10px] uppercase tracking-wide text-slate-400">{item.tab} · {item.group}</span></span><CommandVisual command={item.command}/></button>)}</div></div></div>:null}{snapSettingsOpen?<div className="fixed inset-0 z-[160] flex items-start justify-center bg-slate-950/30 pt-[14vh]" onMouseDown={()=>setSnapSettingsOpen(false)}><div className="w-[380px] rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl" onMouseDown={(event)=>event.stopPropagation()}><div className="flex items-start justify-between"><div><h3 className="text-base font-bold text-slate-900">Object snap settings</h3><p className="mt-1 text-xs leading-5 text-slate-500">Choose which PDF and takeoff geometry targets the cursor may acquire.</p></div><button onClick={()=>setSnapSettingsOpen(false)} className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100">✕</button></div><div className="mt-4 space-y-2">{(["endpoint","midpoint","intersection","nearest","grid"] as const).map((kind)=><label key={kind} className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5"><span className="text-sm font-semibold capitalize text-slate-700">{kind}</span><input type="checkbox" checked={snapModes.modes[kind]} onChange={(event)=>snapModes.setMode(kind,event.target.checked)} className="h-4 w-4 accent-blue-600"/></label>)}</div><p className="mt-4 text-[11px] leading-5 text-slate-500">Hold Alt while drawing to temporarily suppress snapping. F3 toggles Snap on or off.</p></div></div>:null}{contextMenu?<div className="fixed z-[170] w-52 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl" style={{left:contextMenu.x,top:contextMenu.y}} onPointerDown={(event)=>event.stopPropagation()}>{contextCommands.map((label,index)=><div key={label}>{index===4||label==="Lock"?<div className="my-1 border-t border-slate-100"/>:null}<button className={label==="Delete"?"w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-red-600 hover:bg-red-50":"w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"} onClick={()=>{if(!canEdit){dispatchTakeoffStatus({message:editReason});setContextMenu(null);return;}dispatchTakeoffCommand({id:commandId("edit","Context",label),label,tab:"edit",group:"Context",element});dispatchTakeoffStatus({message:label});setContextMenu(null);}}>{commandEmoji(label)||"•"}<span className="ml-2">{label}</span></button></div>)}</div>:null}</>
   );
 }
 

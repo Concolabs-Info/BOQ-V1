@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { ApiRequestError } from "@/shared/services/apiClient";
+import { useAccess } from "@/features/platform/hooks/useAccess";
+import { STAGE_BLOCKED_REASON } from "@/features/settings/access";
 import { scopeApi } from "../api";
 import type { ScopeGap, ScopeManifest, ScopeQuestion } from "../types";
 
@@ -32,6 +34,8 @@ function friendlyQuestion(question: ScopeQuestion) {
 }
 
 export function ScopeStatus({ projectId, element }: { projectId: string; element: string }) {
+  const { canStage } = useAccess();
+  const canOpenPre = canStage("pre");
   const [scope, setScope] = useState<ScopeManifest | null>(null);
   const [error, setError] = useState<{ message: string; setupIncomplete: boolean } | null>(null);
   const [reload, setReload] = useState(0);
@@ -88,7 +92,11 @@ export function ScopeStatus({ projectId, element }: { projectId: string; element
           <span className="font-semibold text-amber-900">Takeoff setup not finished</span>
           <span className="ml-2 text-amber-700">Finish the Pre checks and select Start takeoff to prepare this section.</span>
         </div>
-        <Link href={appRoutes.pre(projectId, "start-takeoff")} className="shrink-0 font-semibold text-amber-800 hover:underline">Finish setup</Link>
+        {canOpenPre ? (
+          <Link href={appRoutes.pre(projectId, "start-takeoff")} className="shrink-0 font-semibold text-amber-800 hover:underline">Finish setup</Link>
+        ) : (
+          <span title={STAGE_BLOCKED_REASON.pre} className="shrink-0 cursor-not-allowed font-semibold text-amber-800/50">Finish setup</span>
+        )}
       </div>
     );
   }
@@ -155,15 +163,17 @@ export function ScopeStatus({ projectId, element }: { projectId: string; element
                     {question.kind === "single_choice" && question.options.length ? (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {question.options.map((option) => (
-                          <button key={option.value} type="button" disabled={answering === question.id} onClick={() => void answer(question, option.value)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700 disabled:opacity-50">
+                          <button key={option.value} type="button" disabled={answering === question.id || !canOpenPre} title={canOpenPre ? undefined : STAGE_BLOCKED_REASON.pre} onClick={() => void answer(question, option.value)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
                             {option.label}
                           </button>
                         ))}
                       </div>
-                    ) : (
+                    ) : canOpenPre ? (
                       <Link href={appRoutes.pre(projectId, question.code.includes("scale") ? "scale" : question.code.includes("height") ? "height" : "plans")} className="mt-2 inline-flex font-semibold text-blue-700 hover:underline">
                         Review drawings
                       </Link>
+                    ) : (
+                      <span title={STAGE_BLOCKED_REASON.pre} className="mt-2 inline-flex cursor-not-allowed font-semibold text-slate-400">Review drawings</span>
                     )}
                   </div>
                 )) : <p className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm ring-1 ring-slate-200/70">The source drawings are ready. Select a drawing below to begin takeoff.</p>}

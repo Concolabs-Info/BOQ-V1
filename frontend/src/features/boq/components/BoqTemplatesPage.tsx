@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { Button } from "@/shared/components/Button";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { LoadingState } from "@/shared/components/LoadingState";
@@ -29,6 +30,7 @@ import type {
 } from "../types";
 import { useBoqJob } from "../hooks/useBoqJob";
 import { BoqShell } from "./BoqShell";
+import { useAccess } from "@/features/platform/hooks/useAccess";
 import { ConditionalRuleBuilder, normalizeRules } from "./ConditionalRuleBuilder";
 import { FormulaBuilder, normalizeFormula } from "./FormulaBuilder";
 
@@ -153,6 +155,8 @@ const defaultItems: ItemDraft[] = [
 ];
 
 export function BoqTemplatesPage({ projectId }: { projectId: string }) {
+  const router = useRouter();
+  const { can, ready } = useAccess();
   const query = useQuery({ queryKey: ["boq", projectId, "templates"], queryFn: () => getBoqTemplateLibrary(projectId), refetchOnWindowFocus: false });
   const { run, saving, error: jobError } = useBoqJob(projectId);
   const [activePackage, setActivePackage] = useState<BoqTemplatePackage | null>(null);
@@ -166,6 +170,10 @@ export function BoqTemplatesPage({ projectId }: { projectId: string }) {
   const activeItems = useMemo(() => items.filter((item) => item.is_active !== false), [items]);
   const conditionalRuleCount = useMemo(() => items.filter((item) => item.template_mode === "conditional" && normalizeItemRules(item).branches.length > 0).length, [items]);
   const itemPreview = useMemo(() => itemDraft ? renderPreview(itemDraft) : "", [itemDraft]);
+
+  useEffect(() => {
+    if (ready && !can("boq:templates_manage")) router.replace(appRoutes.workspaceBoq(projectId));
+  }, [can, ready, projectId, router]);
 
   useEffect(() => {
     if (!query.data) return;

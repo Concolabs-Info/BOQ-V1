@@ -11,6 +11,7 @@ import { AccountProfileForm, AccountSecurityCard } from "@/features/settings/com
 import { CompanySettingsForm } from "@/features/settings/components/CompanySettingsForm";
 import { MembersManager } from "@/features/settings/components/MembersManager";
 import { RolesManager } from "@/features/settings/components/RolesManager";
+import { SettingsAccessGuard } from "@/features/settings/components/SettingsAccessGuard";
 import { SettingsShell } from "@/features/settings/components/SettingsShell";
 import { getCompanySettings, getMemberDirectory, settingsError } from "@/features/settings/api";
 import {
@@ -283,13 +284,15 @@ export function RolesPage() {
 export function BillingPage({ title = "Billing" }: { title?: string }) {
   const { rows, isLoading, error } = useRecords(listBillingHistory);
   return (
-    <PlatformShell title={title} eyebrow="Billing">
-      <Card>
-        {isLoading ? <LoadingState label="Loading billing history" /> : null}
-        {error ? <ErrorMessage message={error} /> : null}
-        <DataTable columns={["provider", "amount", "currency", "status", "description", "created_at"]} rows={rows} />
-      </Card>
-    </PlatformShell>
+    <SettingsAccessGuard>
+      <PlatformShell title={title} eyebrow="Billing">
+        <Card>
+          {isLoading ? <LoadingState label="Loading billing history" /> : null}
+          {error ? <ErrorMessage message={error} /> : null}
+          <DataTable columns={["provider", "amount", "currency", "status", "description", "created_at"]} rows={rows} />
+        </Card>
+      </PlatformShell>
+    </SettingsAccessGuard>
   );
 }
 

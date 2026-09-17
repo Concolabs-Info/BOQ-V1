@@ -22,6 +22,7 @@ import {
   requestGuardedAction,
   useEditSessionStore,
 } from "./editing/editSessionStore";
+import { canMutateTakeoffGeometry } from "./takeoffGeometryAccess";
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 type Snapshot = {
@@ -35,6 +36,7 @@ function stage<T>(
   original: T,
   restore: (value: T) => void,
 ): boolean {
+  if (!canMutateTakeoffGeometry()) return false;
   const edit = useEditSessionStore.getState();
   if (edit.saving) return false;
   if (edit.key === key || edit.key?.startsWith("geometry:")) return true;
@@ -175,7 +177,8 @@ export const useStructuralStore = create<StructuralState>()(
         const selectedIds = current.includes(id) ? current.filter((value) => value !== id) : [...current, id];
         requestGuardedAction(() => set({ selectedIds, selectedId: selectedIds.at(-1) || null }), "change selection");
       },
-      translateSelected: (ids, dx, dy) =>
+      translateSelected: (ids, dx, dy) => {
+        if (!canMutateTakeoffGeometry()) return;
         set((s) => {
           const selected = new Set(ids);
           const movePoint = (point: { x: number; y: number }) => ({
@@ -214,7 +217,8 @@ export const useStructuralStore = create<StructuralState>()(
             ),
             workbookConfirmed: {},
           };
-        }),
+        });
+      },
       updateColumn: (id, patch) => {
         const original = get().columns.find((x) => x.id === id);
         if (
@@ -562,7 +566,8 @@ export const useStructuralStore = create<StructuralState>()(
         set((s) => ({
           workbookConfirmed: { ...s.workbookConfirmed, [key]: value },
         })),
-      captureUndo: () =>
+      captureUndo: () => {
+        if (!canMutateTakeoffGeometry()) return;
         set((s) => ({
           geometryUndo: [
             ...s.geometryUndo.slice(-19),
@@ -573,9 +578,11 @@ export const useStructuralStore = create<StructuralState>()(
             },
           ],
           geometryRedo: [],
-        })),
+        }));
+      },
       undo: () =>
         set((s) => {
+          if (!canMutateTakeoffGeometry()) return {};
           const previous = s.geometryUndo.at(-1);
           return previous
             ? {
@@ -591,6 +598,7 @@ export const useStructuralStore = create<StructuralState>()(
         }),
       redo: () =>
         set((s) => {
+          if (!canMutateTakeoffGeometry()) return {};
           const next = (s.geometryRedo || []).at(-1);
           return next ? {
             columns: clone(next.columns), beams: clone(next.beams), slabPlates: clone(next.slabPlates),

@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { canMutateTakeoffGeometry } from "../takeoffGeometryAccess";
 
 type Commit = (draft: unknown) => void | Promise<void>;
 type Action = () => void;
@@ -114,6 +115,7 @@ export function requestGuardedAction(action: Action, label?: string) {
 }
 
 export function beginLiveEdit(key: string, title: string, discard: Action): boolean {
+  if (!canMutateTakeoffGeometry() && !key.startsWith("measurement:")) return false;
   const state = useEditSessionStore.getState();
   if (state.key === key) return true;
   if (state.key) {

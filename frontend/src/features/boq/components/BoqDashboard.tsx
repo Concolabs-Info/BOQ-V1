@@ -33,6 +33,8 @@ import { BoqSettingsDrawer } from "./BoqSettingsDrawer";
 import { BoqShell } from "./BoqShell";
 import { BoqTemplateCreateDialog } from "./BoqTemplateCreateDialog";
 import { BoqToolbar } from "./BoqToolbar";
+import { useAccess } from "@/features/platform/hooks/useAccess";
+import { actionReason } from "@/features/settings/access";
 
 export type BoqPanel = "settings" | "exports" | null;
 
@@ -57,6 +59,12 @@ function rowType(row: BoqRow): string {
 }
 
 export function BoqDashboard({ projectId, initialPanel = null }: { projectId: string; initialPanel?: BoqPanel }) {
+  const { can } = useAccess();
+  const canExport = can("boq:export");
+  const canTemplates = can("boq:templates_manage");
+  const canRates = can("boq:rates_manage");
+  const canAddItem = can("boq:add_item");
+  const canSetup = canRates || canTemplates || canAddItem;
   const client = useQueryClient();
   const router = useRouter();
   const [floorId, setFloorId] = useState<string | null>(null);
@@ -74,6 +82,16 @@ export function BoqDashboard({ projectId, initialPanel = null }: { projectId: st
   const state = query.data;
 
   useEffect(() => setPanel(initialPanel), [initialPanel]);
+  useEffect(() => {
+    if (initialPanel === "settings" && !canSetup) {
+      setPanel(null);
+      router.replace(appRoutes.workspaceBoq(projectId));
+    }
+    if (initialPanel === "exports" && !canExport) {
+      setPanel(null);
+      router.replace(appRoutes.workspaceBoq(projectId));
+    }
+  }, [canExport, canSetup, initialPanel, projectId, router]);
 
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -168,12 +186,15 @@ export function BoqDashboard({ projectId, initialPanel = null }: { projectId: st
         saving={saving}
         stale={Boolean(state?.stale)}
         onTemplateChange={(templateId) => void run(async () => { await selectBoqTemplate(projectId, templateId); await query.refetch(); }).catch(() => undefined)}
-        onAddTemplate={() => { setError(null); setTemplateDialogOpen(true); }}
-        onManageTemplates={() => router.push(appRoutes.workspaceBoqTemplates(projectId))}
+        onAddTemplate={() => { if (!canTemplates) return; setError(null); setTemplateDialogOpen(true); }}
+        onManageTemplates={() => { if (!canTemplates) return; router.push(appRoutes.workspaceBoqTemplates(projectId)); }}
         onRefresh={() => void forceRefresh()}
-        onDownload={(format) => void quickExport(format)}
-        onExportHistory={() => { setError(null); setPanel("exports"); }}
-        onSettings={() => { setError(null); setPanel("settings"); }}
+        onDownload={(format) => { if (!canExport) return; void quickExport(format); }}
+        onExportHistory={() => { if (!canExport) return; setError(null); setPanel("exports"); }}
+        onSettings={() => { if (!canSetup) return; setError(null); setPanel("settings"); }}
+        canExport={canExport}
+        canTemplates={canTemplates}
+        canSetup={canSetup}
       />
 
       <div className="space-y-5 bg-slate-50 p-5 lg:p-6">
@@ -187,7 +208,25 @@ export function BoqDashboard({ projectId, initialPanel = null }: { projectId: st
                 <h3 className="font-semibold text-slate-950">BOQ items</h3>
               </div>
               <p className="text-sm text-slate-600">Estimated total <strong className="ml-1 text-base text-slate-950">{state?.setup.currency || "Rs"} {totalAmount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></p>
-              <div className="flex gap-2"><Button variant="secondary" className="h-9 px-3 text-xs" onClick={()=>setRatesOpen(true)}>Rates</Button><Button variant="secondary" onClick={() => { setError(null); setManualOpen(true); }}>Add item</Button></div>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  className="h-9 px-3 text-xs"
+                  title={canRates ? undefined : actionReason("boq:rates_manage")}
+                  disabled={!canRates}
+                  onClick={() => setRatesOpen(true)}
+                >
+                  Rates
+                </Button>
+                <Button
+                  variant="secondary"
+                  title={canAddItem ? undefined : actionReason("boq:add_item")}
+                  disabled={!canAddItem}
+                  onClick={() => { setError(null); setManualOpen(true); }}
+                >
+                  Add item
+                </Button>
+              </div>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_180px_190px]">
               <input className="input" placeholder="Search BOQ" value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -303,6 +342,7 @@ export function BoqDashboard({ projectId, initialPanel = null }: { projectId: st
         open={Boolean(selectedRow)}
         saving={saving}
         error={error}
+        canEdit={canAddItem || canRates || can("boq:unmeasured_input")}
         showRates={Boolean(state?.setup.include_rates)}
         showAmounts={Boolean(state?.setup.include_amounts)}
         onClose={() => setSelectedRowId(null)}
