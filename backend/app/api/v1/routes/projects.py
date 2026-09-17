@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from ....core.rbac import WORKSPACE_SCOPED_ROLES
+from ....core.rbac import is_project_scoped
 from ....modules.platform.membership import CompanyMembership
 from ....modules.pre.confirmations import is_confirmed
 from ....modules.pre.project_frame import readiness
@@ -29,7 +29,7 @@ def list_projects(
     user_id = request.state.current_user.id
     clauses = ["company_id = %s"]
     params: list[object] = [membership.company_id]
-    if membership.role in WORKSPACE_SCOPED_ROLES:
+    if is_project_scoped(membership.role):
         clauses.append("id IN (SELECT project_id FROM project_member WHERE user_id = %s)")
         params.append(user_id)
     if search and search.strip():

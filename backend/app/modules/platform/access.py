@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request
 
 from ...core.auth import CurrentUser, get_current_user
-from ...core.rbac import WORKSPACE_SCOPED_ROLES
+from ...core.rbac import is_project_scoped
 from ...database.connection import fetch_one
 from .membership import CompanyMembership, get_company_membership
 from .roles import permissions_for_membership
@@ -133,7 +133,7 @@ def enforce_workspace_access(
     if project_id:
         if not _company_owns_project(membership.company_id, project_id):
             raise HTTPException(status_code=404, detail="Project not found")
-        if membership.role in WORKSPACE_SCOPED_ROLES and not _assigned_to_project(current_user.id, project_id):
+        if is_project_scoped(membership.role) and not _assigned_to_project(current_user.id, project_id):
             raise HTTPException(status_code=403, detail="insufficient_permission")
 
     return membership

@@ -3,7 +3,7 @@ from app.core.rbac import (
     DEFAULT_INVITE_ROLE,
     PERMISSION_MATRIX,
     ROLES,
-    WORKSPACE_SCOPED_ROLES,
+    is_project_scoped,
     permissions_for_role,
     sanitize_custom_permissions,
     slug_to_custom_role_key,
@@ -19,7 +19,9 @@ def test_built_in_roles_are_admin_plus_four_working_roles():
     assert ROLES == ["admin", "chief_estimator", "qs", "qa_checker", "project_manager"]
     assert ASSIGNABLE_ROLES == ["chief_estimator", "qs", "qa_checker", "project_manager"]
     assert DEFAULT_INVITE_ROLE == "qs"
-    assert WORKSPACE_SCOPED_ROLES == frozenset()
+    assert is_project_scoped("qs")
+    assert is_project_scoped("custom_site_qs")
+    assert not is_project_scoped("admin")
 
 
 def test_qs_can_run_the_pipeline_but_not_manage_rates():

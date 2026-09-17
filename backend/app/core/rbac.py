@@ -83,8 +83,11 @@ ALL_PERMISSIONS: list[str] = list(PERMISSION_MATRIX.keys())
 CUSTOM_ROLE_PERMISSIONS: list[str] = [key for key in ALL_PERMISSIONS if key != "billing:manage"]
 CUSTOM_ROLE_PREFIX = "custom_"
 MAX_CUSTOM_ROLES = 20
-# Built-ins are company-wide. Custom roles are too: company_role has no scoped flag yet.
-WORKSPACE_SCOPED_ROLES: frozenset[str] = frozenset()
+
+
+def is_project_scoped(role: str) -> bool:
+    """Owners see every project. Everyone else only sees projects they were added to."""
+    return role != "admin"
 
 
 def is_built_in_role(role: str) -> bool:

@@ -49,6 +49,7 @@ def _request(path: str, method: str = "GET", project_id: str | None = "p1") -> R
 def test_enforce_allows_admin_on_owned_project(monkeypatch):
     monkeypatch.setattr(access, "get_company_membership", lambda user_id: ADMIN)
     monkeypatch.setattr(access, "_company_owns_project", lambda company_id, project_id: True)
+    monkeypatch.setattr(access, "permissions_for_membership", lambda membership: ["takeoff:view"])
     result = access.enforce_workspace_access(_request("/api/v1/projects/p1/takeoff/walls"), USER)
     assert result.role == "admin"
 
@@ -56,19 +57,29 @@ def test_enforce_allows_admin_on_owned_project(monkeypatch):
 def test_enforce_rejects_project_manager_on_takeoff_edit(monkeypatch):
     monkeypatch.setattr(access, "get_company_membership", lambda user_id: PROJECT_MANAGER)
     monkeypatch.setattr(access, "_company_owns_project", lambda company_id, project_id: True)
+    monkeypatch.setattr(access, "permissions_for_membership", lambda membership: ["boq:view", "takeoff:view"])
     with pytest.raises(HTTPException) as excinfo:
         access.enforce_workspace_access(_request("/api/v1/projects/p1/takeoff/walls/analyze", method="POST"), USER)
     assert excinfo.value.status_code == 403
 
 
-def test_workspace_scoped_role_must_be_assigned(monkeypatch):
-    monkeypatch.setattr(access, "WORKSPACE_SCOPED_ROLES", frozenset({"qa_checker"}))
+def test_invited_member_must_be_assigned_to_open_a_project(monkeypatch):
     monkeypatch.setattr(access, "get_company_membership", lambda user_id: QA_CHECKER)
     monkeypatch.setattr(access, "_company_owns_project", lambda company_id, project_id: True)
+    monkeypatch.setattr(access, "permissions_for_membership", lambda membership: ["boq:view"])
     monkeypatch.setattr(access, "_assigned_to_project", lambda user_id, project_id: False)
     with pytest.raises(HTTPException) as excinfo:
         access.enforce_workspace_access(_request("/api/v1/projects/p1/boq"), USER)
     assert excinfo.value.status_code == 403
+
+
+def test_invited_member_can_open_an_assigned_project(monkeypatch):
+    monkeypatch.setattr(access, "get_company_membership", lambda user_id: QA_CHECKER)
+    monkeypatch.setattr(access, "_company_owns_project", lambda company_id, project_id: True)
+    monkeypatch.setattr(access, "permissions_for_membership", lambda membership: ["boq:view"])
+    monkeypatch.setattr(access, "_assigned_to_project", lambda user_id, project_id: True)
+    result = access.enforce_workspace_access(_request("/api/v1/projects/p1/boq"), USER)
+    assert result.role == "qa_checker"
 
 
 def _request_with_params(path: str, path_params: dict) -> Request:

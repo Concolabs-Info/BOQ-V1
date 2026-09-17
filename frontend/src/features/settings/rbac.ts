@@ -33,6 +33,10 @@ export const ASSIGNABLE_ROLES: RoleKey[] = [
 
 export const DEFAULT_INVITE_ROLE: RoleKey = "qs";
 
+export function isProjectScoped(role: string) {
+  return role !== "admin";
+}
+
 export const PERMISSION_GROUPS: { title: string; keys: { key: string; name: string }[] }[] = [
   {
     title: "Pre",
