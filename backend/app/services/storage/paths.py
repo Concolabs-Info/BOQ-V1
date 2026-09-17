@@ -18,6 +18,12 @@ def project_root(project_id: UUID | str) -> Path:
     return value
 
 
+def company_dir(company_id: UUID | str) -> Path:
+    value = root() / "company" / str(company_id)
+    value.mkdir(parents=True, exist_ok=True)
+    return value
+
+
 def source_dir(project_id: UUID | str) -> Path:
     value = project_root(project_id) / "source"
     value.mkdir(parents=True, exist_ok=True)

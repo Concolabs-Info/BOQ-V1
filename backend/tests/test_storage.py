@@ -14,6 +14,8 @@ def test_storage_keys_stay_inside_root(tmp_path, monkeypatch):
         source.write_bytes(b"%PDF-")
         assert resolve_key(key_for(source)) == source.resolve()
         assert crops_dir("project-1").is_dir()
+        from app.services.storage.paths import company_dir
+        assert company_dir("c1").is_dir()
         with pytest.raises(ValueError):
             resolve_key("../outside.txt")
     finally:

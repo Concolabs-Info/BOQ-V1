@@ -1,17 +1,26 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Button } from "@/shared/components/Button";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { LoadingState } from "@/shared/components/LoadingState";
 import { CountrySelect } from "@/features/onboarding/components/CountrySelect";
 import { currencyForCountry } from "@/features/onboarding/countries";
-import { getPlatformContext } from "@/features/platform/services/platformService";
-import { getCompanySettings, settingsError, updateCompanySettings, type CompanySettings } from "../api";
+import { useAssetUrl, invalidateAsset } from "@/features/floor-plans/hooks/useAssetUrl";
+import { getPlatformContext, notifyCompanyLogoChanged } from "@/features/platform/services/platformService";
+import {
+  deleteCompanyLogo,
+  getCompanySettings,
+  settingsError,
+  updateCompanySettings,
+  uploadCompanyLogo,
+  type CompanySettings,
+} from "../api";
 import { CompanyDeleteCard } from "./CompanyDelete";
 import { SettingsCard, SettingsStack } from "./SettingsCard";
 
 export function CompanySettingsForm() {
+  const fileRef = useRef<HTMLInputElement>(null);
   const [company, setCompany] = useState<CompanySettings | null>(null);
   const [name, setName] = useState("");
   const [country, setCountry] = useState("Sri Lanka");
@@ -21,8 +30,12 @@ export function CompanySettingsForm() {
   const [canDelete, setCanDelete] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
+  const [photoPending, setPhotoPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [localPhoto, setLocalPhoto] = useState<string | null>(null);
+  const logoSrc = useAssetUrl(localPhoto ? null : company?.logo_url);
 
   useEffect(() => {
     let mounted = true;
@@ -74,6 +87,53 @@ export function CompanySettingsForm() {
   if (!company) return <ErrorMessage message="Company details could not be loaded." />;
 
   const disabled = !canManage || pending;
+  const initials =
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? "")
+      .join("") || "C";
+
+  function applyCompany(next: CompanySettings) {
+    const previous = company?.logo_url;
+    if (previous && previous !== next.logo_url) {
+      invalidateAsset(previous);
+    }
+    setCompany(next);
+    notifyCompanyLogoChanged(next.logo_url);
+  }
+
+  async function onPickPhoto(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const preview = URL.createObjectURL(file);
+    setPhotoError(null);
+    setPhotoPending(true);
+    setLocalPhoto(preview);
+    try {
+      applyCompany(await uploadCompanyLogo(file));
+    } catch (nextError) {
+      setPhotoError(settingsError(nextError));
+    } finally {
+      URL.revokeObjectURL(preview);
+      setLocalPhoto(null);
+      setPhotoPending(false);
+    }
+  }
+
+  async function removePhoto() {
+    setPhotoError(null);
+    setPhotoPending(true);
+    try {
+      applyCompany(await deleteCompanyLogo());
+    } catch (nextError) {
+      setPhotoError(settingsError(nextError));
+    } finally {
+      setPhotoPending(false);
+    }
+  }
 
   return (
     <SettingsStack>
@@ -81,6 +141,38 @@ export function CompanySettingsForm() {
         {error ? <ErrorMessage message={error} /> : null}
         {note ? <p className="text-sm font-medium text-emerald-700">{note}</p> : null}
         {!canManage ? <p className="text-sm text-slate-500">Ask an admin to change company details.</p> : null}
+
+        <SettingsCard
+          title="Company photo"
+          description="Shown on the sidebar in place of the default mark."
+          footerHint="Square images work best. PNG, JPEG, or WebP, up to 5 MB."
+          footer={
+            canManage ? (
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="secondary" className="rounded-xl" disabled={photoPending} pending={photoPending} onClick={() => fileRef.current?.click()}>
+                  {company.logo_url ? "Update photo" : "Upload photo"}
+                </Button>
+                {company.logo_url ? (
+                  <Button type="button" variant="danger" className="rounded-xl" disabled={photoPending} onClick={() => void removePhoto()}>
+                    Remove
+                  </Button>
+                ) : null}
+              </div>
+            ) : undefined
+          }
+        >
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" disabled={!canManage || photoPending} onChange={(event) => void onPickPhoto(event)} />
+          {photoError ? <p className="mb-3 text-sm text-red-600">{photoError}</p> : null}
+          <div className="flex items-center gap-3">
+            <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-base font-semibold text-slate-600">
+              {localPhoto || logoSrc ? <img src={localPhoto || logoSrc || ""} alt="" className="size-full object-cover" /> : initials}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium text-slate-950">{name || "Company"}</p>
+              <p className="truncate text-xs text-slate-500">{company.logo_url ? "Used on the sidebar." : "No photo yet. The default mark is shown."}</p>
+            </div>
+          </div>
+        </SettingsCard>
 
         <SettingsCard
           title="Company name"
