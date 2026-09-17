@@ -58,7 +58,6 @@ export function preloadAsset(path: string | null | undefined): Promise<string | 
 export function invalidateAsset(path?: string | null) {
   const paths = path ? [path] : [...assetUrls.keys()];
   for (const item of paths) {
-    if (assetConsumers.get(item)) continue;
     const entry = assetUrls.get(item);
     if (entry) URL.revokeObjectURL(entry.url);
     assetUrls.delete(item);
