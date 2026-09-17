@@ -135,6 +135,20 @@ def test_delete_built_in_role_rejected(monkeypatch):
     assert "cannot be deleted" in excinfo.value.message
 
 
+def test_delete_built_in_role_by_plain_key_rejected_without_a_db_call(monkeypatch):
+    """A non-overridden built-in role's id (per list_roles) is its plain key,
+    e.g. "qs" - not a UUID. This must be rejected before any query runs
+    against the uuid-typed company_role.id column, or Postgres raises
+    InvalidTextRepresentation instead of a clean InvitationError."""
+    def fail_if_called(sql, params=()):
+        raise AssertionError("fetch_one should not be called for a plain built-in role key")
+
+    monkeypatch.setattr(roles, "fetch_one", fail_if_called)
+    with pytest.raises(InvitationError) as excinfo:
+        roles.delete_custom_role(MEMBERSHIP, "qs")
+    assert "cannot be deleted" in excinfo.value.message
+
+
 def test_permissions_for_membership_uses_custom_row(monkeypatch):
     monkeypatch.setattr(
         roles,

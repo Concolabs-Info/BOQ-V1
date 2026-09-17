@@ -262,6 +262,11 @@ def update_role(membership: CompanyMembership, role_id: str, *, name: str, descr
 
 
 def delete_custom_role(membership: CompanyMembership, role_id: str) -> None:
+    # A non-overridden built-in role's "id" (per list_roles) is its plain key
+    # (e.g. "qs"), not a UUID — check before it reaches a uuid-typed column,
+    # or Postgres raises InvalidTextRepresentation instead of a clean error.
+    if is_built_in_role(role_id):
+        raise InvitationError("invalid", "Built-in roles cannot be deleted.")
     current = fetch_one(
         "SELECT id, key FROM company_role WHERE id = %s AND company_id = %s",
         (role_id, membership.company_id),
