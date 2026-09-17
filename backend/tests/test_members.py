@@ -30,6 +30,13 @@ def test_update_member_role_rejects_self():
     assert "own role" in excinfo.value.message
 
 
+def test_update_member_role_rejects_promotion_to_admin(monkeypatch):
+    monkeypatch.setattr(members, "fetch_one", lambda sql, params=(): {"user_id": "user_2", "role": "qs"})
+    with pytest.raises(InvitationError) as excinfo:
+        members.update_member_role(ACTOR, MEMBERSHIP, "user_2", "admin")
+    assert "Unknown role" in excinfo.value.message
+
+
 def test_update_member_role_rejects_last_admin(monkeypatch):
     calls = {"n": 0}
 

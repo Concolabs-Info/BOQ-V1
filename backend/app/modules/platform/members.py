@@ -7,7 +7,7 @@ from ...core.rbac import ROLE_LABELS
 from ...database.connection import execute, fetch_all, fetch_one, transaction
 from .invitations import InvitationError
 from .membership import CompanyMembership
-from .roles import known_role, label_for_role
+from .roles import is_assignable_role, label_for_role
 
 
 def list_members(company_id: str) -> list[dict]:
@@ -52,7 +52,9 @@ def _admin_count(company_id: str) -> int:
 def update_member_role(actor: CurrentUser, membership: CompanyMembership, target_user_id: str, role: str) -> dict:
     if target_user_id == actor.id:
         raise InvitationError("invalid", "You can't change your own role.")
-    if not known_role(membership.company_id, role):
+    # Promoting to admin is a separate, deliberate action, not a value on this
+    # dropdown — is_assignable_role() excludes it the same way invites do.
+    if not is_assignable_role(membership.company_id, role):
         raise InvitationError("invalid", "Unknown role.")
     current = fetch_one(
         "SELECT user_id, role FROM company_member WHERE company_id = %s AND user_id = %s",
