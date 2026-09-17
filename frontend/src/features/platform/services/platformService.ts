@@ -14,6 +14,7 @@ export type PlatformContext = {
     name: string;
     status: string;
     membership_role?: string;
+    logo_url?: string | null;
   } | null;
   membership_role?: string;
   permissions: string[];
@@ -39,6 +40,13 @@ export type DashboardSummary = {
     };
   };
 };
+
+export const COMPANY_LOGO_CHANGED = "quanto:company-logo";
+
+export function notifyCompanyLogoChanged(logoUrl: string | null) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<string | null>(COMPANY_LOGO_CHANGED, { detail: logoUrl }));
+}
 
 const CONTEXT_PATH = "/api/v1/platform/me";
 const DASHBOARD_PATH = "/api/v1/platform/dashboard-summary";

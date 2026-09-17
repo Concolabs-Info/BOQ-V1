@@ -25,15 +25,22 @@ export default function HelpPage({
 
       <h2>Inviting your team</h2>
       <ul>
-        <li>Enter someone&apos;s email and pick a role. They&apos;ll get a link to join your company.</li>
+        <li>Enter someone&apos;s email, pick a role, and choose which projects they can open. They&apos;ll only see those jobs.</li>
         <li>Only owners and admins can invite people or change roles.</li>
         <li>You can resend or cancel a pending invite from the members list.</li>
       </ul>
 
+      <h2>Joining a company</h2>
+      <ul>
+        <li>If someone invites you, open the email and set your name and password. That joins you to their company.</li>
+        <li>You&apos;ll only see the projects they picked. If the list is empty, ask an owner to add you from Settings → Members.</li>
+        <li>If you already have a Quanto account, the same email link signs you in and joins you.</li>
+      </ul>
+
       <h2>Roles</h2>
       <p>
-        Built-in roles cover the usual jobs on a team. You can add your own — technician, site engineer, viewer, and so
-        on — under Settings → Roles.
+        Built-in roles cover the usual jobs on a team. You can add your own, like technician, site engineer, or viewer,
+        under Settings → Roles.
       </p>
     </LegalPage>
   );

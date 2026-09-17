@@ -10,11 +10,13 @@ export function ClerkAvatar({
   name,
   email,
   className,
+  cacheKey,
 }: {
   imageUrl?: string | null;
   name: string;
   email?: string | null;
   className?: string;
+  cacheKey?: string | number | Date | null;
 }) {
   const initials =
     name
@@ -25,16 +27,24 @@ export function ClerkAvatar({
       .join("") ||
     email?.[0]?.toUpperCase() ||
     "?";
+  const src = photoSrc(imageUrl, cacheKey);
 
   return (
     <span className={cn("relative flex size-8 shrink-0 overflow-hidden rounded-full bg-slate-200 text-xs font-semibold text-slate-600", className)}>
-      {imageUrl ? (
-        <img src={imageUrl} alt="" className="size-full object-cover" referrerPolicy="no-referrer" />
+      {src ? (
+        <img key={src} src={src} alt="" className="size-full object-cover" referrerPolicy="no-referrer" />
       ) : (
         <span className="flex size-full items-center justify-center">{initials}</span>
       )}
     </span>
   );
+}
+
+function photoSrc(imageUrl?: string | null, cacheKey?: string | number | Date | null) {
+  if (!imageUrl) return null;
+  if (cacheKey == null || cacheKey === "") return imageUrl;
+  const stamp = cacheKey instanceof Date ? cacheKey.getTime() : cacheKey;
+  return `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}v=${stamp}`;
 }
 
 export function NavUser() {
@@ -48,7 +58,7 @@ export function NavUser() {
   return (
     <Menu.Root>
       <Menu.Trigger className="flex w-full items-center gap-2.5 rounded-xl border-0 bg-transparent px-2 py-2 text-left outline-none transition hover:bg-slate-50 data-[popup-open]:bg-slate-50">
-        <ClerkAvatar imageUrl={user.imageUrl} name={name} email={email} />
+        <ClerkAvatar imageUrl={user.imageUrl} cacheKey={user.updatedAt} name={name} email={email} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-slate-950">{name}</span>
           {email ? <span className="block truncate text-xs text-slate-500">{email}</span> : null}
@@ -59,7 +69,7 @@ export function NavUser() {
         <Menu.Positioner side="right" align="end" sideOffset={8} className="z-[90] outline-none">
           <Menu.Popup className="min-w-56 origin-[var(--transform-origin)] rounded-2xl border border-slate-200 bg-white p-1.5 shadow-lg outline-none">
             <div className="flex items-center gap-2.5 px-2 py-2">
-              <ClerkAvatar imageUrl={user.imageUrl} name={name} email={email} />
+              <ClerkAvatar imageUrl={user.imageUrl} cacheKey={user.updatedAt} name={name} email={email} />
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-slate-950">{name}</p>
                 {email ? <p className="truncate text-xs text-slate-500">{email}</p> : null}

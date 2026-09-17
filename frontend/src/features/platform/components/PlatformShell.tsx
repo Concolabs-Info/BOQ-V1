@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode, type SVGProps } from "react";
+import { useAssetUrl } from "@/features/floor-plans/hooks/useAssetUrl";
+import { COMPANY_LOGO_CHANGED, getPlatformContext } from "@/features/platform/services/platformService";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { NavUser } from "./NavUser";
 
@@ -30,7 +32,7 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
 
   const navigation = <>
     <div className="flex items-center gap-3 px-1">
-      <HexLogoIcon className="h-10 w-10" />
+      <CompanyMark />
       <div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-950">Quanto</p><p className="truncate text-xs text-slate-500">BOQ production workspace</p></div>
     </div>
     <nav className="mt-8">
@@ -55,8 +57,8 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
         onClick={() => setMobileOpen(false)}
         className={
           settingsActive
-            ? "flex items-center gap-2 rounded-xl bg-blue-50 px-3 py-2.5 text-sm font-semibold text-blue-700"
-            : "flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+            ? "flex items-center gap-2 rounded-xl border-l-2 border-blue-600 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700"
+            : "flex items-center gap-2 rounded-xl border-l-2 border-transparent px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
         }
       >
         <SettingsIcon className="size-4 shrink-0" />
@@ -69,28 +71,58 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
     </div>
   );
 
-  return <main className="autoboq-ui h-dvh overflow-hidden bg-[#eef3f8] text-slate-950">
-    <div className="flex h-full min-h-0 w-full">
-      <aside aria-hidden={desktopCollapsed} className={`hidden shrink-0 overflow-hidden bg-white xl:block ${desktopCollapsed ? "w-0 border-r-0 border-transparent" : "w-[280px] border-r border-slate-200"}`}>
+  return <main className={`autoboq-ui bg-[#eef3f8] text-slate-950 ${lockContent ? "h-dvh overflow-hidden" : "min-h-dvh"}`}>
+    <div className={`flex w-full ${lockContent ? "h-full min-h-0" : "min-h-dvh"}`}>
+      <aside aria-hidden={desktopCollapsed} className={`hidden shrink-0 overflow-hidden bg-white xl:block ${lockContent ? "" : "sticky top-0 h-dvh"} ${desktopCollapsed ? "w-0 border-r-0 border-transparent" : "w-[280px] border-r border-slate-200"}`}>
         <div className={`flex h-full w-[280px] flex-col px-5 py-6 ${desktopCollapsed ? "pointer-events-none opacity-0" : "opacity-100"}`}>
           <div className="min-h-0 flex-1 overflow-y-auto">{navigation}</div>
           {settingsFooter}
         </div>
       </aside>
       {mobileOpen ? <div className="fixed inset-0 z-50 xl:hidden"><button aria-label="Close navigation" className="absolute inset-0 bg-slate-950/35" onClick={() => setMobileOpen(false)} /><aside className="relative flex h-full w-[290px] flex-col border-r border-slate-200 bg-white px-5 py-6 shadow-2xl"><button className="ml-auto block rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600" onClick={() => setMobileOpen(false)}>Close</button><div className="mt-4 min-h-0 flex-1 overflow-y-auto">{navigation}</div>{settingsFooter}</aside></div> : null}
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className={officeHeader ? "flex h-[58px] shrink-0 items-stretch gap-3 border-b border-slate-300 bg-[#f8f9fb] px-2" : `flex min-h-[72px] shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 ${flushContent ? "lg:px-7" : "lg:px-8"}`}>
-          <div className={officeHeader ? "flex shrink-0 items-center gap-2 border-r border-slate-300 pr-3" : "flex shrink-0 items-center gap-3"}>
-            <button aria-label="Open navigation" className={officeHeader ? "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 xl:hidden" : "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 xl:hidden"} onClick={() => setMobileOpen(true)}><MenuIcon className="h-5 w-5" /></button>
-            <button aria-label={desktopCollapsed ? "Show navigation" : "Hide navigation"} className={officeHeader ? "hidden h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:bg-blue-50 hover:text-blue-700 xl:inline-flex" : "hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 xl:inline-flex"} onClick={toggleDesktopNavigation}><SidebarIcon className="h-5 w-5" /></button>
-            <div className="min-w-0">{eyebrow ? <p className={officeHeader ? "truncate text-[9px] font-bold uppercase tracking-[0.22em] text-blue-700" : "truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-blue-700"}>{eyebrow}</p> : null}<h1 className={officeHeader ? "truncate text-lg font-semibold tracking-tight text-slate-950" : "mt-0.5 truncate text-lg font-semibold tracking-tight text-slate-950 sm:text-xl"}>{title}</h1></div>
+      <section className={`flex min-w-0 flex-1 flex-col ${lockContent ? "min-h-0 overflow-hidden" : ""}`}>
+        <header className={officeHeader ? "flex h-[58px] shrink-0 items-stretch gap-3 border-b border-slate-300 bg-[#f8f9fb] px-2" : `sticky top-0 z-20 flex min-h-16 shrink-0 items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-white px-4 py-2.5 sm:px-6 ${flushContent ? "lg:px-7" : "lg:px-8"} ${headerNavigation ? "flex-wrap xl:h-16 xl:flex-nowrap xl:py-0" : "h-16 py-0"}`}>
+          <div className={officeHeader ? "flex shrink-0 items-center gap-2 border-r border-slate-300 pr-3" : "flex shrink-0 items-center gap-3.5"}>
+            <button aria-label="Open navigation" className={officeHeader ? "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 xl:hidden" : "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 xl:hidden"} onClick={() => setMobileOpen(true)}><MenuIcon className="h-5 w-5" /></button>
+            <button aria-label={desktopCollapsed ? "Show navigation" : "Hide navigation"} className={officeHeader ? "hidden h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:bg-blue-50 hover:text-blue-700 xl:inline-flex" : "hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 xl:inline-flex"} onClick={toggleDesktopNavigation}><SidebarIcon className="h-5 w-5" /></button>
+            <div className="flex min-w-0 flex-col justify-center gap-0.5">
+              {eyebrow ? <p className="truncate text-[10px] font-semibold uppercase leading-none tracking-[0.14em] text-blue-700">{eyebrow}</p> : null}
+              <h1 className="truncate text-lg font-semibold leading-tight tracking-tight text-slate-950">{title}</h1>
+            </div>
           </div>
-          {headerNavigation ? <div className={officeHeader ? "min-w-0 flex flex-1 items-stretch" : "min-w-0 flex-1 border-l border-slate-200 pl-4"}>{headerNavigation}</div> : <div className="flex-1" />}
+          {headerNavigation ? <div className={officeHeader ? "min-w-0 flex flex-1 items-stretch" : "min-w-0 w-full flex-1 xl:w-auto xl:border-l xl:border-slate-200 xl:pl-4"}>{headerNavigation}</div> : <div className="flex-1" />}
         </header>
-        <div className={`min-h-0 flex-1 ${flushContent ? "p-0" : "px-4 py-6 sm:px-6 lg:px-8"} ${lockContent ? "overflow-hidden" : "overflow-y-auto overscroll-contain"}`}>{children}</div>
+        <div className={`${lockContent ? "min-h-0 flex-1 overflow-hidden" : ""} ${flushContent ? "p-0" : "px-4 py-6 sm:px-6 lg:px-8"}`}>{children}</div>
       </section>
     </div>
   </main>;
+}
+
+function CompanyMark() {
+  const [logoPath, setLogoPath] = useState<string | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    getPlatformContext()
+      .then((context) => {
+        if (mounted) setLogoPath(context.organization?.logo_url ?? null);
+      })
+      .catch(() => {
+        if (mounted) setLogoPath(null);
+      });
+    function onChanged(event: Event) {
+      setLogoPath((event as CustomEvent<string | null>).detail ?? null);
+    }
+    window.addEventListener(COMPANY_LOGO_CHANGED, onChanged);
+    return () => {
+      mounted = false;
+      window.removeEventListener(COMPANY_LOGO_CHANGED, onChanged);
+    };
+  }, []);
+  const src = useAssetUrl(logoPath);
+  if (src) {
+    return <img src={src} alt="" className="h-10 w-10 rounded-xl object-cover" />;
+  }
+  return <HexLogoIcon className="h-10 w-10" />;
 }
 
 function HexLogoIcon(props: SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 40 40" fill="none" aria-hidden="true" {...props}><rect x="1" y="1" width="38" height="38" rx="12" fill="#0f172a"/><path d="M12 13h16v4H17v4h9v4h-9v4h11" stroke="white" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"/></svg>; }

@@ -20,17 +20,12 @@
 
 html,
 body {
-  height: 100%;
-}
-
-html {
-  overflow: hidden;
+  min-height: 100%;
 }
 
 body {
   margin: 0;
   font-size: 15px;
-  overflow: hidden;
   background: #eef3f8;
   color: #172033;
   font-family: var(--autoboq-font-sans);

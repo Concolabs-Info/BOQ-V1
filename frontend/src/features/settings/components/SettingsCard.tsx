@@ -4,6 +4,28 @@ export function SettingsStack({ children }: { children: ReactNode }) {
   return <div className="flex flex-col gap-5">{children}</div>;
 }
 
+export function SettingsMark({ children }: { children: ReactNode }) {
+  return <strong className="font-semibold text-slate-800">{children}</strong>;
+}
+
+export function SettingsStatus({
+  kind,
+  children,
+  className = "",
+}: {
+  kind: "ok" | "error";
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <p
+      className={`${kind === "ok" ? "text-sm font-medium leading-6 text-emerald-700" : "text-sm font-medium leading-6 text-red-600"} ${className}`}
+    >
+      {children}
+    </p>
+  );
+}
+
 export function SettingsCard({
   title,
   titleId,
@@ -16,10 +38,10 @@ export function SettingsCard({
 }: {
   title: string;
   titleId?: string;
-  description?: string;
+  description?: ReactNode;
   action?: ReactNode;
   children?: ReactNode;
-  footerHint?: string;
+  footerHint?: ReactNode;
   footer?: ReactNode;
   contentClassName?: string;
 }) {
