@@ -9,7 +9,7 @@ import jwt
 from fastapi import Header, HTTPException
 
 from ..database.connection import execute, fetch_one
-from .clerk_client import fetch_clerk_user
+from .clerk_client import ClerkApiError, fetch_clerk_user
 from .config import get_settings
 
 
@@ -65,4 +65,10 @@ def get_current_user(authorization: str | None = Header(default=None)) -> Curren
     except ClerkTokenError as exc:
         raise HTTPException(status_code=401, detail="Invalid session token") from exc
 
-    return upsert_app_user(claims["sub"])
+    try:
+        return upsert_app_user(claims["sub"])
+    except ClerkApiError as exc:
+        # The session JWT can still be validly signed for a short window after
+        # the Clerk account behind it is deleted. Treat that as signed out
+        # instead of surfacing it as an unhandled 500.
+        raise HTTPException(status_code=401, detail="Invalid session token") from exc

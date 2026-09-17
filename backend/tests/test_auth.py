@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 
 from app.core import auth
-from app.core.clerk_client import ClerkProfile
+from app.core.clerk_client import ClerkApiError, ClerkProfile
 
 ISSUER = "https://example.clerk.accounts.dev"
 
@@ -102,3 +102,26 @@ def test_get_current_user_verifies_the_token_and_upserts(monkeypatch):
 
     result = auth.get_current_user(authorization="Bearer sometoken")
     assert result.id == "user_3"
+
+
+def test_get_current_user_treats_a_deleted_clerk_user_as_unauthenticated(monkeypatch):
+    """A session JWT can still be validly signed for a few minutes after the
+    Clerk account behind it is deleted (e.g. from the Clerk dashboard). The
+    first-time profile lookup then 404s — that must come back as 401, not an
+    unhandled 500."""
+    class FakeSettings:
+        clerk_jwt_key = "fake-key"
+        clerk_issuer = ISSUER
+
+    monkeypatch.setattr(auth, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(auth, "verify_clerk_token", lambda token, jwt_key, issuer: {"sub": "user_deleted"})
+
+    def raise_not_found(user_id):
+        raise ClerkApiError("Clerk API returned 404 for user user_deleted")
+
+    monkeypatch.setattr(auth, "fetch_one", lambda sql, params=(): None)
+    monkeypatch.setattr(auth, "fetch_clerk_user", raise_not_found)
+
+    with pytest.raises(HTTPException) as excinfo:
+        auth.get_current_user(authorization="Bearer sometoken")
+    assert excinfo.value.status_code == 401
