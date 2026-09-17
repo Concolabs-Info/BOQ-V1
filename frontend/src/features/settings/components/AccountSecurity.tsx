@@ -9,13 +9,14 @@ import { thrownErrText } from "@/features/auth/clerk-errors";
 import { signOutAndGo } from "@/features/auth/hard-navigate";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { LoadingState } from "@/shared/components/LoadingState";
-import { FieldLabel } from "@/features/onboarding/components/formBits";
 import { AUTH_CONTROL_CLASS } from "@/features/auth/components/AuthField";
 import { ApiRequestError } from "@/shared/services/apiClient";
 import { getAccountDeletionStatus, settingsError, deleteMyAccount, type AccountDeletionStatus } from "../api";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { SettingsCard, SettingsStack } from "./SettingsCard";
+import { SettingsCard, SettingsMark, SettingsStack } from "./SettingsCard";
+import { TypeToConfirmLabel } from "./TypeToConfirmLabel";
 import { useClerkAccount } from "./useClerkAccount";
+import { passwordLengthHint, passwordLengthPlaceholder } from "@/features/auth/password";
 
 type DeviceKind = "laptop" | "phone" | "tablet";
 
@@ -250,7 +251,7 @@ export function AccountSecurityCard() {
         <SettingsCard
           title="Password"
           description={user?.passwordEnabled ? "Choose a new password for this account." : "Add a password so you can sign in with email."}
-          footerHint="Use at least 8 characters."
+          footerHint={passwordLengthHint()}
           footer={
             <Button
               type="submit"
@@ -282,7 +283,7 @@ export function AccountSecurityCard() {
               type="password"
               autoComplete="new-password"
               required
-              placeholder="At least 8 characters"
+              placeholder={passwordLengthPlaceholder()}
               value={newPassword}
               disabled={!ready || busy}
               onChange={(event) => setNewPassword(event.target.value)}
@@ -324,9 +325,14 @@ export function AccountSecurityCard() {
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   {row.when ? <p className="text-xs text-slate-500">{row.when}</p> : null}
                   {!row.current ? (
-                    <Button type="button" variant="danger" className="rounded-xl" disabled={busy} onClick={() => void revokeSession(row)}>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void revokeSession(row)}
+                      className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-40"
+                    >
                       Sign out
-                    </Button>
+                    </button>
                   ) : null}
                 </div>
               </li>
@@ -338,16 +344,43 @@ export function AccountSecurityCard() {
       {user?.deleteSelfEnabled === false ? null : lastAdmin && deletion.kind === "last-admin" ? (
         <SettingsCard
           title="Delete account"
-          description={`You are the only owner of ${deletion.company_name}. Deleting your account also permanently deletes the company${
-            deletion.other_members > 0
-              ? `, removes ${deletion.other_members} other ${deletion.other_members === 1 ? "person" : "people"},`
-              : ""
-          } and every project in it.`}
-          footerHint="To keep the company, make someone else an owner first."
+          description={
+            <>
+              You're the only owner of <SettingsMark>{deletion.company_name}</SettingsMark>.{" "}
+              <SettingsMark>Transfer ownership</SettingsMark> first if you want the company to stay.
+            </>
+          }
+          footerHint={
+            deleteConfirm ? (
+              <>
+                This <SettingsMark>cannot be undone</SettingsMark>.
+              </>
+            ) : deletion.other_members > 0 ? (
+              <>
+                Deleting anyway also deletes <SettingsMark>the company</SettingsMark>,{" "}
+                <SettingsMark>
+                  {deletion.other_members} other {deletion.other_members === 1 ? "person" : "people"}
+                </SettingsMark>
+                , and <SettingsMark>every project</SettingsMark>.
+              </>
+            ) : (
+              <>
+                Deleting anyway also deletes <SettingsMark>the company</SettingsMark> and{" "}
+                <SettingsMark>every project</SettingsMark>.
+              </>
+            )
+          }
           footer={
             deleteConfirm ? (
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="danger" className="rounded-xl" disabled={busy || !confirmName.trim()} pending={busy} onClick={() => void deleteAccount()}>
+                <Button
+                  type="button"
+                  variant="danger"
+                  className="rounded-xl"
+                  disabled={busy || confirmName.trim().toLowerCase() !== deletion.company_name.trim().toLowerCase()}
+                  pending={busy}
+                  onClick={() => void deleteAccount()}
+                >
                   Delete company and account
                 </Button>
                 <Button type="button" variant="ghost" className="rounded-xl" disabled={busy} onClick={closeDelete}>
@@ -360,7 +393,7 @@ export function AccountSecurityCard() {
                   href={appRoutes.organizationMembers}
                   className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
-                  Manage members
+                  Transfer ownership
                 </Link>
                 <Button type="button" variant="danger" className="rounded-xl" onClick={() => setDeleteConfirm(true)}>
                   Delete anyway
@@ -371,9 +404,7 @@ export function AccountSecurityCard() {
         >
           {deleteConfirm ? (
             <div className="flex flex-col gap-2">
-              <FieldLabel htmlFor="delete-confirm-name">
-                Type <span className="font-medium text-slate-950">{deletion.company_name}</span> to confirm
-              </FieldLabel>
+              <TypeToConfirmLabel htmlFor="delete-confirm-name" value={deletion.company_name} />
               <input
                 id="delete-confirm-name"
                 autoComplete="off"
@@ -383,15 +414,21 @@ export function AccountSecurityCard() {
                 className={AUTH_CONTROL_CLASS}
               />
             </div>
-          ) : (
-            <p className="text-sm text-slate-500">Add another owner from the members page and this becomes an ordinary account deletion.</p>
-          )}
+          ) : null}
         </SettingsCard>
       ) : (
         <SettingsCard
           title="Delete account"
-          description="This permanently removes your user from Quanto."
-          footerHint="This cannot be undone."
+          description={
+            <>
+              This permanently removes you from <SettingsMark>Quanto</SettingsMark>.
+            </>
+          }
+          footerHint={
+            <>
+              This <SettingsMark>cannot be undone</SettingsMark>.
+            </>
+          }
           footer={
             deleteConfirm ? (
               <div className="flex flex-wrap gap-2">

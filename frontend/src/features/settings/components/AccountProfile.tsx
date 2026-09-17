@@ -8,6 +8,7 @@ import { thrownErrText } from "@/features/auth/clerk-errors";
 import { LoadingState } from "@/shared/components/LoadingState";
 import { SettingsCard, SettingsStack } from "./SettingsCard";
 import { useClerkAccount } from "./useClerkAccount";
+import { ClerkAvatar } from "@/features/platform/components/NavUser";
 
 export function AccountProfileForm() {
   const { user, loaded, refresh } = useClerkAccount();
@@ -22,6 +23,7 @@ export function AccountProfileForm() {
   const [verifyId, setVerifyId] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [syncedUserId, setSyncedUserId] = useState(user?.id);
+  const [localPhoto, setLocalPhoto] = useState<string | null>(null);
 
   if (user && user.id !== syncedUserId) {
     setSyncedUserId(user.id);
@@ -29,10 +31,6 @@ export function AccountProfileForm() {
     setLastName(user.lastName ?? "");
   }
 
-  const initials =
-    `${user?.firstName?.[0] ?? ""}${user?.lastName?.[0] ?? ""}`.toUpperCase() ||
-    user?.primaryEmailAddress?.emailAddress?.[0]?.toUpperCase() ||
-    "?";
   const displayName = `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim() || "Your profile";
   const emails = user?.emailAddresses ?? [];
   const ready = loaded && Boolean(user);
@@ -68,17 +66,23 @@ export function AccountProfileForm() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file || !user) return;
+    const preview = URL.createObjectURL(file);
     setProfileError(null);
+    setLocalPhoto(preview);
     try {
       await run(() => user.setProfileImage({ file }));
     } catch (err) {
       setProfileError(thrownErrText(err));
+    } finally {
+      URL.revokeObjectURL(preview);
+      setLocalPhoto(null);
     }
   }
 
   async function removePhoto() {
     if (!user) return;
     setProfileError(null);
+    setLocalPhoto(null);
     try {
       await run(() => user.setProfileImage({ file: null }));
     } catch (err) {
@@ -187,13 +191,13 @@ export function AccountProfileForm() {
         <input ref={fileRef} type="file" accept="image/*" className="sr-only" onChange={onPickPhoto} />
         {profileError ? <p className="mb-3 text-sm text-red-600">{profileError}</p> : null}
         <div className="flex items-center gap-3">
-          <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-base font-semibold text-slate-600">
-            {user.imageUrl ? (
-              <img src={user.imageUrl} alt="" className="size-full object-cover" referrerPolicy="no-referrer" />
-            ) : (
-              initials
-            )}
-          </span>
+          <ClerkAvatar
+            imageUrl={localPhoto ?? (user.hasImage ? user.imageUrl : null)}
+            cacheKey={localPhoto ? null : user.updatedAt}
+            name={displayName}
+            email={user.primaryEmailAddress?.emailAddress}
+            className="size-14 text-base"
+          />
           <div className="min-w-0 flex-1">
             <p className="truncate font-medium text-slate-950">{displayName}</p>
             <p className="truncate text-xs text-slate-500">{user.primaryEmailAddress?.emailAddress}</p>

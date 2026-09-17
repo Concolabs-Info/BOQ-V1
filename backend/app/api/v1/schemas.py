@@ -160,6 +160,7 @@ class PlatformOrganization(ApiModel):
     name: str
     status: str = "active"
     membership_role: str | None = None
+    logo_url: str | None = None
 
 
 class PlatformContext(ApiModel):
@@ -207,6 +208,7 @@ class OnboardingStatusOut(ApiModel):
     former_company_name: str | None = None
     has_company: bool
     has_project: bool
+    pending_project_count: int = 0
 
 
 class InviteRowIn(ApiModel):
@@ -227,6 +229,11 @@ class InviteFailureOut(ApiModel):
 class InviteBatchOut(ApiModel):
     sent: int
     failures: list[InviteFailureOut] = Field(default_factory=list)
+
+
+class InvitePatchIn(ApiModel):
+    role: str | None = Field(default=None, max_length=80)
+    workspace_ids: list[str] | None = None
 
 
 class InviteClaimIn(ApiModel):
@@ -251,6 +258,7 @@ class CompanyOut(ApiModel):
     country: str
     currency: str
     phone: str | None = None
+    logo_url: str | None = None
     role: str
     permissions: list[str]
 

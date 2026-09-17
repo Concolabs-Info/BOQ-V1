@@ -56,6 +56,32 @@ def test_revoke_invite_route(monkeypatch):
     assert seen["id"] == "inv-1"
 
 
+def test_patch_invite_route(monkeypatch):
+    _auth()
+    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
+    seen = {}
+
+    def fake_update(membership, invitation_id, role=None, workspace_ids=None):
+        seen["id"] = invitation_id
+        seen["role"] = role
+        seen["workspace_ids"] = workspace_ids
+        return {
+            "id": invitation_id,
+            "email": "join@acme.com",
+            "role": role or "qs",
+            "workspace_ids": workspace_ids or [],
+            "expires_at": None,
+            "created_at": None,
+        }
+
+    monkeypatch.setattr(platform, "update_invite", fake_update)
+    response = client.patch("/api/v1/platform/invitations/inv-1", json={"role": "qa_checker", "workspace_ids": ["p1"]})
+    _clear()
+    assert response.status_code == 200
+    assert seen == {"id": "inv-1", "role": "qa_checker", "workspace_ids": ["p1"]}
+    assert response.json()["role"] == "qa_checker"
+
+
 def test_resend_invite_route(monkeypatch):
     _auth()
     monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
@@ -168,6 +194,72 @@ def test_delete_company_requires_billing_manage(monkeypatch):
     response = client.request("DELETE", "/api/v1/platform/company", json={"confirm_name": "Acme"})
     _clear()
     assert response.status_code == 403
+
+
+def test_upload_logo_requires_company_manage(monkeypatch):
+    _auth()
+    monkeypatch.setattr(
+        membership_mod,
+        "get_company_membership",
+        lambda user_id: CompanyMembership(company_id="c1", company_name="Acme", role="qs"),
+    )
+    response = client.post("/api/v1/platform/company/logo", files={"file": ("logo.png", b"x", "image/png")})
+    _clear()
+    assert response.status_code == 403
+
+
+def test_upload_logo_route(monkeypatch):
+    _auth()
+    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
+    monkeypatch.setattr(
+        platform,
+        "save_company_logo",
+        lambda membership, data: {
+            "id": "c1",
+            "name": "Acme",
+            "domain": None,
+            "registration_type": None,
+            "registration_number": None,
+            "tax_id": None,
+            "country": "Sri Lanka",
+            "currency": "LKR",
+            "phone": None,
+            "logo_url": "/api/v1/platform/company/logo?v=abc",
+            "role": "admin",
+            "permissions": ["company:manage"],
+        },
+    )
+    response = client.post("/api/v1/platform/company/logo", files={"file": ("logo.png", b"fake", "image/png")})
+    _clear()
+    assert response.status_code == 200
+    assert response.json()["logo_url"] == "/api/v1/platform/company/logo?v=abc"
+
+
+def test_delete_logo_route(monkeypatch):
+    _auth()
+    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
+    monkeypatch.setattr(
+        platform,
+        "remove_company_logo",
+        lambda membership: {
+            "id": "c1",
+            "name": "Acme",
+            "domain": None,
+            "registration_type": None,
+            "registration_number": None,
+            "tax_id": None,
+            "country": "Sri Lanka",
+            "currency": "LKR",
+            "phone": None,
+            "logo_url": None,
+            "role": "admin",
+            "permissions": ["company:manage"],
+        },
+    )
+    response = client.delete("/api/v1/platform/company/logo")
+    _clear()
+    assert response.status_code == 200
+    assert response.json()["logo_url"] is None
 
 
 def test_delete_company_route(monkeypatch):

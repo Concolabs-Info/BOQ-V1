@@ -4,6 +4,7 @@ from __future__ import annotations
 from ...core.auth import CurrentUser
 from ...core.clerk_client import ClerkApiError, delete_user, revoke_invitation, pending_invitation_id_for_email
 from ...database.connection import fetch_all, fetch_one, transaction
+from .company import purge_company_files
 from .invitations import InvitationError
 from .membership import CompanyMembership, get_company_membership
 
@@ -66,6 +67,7 @@ def teardown_company(company_id: str) -> None:
     with transaction() as conn:
         conn.execute("DELETE FROM project WHERE company_id = %s", (company_id,))
         conn.execute("DELETE FROM company WHERE id = %s", (company_id,))
+    purge_company_files(company_id)
 
 
 def _leave_company(user_id: str, company_id: str) -> None:

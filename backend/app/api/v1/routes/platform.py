@@ -1,10 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from ....core.auth import CurrentUser, get_current_user
 from ....modules.platform.account import account_deletion_status, delete_company, delete_my_account
-from ....modules.platform.company import get_company, update_company
+from ....modules.platform.company import (
+    company_logo_path,
+    get_company,
+    remove_company_logo,
+    save_company_logo,
+    update_company,
+)
 from ....modules.platform.invitations import (
     InvitationError,
     claim_invitation,
@@ -12,6 +19,7 @@ from ....modules.platform.invitations import (
     resend_invite,
     revoke_invite,
     send_invites,
+    update_invite,
 )
 from ....modules.platform.members import (
     assign_to_project,
@@ -47,6 +55,7 @@ from ..schemas import (
     InviteClaimIn,
     InviteClaimOut,
     InviteFailureOut,
+    InvitePatchIn,
     MemberDirectoryOut,
     MemberOut,
     MemberProjectIn,
@@ -106,6 +115,7 @@ def _status_out(status: OnboardingStatus) -> OnboardingStatusOut:
         former_company_name=status.former_company_name,
         has_company=status.has_company,
         has_project=status.has_project,
+        pending_project_count=status.pending_project_count,
     )
 
 
@@ -117,7 +127,12 @@ def get_me(current_user: CurrentUser = Depends(get_current_user)) -> PlatformCon
     return PlatformContext(
         user=PlatformUser(id=current_user.id, email=current_user.email, full_name=current_user.full_name, role=role),
         organization=(
-            PlatformOrganization(id=found.company_id, name=found.company_name, membership_role=found.role)
+            PlatformOrganization(
+                id=found.company_id,
+                name=found.company_name,
+                membership_role=found.role,
+                logo_url=found.logo_url,
+            )
             if found else None
         ),
         membership_role=found.role if found else None,
@@ -230,6 +245,41 @@ def patch_company_settings(
         raise _invite_http(exc) from exc
 
 
+@router.get("/platform/company/logo")
+def get_company_logo_file(membership: CompanyMembership = Depends(require_company)):
+    path = company_logo_path(membership)
+    if path is None:
+        raise HTTPException(status_code=404, detail="No company photo")
+    return FileResponse(
+        path,
+        media_type="image/png",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/platform/company/logo", response_model=CompanyOut)
+async def post_company_logo(
+    membership: CompanyMembership = Depends(require_permission("company:manage")),
+    file: UploadFile = File(...),
+) -> CompanyOut:
+    data = await file.read()
+    await file.close()
+    try:
+        return CompanyOut(**save_company_logo(membership, data))
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
+@router.delete("/platform/company/logo", response_model=CompanyOut)
+def delete_company_logo(
+    membership: CompanyMembership = Depends(require_permission("company:manage")),
+) -> CompanyOut:
+    try:
+        return CompanyOut(**remove_company_logo(membership))
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+
+
 @router.delete("/platform/company", status_code=204)
 def delete_company_settings(
     body: CompanyDeleteIn,
@@ -293,6 +343,24 @@ def delete_company_member(
 @router.get("/platform/invitations")
 def get_invitations(membership: CompanyMembership = Depends(require_permission("members:manage"))):
     return {"invitations": list_pending_invitations(membership.company_id)}
+
+
+@router.patch("/platform/invitations/{invitation_id}", response_model=PendingInviteOut)
+def patch_invitation(
+    invitation_id: str,
+    body: InvitePatchIn,
+    membership: CompanyMembership = Depends(require_permission("members:manage")),
+) -> PendingInviteOut:
+    try:
+        row = update_invite(
+            membership,
+            invitation_id,
+            role=body.role,
+            workspace_ids=body.workspace_ids,
+        )
+    except InvitationError as exc:
+        raise _invite_http(exc) from exc
+    return PendingInviteOut(**row)
 
 
 @router.post("/platform/invitations/{invitation_id}/revoke", status_code=204)
