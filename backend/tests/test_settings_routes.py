@@ -290,6 +290,23 @@ def test_delete_company_route(monkeypatch):
     assert seen["actor_user_id"] == "user_1"
 
 
+def test_patch_member_route_promotes_to_admin(monkeypatch):
+    _auth()
+    monkeypatch.setattr(membership_mod, "get_company_membership", lambda user_id: ADMIN)
+    seen = {}
+    monkeypatch.setattr(
+        platform,
+        "update_member_role",
+        lambda actor, membership, user_id, role: seen.update(user_id=user_id, role=role)
+        or {"id": user_id, "role": role, "role_label": "Owner / Admin"},
+    )
+    response = client.patch("/api/v1/platform/company/members/user_2", json={"role": "admin"})
+    _clear()
+    assert response.status_code == 200
+    assert response.json()["role"] == "admin"
+    assert seen == {"user_id": "user_2", "role": "admin"}
+
+
 def test_members_can_read_company_without_manage(monkeypatch):
     _auth()
     monkeypatch.setattr(
