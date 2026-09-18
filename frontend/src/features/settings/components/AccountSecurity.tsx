@@ -18,6 +18,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { SettingsCard, SettingsMark, SettingsStack } from "./SettingsCard";
 import { TypeToConfirmLabel } from "./TypeToConfirmLabel";
 import { useClerkAccount } from "./useClerkAccount";
+import { useReverificationPrompt } from "./useReverificationPrompt";
 import { passwordLengthHint, passwordLengthPlaceholder } from "@/features/auth/password";
 
 type DeviceKind = "laptop" | "phone" | "tablet";
@@ -120,8 +121,12 @@ export function AccountSecurityCard() {
   // Changing a password is a sensitive action - Clerk requires the session
   // to be freshly reverified before allowing it, even with currentPassword
   // supplied, and rejects the call outright if it isn't wrapped like this.
+  // `options` routes the prompt through our own ReverificationDialog
+  // instead of Clerk's default modal.
+  const { dialog: reverificationDialog, options: reverificationOptions } = useReverificationPrompt();
   const updatePassword = useReverification(
     (input: { currentPassword?: string; newPassword: string }) => user?.updatePassword(input),
+    reverificationOptions,
   );
 
   const lastAdmin = deletion.kind === "last-admin";
@@ -355,7 +360,7 @@ export function AccountSecurityCard() {
           title="Delete account"
           description={
             <>
-              You're the only owner of <SettingsMark>{deletion.company_name}</SettingsMark>.{" "}
+              You&apos;re the only owner of <SettingsMark>{deletion.company_name}</SettingsMark>.{" "}
               <SettingsMark>Transfer ownership</SettingsMark> first if you want the company to stay.
             </>
           }
@@ -470,6 +475,7 @@ export function AccountSecurityCard() {
           void revokeAllOther();
         }}
       />
+      {reverificationDialog}
     </SettingsStack>
   );
 }

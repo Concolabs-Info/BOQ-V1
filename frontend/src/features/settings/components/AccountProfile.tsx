@@ -10,6 +10,7 @@ import { thrownErrText } from "@/features/auth/clerk-errors";
 import { LoadingState } from "@/shared/components/LoadingState";
 import { SettingsCard, SettingsStack } from "./SettingsCard";
 import { useClerkAccount } from "./useClerkAccount";
+import { useReverificationPrompt } from "./useReverificationPrompt";
 import { ClerkAvatar } from "@/features/platform/components/NavUser";
 import { useAccess } from "@/features/platform/hooks/useAccess";
 
@@ -31,13 +32,19 @@ export function AccountProfileForm() {
 
   // Adding, removing, or changing the primary email is a sensitive action -
   // Clerk requires the session to be freshly reverified before allowing it,
-  // and rejects the call outright if it isn't wrapped like this.
-  const createEmailAddress = useReverification((email: string) => user?.createEmailAddress({ email }));
-  const setPrimaryEmail = useReverification((emailAddressId: string) => user?.update({ primaryEmailAddressId: emailAddressId }));
+  // and rejects the call outright if it isn't wrapped like this. `options`
+  // routes the prompt through our own ReverificationDialog instead of
+  // Clerk's default modal.
+  const { dialog: reverificationDialog, options: reverificationOptions } = useReverificationPrompt();
+  const createEmailAddress = useReverification((email: string) => user?.createEmailAddress({ email }), reverificationOptions);
+  const setPrimaryEmail = useReverification(
+    (emailAddressId: string) => user?.update({ primaryEmailAddressId: emailAddressId }),
+    reverificationOptions,
+  );
   const destroyEmailAddress = useReverification((emailAddressId: string) => {
     const address = user?.emailAddresses.find((item) => item.id === emailAddressId);
     return address?.destroy();
-  });
+  }, reverificationOptions);
 
   if (user && user.id !== syncedUserId) {
     setSyncedUserId(user.id);
@@ -384,6 +391,7 @@ export function AccountProfileForm() {
       </SettingsCard>
 
       <SecuredByClerk />
+      {reverificationDialog}
     </SettingsStack>
   );
 }
