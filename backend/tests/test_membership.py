@@ -79,3 +79,25 @@ def test_require_company_rejects_stale_terms(monkeypatch):
         membership.require_company(current_user=CurrentUser(id="user_1", email="a@example.com", full_name=None))
     assert excinfo.value.status_code == 403
     assert excinfo.value.detail["code"] == "terms"
+
+
+def test_require_permission_honors_a_company_override_of_a_built_in_role(monkeypatch):
+    from app.modules.platform import roles as roles_mod
+
+    monkeypatch.setattr(
+        membership,
+        "get_company_membership",
+        lambda user_id: membership.CompanyMembership(company_id="c1", company_name="Acme", role="qs"),
+    )
+    # qs doesn't hold members:manage by default. A company can override that,
+    # and require_permission must see the override the same way
+    # permissions_for_membership() (and /platform/me) already do, instead of
+    # falling back to the hardcoded default matrix for a built-in role key.
+    monkeypatch.setattr(
+        roles_mod,
+        "custom_role_row",
+        lambda company_id, key: {"permissions": ["boq:view", "members:manage"]} if key == "qs" else None,
+    )
+    dependency = membership.require_permission("members:manage")
+    result = dependency(current_user=CurrentUser(id="user_1", email="a@example.com", full_name=None, **TERMS_ACCEPTED))
+    assert result.role == "qs"

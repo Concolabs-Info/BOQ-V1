@@ -9,7 +9,6 @@ from typing import Callable
 from fastapi import Depends, HTTPException
 
 from ...core.auth import CurrentUser, get_current_user
-from ...core.rbac import is_built_in_role, permissions_for_role
 from ...database.connection import fetch_one
 from .terms import has_accepted_current
 
@@ -73,7 +72,11 @@ def require_permission(permission: str) -> Callable[[CurrentUser], CompanyMember
         if found is None:
             raise HTTPException(status_code=409, detail="onboarding_incomplete")
         _require_current_terms(current_user)
-        allowed = permissions_for_role(found.role) if is_built_in_role(found.role) else membership_permissions(found)
+        # Always go through membership_permissions(), never the raw default
+        # matrix directly - a company can override a built-in role's
+        # permissions, and this must see that override the same way
+        # /platform/me and enforce_workspace_access already do.
+        allowed = membership_permissions(found)
         if permission not in allowed:
             raise HTTPException(status_code=403, detail="insufficient_permission")
         return found
