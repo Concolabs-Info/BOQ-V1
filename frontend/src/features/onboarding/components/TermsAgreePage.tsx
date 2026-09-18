@@ -7,7 +7,8 @@ import { hasAcceptedTerms } from "@/features/legal/termsClient";
 import type { TermsDocument } from "@/features/legal/parseTerms";
 import { getPlatformContext } from "@/features/platform/services/platformService";
 import { Button } from "@/shared/components/Button";
-import { acceptTerms, continueAfterTerms } from "../api";
+import { appRoutes } from "@/shared/constants/appRoutes";
+import { acceptTerms, continueAfterTerms, getOnboardingStatus } from "../api";
 import { FLOW_STEPS, INVITE_FLOW_STEPS } from "../types";
 import { BrandRailNote, OnboardingStepper } from "./OnboardingStepper";
 import { OnboardingShell } from "./OnboardingShell";
@@ -43,10 +44,24 @@ export function TermsAgreePage({ document }: { document: TermsDocument }) {
       try {
         const context = await getPlatformContext();
         if (!mounted) return;
-        setInvited(!context.organization);
         if (hasAcceptedTerms(context, document)) {
           router.replace(await continueAfterTerms());
+          return;
         }
+        if (!context.organization && !fromSetup) {
+          // Landed here directly (e.g. a stale redirect from before this
+          // was fixed) without actually being mid-invite or coming from the
+          // wizard's own final step. Nothing to agree to yet - go set up
+          // or join a company first; the wizard reaches terms on its own
+          // once that's done.
+          const status = await getOnboardingStatus().catch(() => null);
+          if (!mounted) return;
+          if (status?.path !== "ACCEPT_INVITE") {
+            router.replace(appRoutes.onboarding);
+            return;
+          }
+        }
+        setInvited(!context.organization);
       } catch {
         // Stay on the agree screen until they can submit.
       }
@@ -54,7 +69,7 @@ export function TermsAgreePage({ document }: { document: TermsDocument }) {
     return () => {
       mounted = false;
     };
-  }, [document.version, router]);
+  }, [document.version, router, fromSetup]);
 
   async function agree() {
     if (!reachedEnd || pending) return;
