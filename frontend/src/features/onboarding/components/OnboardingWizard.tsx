@@ -7,6 +7,7 @@ import { LoadingState } from "@/shared/components/LoadingState";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { fetchTermsMeta, hasAcceptedTerms } from "@/features/legal/termsClient";
 import { getPlatformContext } from "@/features/platform/services/platformService";
+import { listProjects } from "@/features/projects/services/projectService";
 import { getOnboardingStatus } from "../api";
 import { FLOW_STEPS, WIZARD_STEP_OFFSET, type CreatedProject, type OnboardingStatus, type WizardStep } from "../types";
 import { AcceptInviteStep } from "./AcceptInviteStep";
@@ -30,6 +31,8 @@ export function OnboardingWizard() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [step, setStep] = useState<WizardStep>("branch");
   const [firstProject, setFirstProject] = useState<CreatedProject | null>(null);
+  const [resumeProjects, setResumeProjects] = useState<{ id: string; name: string }[]>([]);
+  const [resumingWizard, setResumingWizard] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,9 +45,24 @@ export function OnboardingWizard() {
           try {
             const [context, meta] = await Promise.all([getPlatformContext(), fetchTermsMeta()]);
             if (!mounted) return;
-            router.replace(hasAcceptedTerms(context, meta) ? appRoutes.projects : appRoutes.onboardingTerms);
+            if (hasAcceptedTerms(context, meta)) {
+              router.replace(appRoutes.projects);
+              return;
+            }
+            // Signed out (or just closed the tab) after creating a project
+            // but before reaching invite or terms - resume at invite rather
+            // than warping straight to terms, the same way skipping the
+            // project step does within one session.
+            const projects = await listProjects({ limit: 100, offset: 0 }).catch(() => ({ projects: [] }));
+            if (!mounted) return;
+            setResumeProjects(projects.projects.map((project) => ({ id: project.id, name: project.name })));
+            setResumingWizard(true);
+            setStep("invite");
           } catch {
-            if (mounted) router.replace(appRoutes.onboardingTerms);
+            if (mounted) {
+              setResumingWizard(true);
+              setStep("invite");
+            }
           }
           return;
         }
@@ -66,7 +84,7 @@ export function OnboardingWizard() {
     );
   }
 
-  if (!status || status.path === "DONE") {
+  if (!status || (status.path === "DONE" && !resumingWizard)) {
     return (
       <OnboardingShell rail={<BrandRailNote />} heading="Setting up">
         <LoadingState label="Loading your company setup" />
@@ -145,7 +163,7 @@ export function OnboardingWizard() {
       : "Optional. People without an account get an email. Anyone who already has a Quanto account joins the next time they sign in.";
     body = (
       <InviteStep
-        projects={firstProject ? [{ id: firstProject.id, name: firstProject.name }] : []}
+        projects={firstProject ? [{ id: firstProject.id, name: firstProject.name }] : resumeProjects}
         onDone={() => router.replace(`${appRoutes.onboardingTerms}?from=setup`)}
       />
     );
