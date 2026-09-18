@@ -195,6 +195,27 @@ async function readResponse<T>(response: Response): Promise<T> {
 
 type JsonRequestOptions = RequestInit & { skipCache?: boolean };
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchOnce<T>(path: string, fetchOptions: RequestInit): Promise<{ ok: true; data: T } | { ok: false; status: number; rawMessage: string; details?: ApiErrorDetails }> {
+  const response = await fetch(apiUrl(path), {
+    ...fetchOptions,
+    headers: {
+      ...(fetchOptions.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+      ...(await apiRequestHeaders()),
+      ...(fetchOptions.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const { message: rawMessage, details } = await readErrorPayload(response);
+    return { ok: false, status: response.status, rawMessage, details };
+  }
+  return { ok: true, data: await readResponse<T>(response) };
+}
+
 export async function requestJson<T>(path: string, options?: JsonRequestOptions): Promise<T> {
   const skipCache = options?.skipCache === true;
   const fetchOptions: RequestInit = { ...options };
@@ -202,25 +223,26 @@ export async function requestJson<T>(path: string, options?: JsonRequestOptions)
   const useCache = !skipCache && requestCanUseCache(path, fetchOptions);
 
   try {
-    const response = await fetch(apiUrl(path), {
-      ...fetchOptions,
-      headers: {
-        ...(fetchOptions.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-        ...(await apiRequestHeaders()),
-        ...(fetchOptions.headers || {}),
-      },
-    });
-
-    if (!response.ok) {
-      const { message: rawMessage, details } = await readErrorPayload(response);
-      const cached = useCache ? getCachedJson<T>(path) : null;
-      if (cached) return cached;
-      throw new ApiRequestError(response.status, userFacingApiError(response.status, rawMessage), rawMessage, details);
+    let result = await fetchOnce<T>(path, fetchOptions);
+    // A 401 right after signing in can be a real "your session is gone", or
+    // it can be this request racing ahead of Clerk finishing its bootstrap
+    // on a fresh page load (setActive() is immediately followed by a full
+    // reload elsewhere in the app, which throws away the in-memory Clerk
+    // client and forces it to re-hydrate from scratch). One short retry
+    // tells the two apart without making a genuinely signed-out user wait.
+    if (!result.ok && result.status === 401) {
+      await delay(400);
+      result = await fetchOnce<T>(path, fetchOptions);
     }
 
-    const data = await readResponse<T>(response);
-    if (useCache) setCachedJson(path, data);
-    return data;
+    if (!result.ok) {
+      const cached = useCache ? getCachedJson<T>(path) : null;
+      if (cached) return cached;
+      throw new ApiRequestError(result.status, userFacingApiError(result.status, result.rawMessage), result.rawMessage, result.details);
+    }
+
+    if (useCache) setCachedJson(path, result.data);
+    return result.data;
   } catch (error) {
     const cached = useCache ? getCachedJson<T>(path) : null;
     if (cached) return cached;
