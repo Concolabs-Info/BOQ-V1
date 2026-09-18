@@ -32,19 +32,21 @@ export function AccountProfileForm() {
 
   // Adding, removing, or changing the primary email is a sensitive action -
   // Clerk requires the session to be freshly reverified before allowing it,
-  // and rejects the call outright if it isn't wrapped like this. `options`
-  // routes the prompt through our own ReverificationDialog instead of
-  // Clerk's default modal.
-  const { dialog: reverificationDialog, options: reverificationOptions } = useReverificationPrompt();
-  const createEmailAddress = useReverification((email: string) => user?.createEmailAddress({ email }), reverificationOptions);
+  // and rejects the call outright if it isn't wrapped like this. Each gets
+  // its own prompt (with its own explanation) instead of Clerk's default
+  // modal, since only one of these can ever be in flight at a time.
+  const addEmailReverify = useReverificationPrompt("add this email address");
+  const primaryEmailReverify = useReverificationPrompt("change your primary email");
+  const removeEmailReverify = useReverificationPrompt("remove this email address");
+  const createEmailAddress = useReverification((email: string) => user?.createEmailAddress({ email }), addEmailReverify.options);
   const setPrimaryEmail = useReverification(
     (emailAddressId: string) => user?.update({ primaryEmailAddressId: emailAddressId }),
-    reverificationOptions,
+    primaryEmailReverify.options,
   );
   const destroyEmailAddress = useReverification((emailAddressId: string) => {
     const address = user?.emailAddresses.find((item) => item.id === emailAddressId);
     return address?.destroy();
-  }, reverificationOptions);
+  }, removeEmailReverify.options);
 
   if (user && user.id !== syncedUserId) {
     setSyncedUserId(user.id);
@@ -295,7 +297,7 @@ export function AccountProfileForm() {
                   ) : null}
                   <p className="min-w-0 truncate text-sm text-slate-950">{item.emailAddress}</p>
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-1">
+                <div className="flex shrink-0 items-center gap-3">
                   {!verified ? (
                     <button type="button" className="text-xs font-medium text-blue-700 hover:text-blue-800" onClick={() => void resendCode(item.id)}>
                       Send code
@@ -391,7 +393,9 @@ export function AccountProfileForm() {
       </SettingsCard>
 
       <SecuredByClerk />
-      {reverificationDialog}
+      {addEmailReverify.dialog}
+      {primaryEmailReverify.dialog}
+      {removeEmailReverify.dialog}
     </SettingsStack>
   );
 }

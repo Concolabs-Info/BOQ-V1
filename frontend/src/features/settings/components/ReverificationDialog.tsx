@@ -4,16 +4,20 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useSession } from "@clerk/nextjs";
 import { Button } from "@/shared/components/Button";
 import { AuthField } from "@/features/auth/components/AuthField";
+import { SecuredByClerk } from "@/features/auth/components/SecuredByClerk";
 
 type ReverificationLevel = "first_factor" | "second_factor" | "multi_factor";
 type Factor = "password" | "email_code";
 
 export function ReverificationDialog({
   level,
+  reason,
   onVerified,
   onCancel,
 }: {
   level: ReverificationLevel | undefined;
+  /** Short phrase completing "so we can ...", e.g. "change your password". */
+  reason: string;
   onVerified: () => void;
   onCancel: () => void;
 }) {
@@ -91,8 +95,8 @@ export function ReverificationDialog({
         </h2>
         <p className="mt-2 text-sm leading-6 text-slate-500">
           {factor === "email_code"
-            ? `Enter the code we sent to ${safeIdentifier ?? "your email"}.`
-            : "This is a sensitive change, so enter your password to continue."}
+            ? `Enter the code we sent to ${safeIdentifier ?? "your email"} so we can ${reason}.`
+            : `This is a sensitive change, so enter your current password so we can ${reason}.`}
         </p>
 
         {!ready ? (
@@ -126,6 +130,7 @@ export function ReverificationDialog({
             </div>
           </form>
         )}
+        <SecuredByClerk />
       </div>
     </div>
   );

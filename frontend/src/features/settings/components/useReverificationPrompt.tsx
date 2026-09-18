@@ -11,12 +11,14 @@ type PendingVerification = {
   cancel: () => void;
 };
 
-/** Shared state for every useReverification() call in a settings screen, so
- * sensitive Clerk actions (change email, change password, ...) prompt with
- * our own dialog instead of Clerk's default modal. Call once per component,
- * pass `options` as the second argument to each useReverification() call,
- * and render `dialog` once alongside the rest of the screen. */
-export function useReverificationPrompt() {
+/** State for one useReverification() call, so a sensitive Clerk action
+ * prompts with our own dialog instead of Clerk's default modal. Call once
+ * per sensitive action with a short phrase completing "so we can ..."
+ * (e.g. "change your password"), pass `options` as the second argument to
+ * that action's useReverification() call, and render `dialog` alongside the
+ * rest of the screen. Give each sensitive action on a page its own call so
+ * the dialog can explain specifically what it's confirming. */
+export function useReverificationPrompt(reason: string) {
   const [pending, setPending] = useState<PendingVerification | null>(null);
 
   const onNeedsReverification = useCallback((params: PendingVerification) => {
@@ -26,6 +28,7 @@ export function useReverificationPrompt() {
   const dialog = pending ? (
     <ReverificationDialog
       level={pending.level}
+      reason={reason}
       onVerified={() => {
         const { complete } = pending;
         setPending(null);

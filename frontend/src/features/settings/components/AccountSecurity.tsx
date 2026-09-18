@@ -123,10 +123,10 @@ export function AccountSecurityCard() {
   // supplied, and rejects the call outright if it isn't wrapped like this.
   // `options` routes the prompt through our own ReverificationDialog
   // instead of Clerk's default modal.
-  const { dialog: reverificationDialog, options: reverificationOptions } = useReverificationPrompt();
+  const passwordReverify = useReverificationPrompt("change your password");
   const updatePassword = useReverification(
     (input: { currentPassword?: string; newPassword: string }) => user?.updatePassword(input),
-    reverificationOptions,
+    passwordReverify.options,
   );
 
   const lastAdmin = deletion.kind === "last-admin";
@@ -475,7 +475,7 @@ export function AccountSecurityCard() {
           void revokeAllOther();
         }}
       />
-      {reverificationDialog}
+      {passwordReverify.dialog}
     </SettingsStack>
   );
 }
