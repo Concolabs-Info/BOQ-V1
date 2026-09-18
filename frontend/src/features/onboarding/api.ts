@@ -1,6 +1,6 @@
 import { fetchTermsMeta, hasAcceptedTerms } from "@/features/legal/termsClient";
 import { getPlatformContext } from "@/features/platform/services/platformService";
-import { removeCachedJson, requestJson, setSessionTokenGetter } from "@/shared/services/apiClient";
+import { removeCachedJson, requestJson } from "@/shared/services/apiClient";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import type { CreatedCompany, CreatedProject, OnboardingStatus } from "./types";
 
@@ -119,13 +119,4 @@ export async function continueAfterTerms(): Promise<string> {
     return appRoutes.projects;
   }
   return appRoutes.onboarding;
-}
-
-export async function claimInvitationWithSession(getToken: () => Promise<string | null>) {
-  setSessionTokenGetter(getToken);
-  try {
-    return await claimInvitation();
-  } catch {
-    return null;
-  }
 }
