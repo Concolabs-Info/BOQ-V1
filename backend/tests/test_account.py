@@ -127,6 +127,25 @@ def test_delete_company_removes_projects_then_the_company(monkeypatch):
     assert any("DELETE FROM company" in sql for sql, _ in conn.calls)
 
 
+def test_teardown_company_purges_every_project_file_folder(monkeypatch):
+    # Every child table cascades from project_id, but source PDFs, page
+    # renders, and each takeoff module's own on-disk folder live under
+    # storage_root/<project_id>/, not in Postgres - deleting the row alone
+    # never removed them until this was added.
+    monkeypatch.setattr(account, "fetch_one", lambda sql, params=(): {"name": "Acme"})
+    monkeypatch.setattr(
+        account,
+        "fetch_all",
+        lambda sql, params=(): [{"id": "p1"}, {"id": "p2"}] if "FROM project" in sql else [],
+    )
+    patch_tx(monkeypatch, FakeConn())
+    purged = []
+    monkeypatch.setattr(account, "purge_project_files", lambda project_id: purged.append(project_id))
+    monkeypatch.setattr(account, "purge_company_files", lambda company_id: None)
+    account.teardown_company("c1")
+    assert sorted(purged) == ["p1", "p2"]
+
+
 def test_delete_my_account_last_admin_requires_confirm_name(monkeypatch):
     monkeypatch.setattr(
         account,

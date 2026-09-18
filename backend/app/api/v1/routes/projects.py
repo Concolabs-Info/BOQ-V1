@@ -11,6 +11,7 @@ from ....modules.pre.project_frame import readiness
 from ....modules.pre.height import confirmed_scale
 from ....modules.pre.scale import is_scale_eligible, parse_scale_note, requires_primary_scale
 from ....services.pdf.geometry import page_mpt_box_to_norm01
+from ....services.storage.paths import purge_project_files
 from ....database.connection import fetch_all, fetch_one, transaction
 from ..schemas import CreateProject, UpdateProject
 
@@ -111,6 +112,11 @@ def delete_project(project_id: UUID):
         row = conn.execute("DELETE FROM project WHERE id=%s RETURNING id", (str(project_id),)).fetchone()
     if not row:
         raise HTTPException(404, "Project not found")
+    # Every child table cascades from project_id, but the source PDFs, page
+    # renders, crops, and each takeoff module's own on-disk folder live under
+    # storage_root/<project_id>/, not in Postgres - deleting the row alone
+    # never touches them.
+    purge_project_files(project_id)
 
 
 def _safe_confirmed(entity_type: str, entity_id) -> bool:

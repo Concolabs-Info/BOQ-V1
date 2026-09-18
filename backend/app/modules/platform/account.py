@@ -4,6 +4,7 @@ from __future__ import annotations
 from ...core.auth import CurrentUser
 from ...core.clerk_client import ClerkApiError, delete_user
 from ...database.connection import execute, fetch_all, fetch_one, transaction
+from ...services.storage.paths import purge_project_files
 from .company import purge_company_files
 from .invitations import InvitationError, _revoke_clerk_invite
 from .membership import CompanyMembership, get_company_membership
@@ -73,11 +74,18 @@ def teardown_company(company_id: str, *, except_user_id: str | None = None) -> N
     """Projects first (no ON DELETE CASCADE from company), then the company row."""
     row = fetch_one("SELECT name FROM company WHERE id = %s", (company_id,))
     name = (row["name"] if row else "").strip() or "this company"
+    project_ids = [str(item["id"]) for item in fetch_all("SELECT id FROM project WHERE company_id = %s", (company_id,))]
     _revoke_pending_invites(company_id)
     _displace_members(company_id, name, except_user_id=except_user_id)
     with transaction() as conn:
         conn.execute("DELETE FROM project WHERE company_id = %s", (company_id,))
         conn.execute("DELETE FROM company WHERE id = %s", (company_id,))
+    # Every table under a project cascades from project_id, but the source
+    # PDFs, page renders, crops, and each takeoff module's own on-disk
+    # folder live under storage_root/<project_id>/, not in Postgres at all -
+    # deleting the row never touches them.
+    for project_id in project_ids:
+        purge_project_files(project_id)
     purge_company_files(company_id)
 
 
