@@ -30,10 +30,23 @@ def test_update_member_role_rejects_self():
     assert "own role" in excinfo.value.message
 
 
-def test_update_member_role_rejects_promotion_to_admin(monkeypatch):
+def test_update_member_role_allows_promotion_to_admin(monkeypatch):
+    from app.modules.platform import roles as roles_mod
+
+    monkeypatch.setattr(members, "fetch_one", lambda sql, params=(): {"user_id": "user_2", "role": "qs"})
+    monkeypatch.setattr(roles_mod, "custom_role_row", lambda company_id, key: None)
+    seen = {}
+    monkeypatch.setattr(members, "execute", lambda sql, params=(): seen.update(sql=sql, params=params))
+    result = members.update_member_role(ACTOR, MEMBERSHIP, "user_2", "admin")
+    assert result["role"] == "admin"
+    assert result["role_label"] == "Owner / Admin"
+    assert seen["params"] == ("admin", MEMBERSHIP.company_id, "user_2")
+
+
+def test_update_member_role_rejects_an_unknown_role(monkeypatch):
     monkeypatch.setattr(members, "fetch_one", lambda sql, params=(): {"user_id": "user_2", "role": "qs"})
     with pytest.raises(InvitationError) as excinfo:
-        members.update_member_role(ACTOR, MEMBERSHIP, "user_2", "admin")
+        members.update_member_role(ACTOR, MEMBERSHIP, "user_2", "not_a_real_role")
     assert "Unknown role" in excinfo.value.message
 
 

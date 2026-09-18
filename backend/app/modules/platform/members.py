@@ -53,9 +53,12 @@ def _admin_count(company_id: str) -> int:
 def update_member_role(actor: CurrentUser, membership: CompanyMembership, target_user_id: str, role: str) -> dict:
     if target_user_id == actor.id:
         raise InvitationError("invalid", "You can't change your own role.")
-    # Promoting to admin is a separate, deliberate action, not a value on this
-    # dropdown — is_assignable_role() excludes it the same way invites do.
-    if not is_assignable_role(membership.company_id, role):
+    # Promoting to admin is a separate, deliberate action from the plain role
+    # dropdown, which is why it's excluded from is_assignable_role() the same
+    # way invites are. The frontend only reaches "admin" here after its own
+    # confirmation step, so it's allowed through directly rather than via
+    # is_assignable_role(), which stays reserved for invite-style role picks.
+    if role != "admin" and not is_assignable_role(membership.company_id, role):
         raise InvitationError("invalid", "Unknown role.")
     current = fetch_one(
         "SELECT user_id, role FROM company_member WHERE company_id = %s AND user_id = %s",
