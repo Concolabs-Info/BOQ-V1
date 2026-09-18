@@ -64,7 +64,12 @@ export function CompanyGate({ children }: { children: ReactNode }) {
           setReady(true);
           return;
         }
-        router.replace(appRoutes.onboardingTerms);
+        // Only a user who already has a company is truly "done except
+        // terms" - send them straight there. Anyone still mid-setup (no
+        // company yet, still has a project/invite step ahead) goes to the
+        // wizard instead, which resumes at the right step and only routes
+        // to terms itself once the sequence is actually complete.
+        router.replace(context.organization ? appRoutes.onboardingTerms : appRoutes.onboarding);
         return;
       }
 
