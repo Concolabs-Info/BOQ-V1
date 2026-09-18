@@ -135,7 +135,7 @@ export function OnboardingWizard() {
           setFirstProject(project);
           setStep("invite");
         }}
-        onSkip={() => router.replace(`${appRoutes.onboardingTerms}?from=setup`)}
+        onSkip={() => setStep("invite")}
       />
     );
   } else if (step === "invite") {
