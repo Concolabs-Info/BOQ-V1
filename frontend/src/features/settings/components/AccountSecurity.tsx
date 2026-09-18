@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
+import { useReverification } from "@clerk/nextjs";
+import { isReverificationCancelledError } from "@clerk/nextjs/errors";
 import { Button } from "@/shared/components/Button";
 import { AuthField } from "@/features/auth/components/AuthField";
 import { SecuredByClerk } from "@/features/auth/components/SecuredByClerk";
@@ -115,6 +117,13 @@ export function AccountSecurityCard() {
   const [busy, setBusy] = useState(false);
   const [deletion, setDeletion] = useState<AccountDeletionStatus>({ kind: "free" });
 
+  // Changing a password is a sensitive action - Clerk requires the session
+  // to be freshly reverified before allowing it, even with currentPassword
+  // supplied, and rejects the call outright if it isn't wrapped like this.
+  const updatePassword = useReverification(
+    (input: { currentPassword?: string; newPassword: string }) => user?.updatePassword(input),
+  );
+
   const lastAdmin = deletion.kind === "last-admin";
   const ready = loaded && Boolean(user);
   const currentSessionId = clerk.session?.id;
@@ -176,7 +185,7 @@ export function AccountSecurityCard() {
     setPasswordError(null);
     setBusy(true);
     try {
-      await user.updatePassword({
+      await updatePassword({
         currentPassword: user.passwordEnabled ? currentPassword : undefined,
         newPassword,
       });
@@ -184,7 +193,7 @@ export function AccountSecurityCard() {
       setNewPassword("");
       await refresh();
     } catch (err) {
-      setPasswordError(thrownErrText(err));
+      if (!isReverificationCancelledError(err)) setPasswordError(thrownErrText(err));
     } finally {
       setBusy(false);
     }

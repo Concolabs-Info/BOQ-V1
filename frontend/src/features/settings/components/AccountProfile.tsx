@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useRef, useState } from "react";
+import { useReverification } from "@clerk/nextjs";
+import { isReverificationCancelledError } from "@clerk/nextjs/errors";
 import { Button } from "@/shared/components/Button";
 import { AuthField } from "@/features/auth/components/AuthField";
 import { SecuredByClerk } from "@/features/auth/components/SecuredByClerk";
@@ -26,6 +28,16 @@ export function AccountProfileForm() {
   const [code, setCode] = useState("");
   const [syncedUserId, setSyncedUserId] = useState(user?.id);
   const [localPhoto, setLocalPhoto] = useState<string | null>(null);
+
+  // Adding, removing, or changing the primary email is a sensitive action -
+  // Clerk requires the session to be freshly reverified before allowing it,
+  // and rejects the call outright if it isn't wrapped like this.
+  const createEmailAddress = useReverification((email: string) => user?.createEmailAddress({ email }));
+  const setPrimaryEmail = useReverification((emailAddressId: string) => user?.update({ primaryEmailAddressId: emailAddressId }));
+  const destroyEmailAddress = useReverification((emailAddressId: string) => {
+    const address = user?.emailAddresses.find((item) => item.id === emailAddressId);
+    return address?.destroy();
+  });
 
   if (user && user.id !== syncedUserId) {
     setSyncedUserId(user.id);
@@ -92,6 +104,11 @@ export function AccountProfileForm() {
     }
   }
 
+  function reportEmailError(err: unknown) {
+    if (isReverificationCancelledError(err)) return;
+    setEmailError(thrownErrText(err));
+  }
+
   async function startAddEmail(event: FormEvent) {
     event.preventDefault();
     if (!user) return;
@@ -99,13 +116,14 @@ export function AccountProfileForm() {
     const email = newEmail.trim();
     if (!email) return;
     try {
-      const created = await user.createEmailAddress({ email });
+      const created = await createEmailAddress(email);
+      if (!created) return;
       await created.prepareVerification({ strategy: "email_code" });
       setVerifyId(created.id);
       setCode("");
       await refresh();
     } catch (err) {
-      setEmailError(thrownErrText(err));
+      reportEmailError(err);
     }
   }
 
@@ -145,9 +163,9 @@ export function AccountProfileForm() {
     if (!user) return;
     setEmailError(null);
     try {
-      await run(() => user.update({ primaryEmailAddressId: id }));
+      await run(() => setPrimaryEmail(id));
     } catch (err) {
-      setEmailError(thrownErrText(err));
+      reportEmailError(err);
     }
   }
 
@@ -157,14 +175,14 @@ export function AccountProfileForm() {
     const address = user.emailAddresses.find((item) => item.id === id);
     if (!address) return;
     try {
-      await address.destroy();
+      await destroyEmailAddress(id);
       if (verifyId === id) {
         setVerifyId(null);
         setCode("");
       }
       await refresh();
     } catch (err) {
-      setEmailError(thrownErrText(err));
+      reportEmailError(err);
     }
   }
 
