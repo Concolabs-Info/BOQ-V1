@@ -58,9 +58,9 @@ export function SettingsCard({
       </header>
       {children ? <div className={contentClassName ?? "px-6 pb-6 pt-4"}>{children}</div> : <div className="pb-6" />}
       {footer || footerHint ? (
-        <footer className="flex items-center justify-between gap-3 border-t border-slate-100 px-6 py-4">
-          {footerHint ? <p className="text-xs leading-5 text-slate-500">{footerHint}</p> : <span />}
-          {footer}
+        <footer className="flex flex-col gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+          {footerHint ? <p className="min-w-0 flex-1 text-xs leading-5 text-slate-500">{footerHint}</p> : <span className="hidden min-w-0 flex-1 sm:block" />}
+          {footer ? <div className="flex shrink-0 items-center justify-end gap-2">{footer}</div> : null}
         </footer>
       ) : null}
     </section>

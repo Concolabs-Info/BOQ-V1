@@ -373,11 +373,11 @@ export function AccountSecurityCard() {
           }
           footer={
             deleteConfirm ? (
-              <div className="flex flex-wrap gap-2">
+              <>
                 <Button
                   type="button"
                   variant="danger"
-                  className="rounded-xl"
+                  className="rounded-xl whitespace-nowrap"
                   disabled={busy || confirmName.trim().toLowerCase() !== deletion.company_name.trim().toLowerCase()}
                   pending={busy}
                   onClick={() => void deleteAccount()}
@@ -387,19 +387,19 @@ export function AccountSecurityCard() {
                 <Button type="button" variant="ghost" className="rounded-xl" disabled={busy} onClick={closeDelete}>
                   Cancel
                 </Button>
-              </div>
+              </>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <>
                 <Link
                   href={appRoutes.organizationMembers}
-                  className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  className="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
                   Transfer ownership
                 </Link>
-                <Button type="button" variant="danger" className="rounded-xl" onClick={() => setDeleteConfirm(true)}>
+                <Button type="button" variant="danger" className="h-9 rounded-xl whitespace-nowrap" onClick={() => setDeleteConfirm(true)}>
                   Delete anyway
                 </Button>
-              </div>
+              </>
             )
           }
         >
@@ -432,14 +432,14 @@ export function AccountSecurityCard() {
           }
           footer={
             deleteConfirm ? (
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="danger" className="rounded-xl" disabled={busy} pending={busy} onClick={() => void deleteAccount()}>
+              <>
+                <Button type="button" variant="danger" className="rounded-xl whitespace-nowrap" disabled={busy} pending={busy} onClick={() => void deleteAccount()}>
                   Yes, delete my account
                 </Button>
                 <Button type="button" variant="ghost" className="rounded-xl" disabled={busy} onClick={closeDelete}>
                   Cancel
                 </Button>
-              </div>
+              </>
             ) : (
               <Button type="button" variant="danger" className="rounded-xl" onClick={() => setDeleteConfirm(true)}>
                 Delete account
