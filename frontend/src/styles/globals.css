@@ -20,17 +20,12 @@
 
 html,
 body {
-  height: 100%;
-}
-
-html {
-  overflow: hidden;
+  min-height: 100%;
 }
 
 body {
   margin: 0;
   font-size: 15px;
-  overflow: hidden;
   background: #eef3f8;
   color: #172033;
   font-family: var(--autoboq-font-sans);
@@ -74,6 +69,41 @@ select {
 .viewer-scrollbar::-webkit-scrollbar-thumb {
   background: #b9c2d0;
   border-radius: 20px;
+}
+
+.terms-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #c5ced9 transparent;
+}
+
+.terms-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.terms-scroll::-webkit-scrollbar-track {
+  margin-block: 12px;
+  background: transparent;
+}
+
+.terms-scroll::-webkit-scrollbar-thumb {
+  background: #c5ced9;
+  border-radius: 999px;
+}
+
+.terms-scroll::-webkit-scrollbar-button,
+.terms-scroll::-webkit-scrollbar-button:start:decrement,
+.terms-scroll::-webkit-scrollbar-button:end:increment,
+.terms-scroll::-webkit-scrollbar-button:vertical:start:increment,
+.terms-scroll::-webkit-scrollbar-button:vertical:end:decrement {
+  display: none;
+  height: 0;
+  width: 0;
+  background: transparent;
+}
+
+.terms-scroll::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .toolbar-section {

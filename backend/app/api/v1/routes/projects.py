@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
+from ....core.rbac import is_project_scoped
+from ....modules.platform.membership import CompanyMembership
 from ....modules.pre.confirmations import is_confirmed
 from ....modules.pre.project_frame import readiness
 from ....modules.pre.height import confirmed_scale
 from ....modules.pre.scale import is_scale_eligible, parse_scale_note, requires_primary_scale
 from ....services.pdf.geometry import page_mpt_box_to_norm01
+from ....services.storage.paths import purge_project_files
 from ....database.connection import fetch_all, fetch_one, transaction
 from ..schemas import CreateProject, UpdateProject
 
@@ -17,13 +20,19 @@ router = APIRouter(tags=["projects"])
 
 @router.get("/projects")
 def list_projects(
+    request: Request,
     search: str | None = Query(default=None, max_length=200),
     status: str | None = Query(default=None),
     limit: int = Query(default=24, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    clauses = ["1=1"]
-    params: list[object] = []
+    membership: CompanyMembership = request.state.membership
+    user_id = request.state.current_user.id
+    clauses = ["company_id = %s"]
+    params: list[object] = [membership.company_id]
+    if is_project_scoped(membership.role):
+        clauses.append("id IN (SELECT project_id FROM project_member WHERE user_id = %s)")
+        params.append(user_id)
     if search and search.strip():
         needle = f"%{search.strip()}%"
         clauses.append("(name ILIKE %s OR COALESCE(project_number,'') ILIKE %s OR COALESCE(client_name,'') ILIKE %s OR COALESCE(location,'') ILIKE %s)")
@@ -44,15 +53,21 @@ def list_projects(
 
 
 @router.post("/projects", status_code=201)
-def create_project(body: CreateProject):
+def create_project(body: CreateProject, request: Request):
+    membership: CompanyMembership = request.state.membership
+    user_id = request.state.current_user.id
     with transaction() as conn:
         row = conn.execute(
-            """INSERT INTO project(name,project_number,client_name,location,description)
-               VALUES (%s,%s,%s,%s,%s)
+            """INSERT INTO project(name,project_number,client_name,location,description,company_id,created_by_user_id)
+               VALUES (%s,%s,%s,%s,%s,%s,%s)
                RETURNING id,name,status,project_number,client_name,location,description,pre_status,frame_version,
                          frozen_at,created_at,updated_at""",
-            (body.name.strip(), body.project_number, body.client_name, body.location, body.description),
+            (body.name.strip(), body.project_number, body.client_name, body.location, body.description, membership.company_id, user_id),
         ).fetchone()
+        conn.execute(
+            "INSERT INTO project_member (project_id, user_id) VALUES (%s, %s) ON CONFLICT (project_id, user_id) DO NOTHING",
+            (str(row["id"]), user_id),
+        )
     result = dict(row)
     result["project_id"] = str(result["id"])
     return result
@@ -97,6 +112,11 @@ def delete_project(project_id: UUID):
         row = conn.execute("DELETE FROM project WHERE id=%s RETURNING id", (str(project_id),)).fetchone()
     if not row:
         raise HTTPException(404, "Project not found")
+    # Every child table cascades from project_id, but the source PDFs, page
+    # renders, crops, and each takeoff module's own on-disk folder live under
+    # storage_root/<project_id>/, not in Postgres - deleting the row alone
+    # never touches them.
+    purge_project_files(project_id)
 
 
 def _safe_confirmed(entity_type: str, entity_id) -> bool:

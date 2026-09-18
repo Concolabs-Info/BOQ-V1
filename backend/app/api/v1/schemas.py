@@ -1,7 +1,7 @@
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ...modules.pre.schemas import ViewportDiscipline, ViewportSubject, ViewportViewKind
 
@@ -145,6 +145,219 @@ class ConfirmationCreate(ApiModel):
     entity_type: str
     entity_id: UUID
     actor: str = "user"
+
+
+class PlatformUser(ApiModel):
+    id: str
+    email: str
+    full_name: str | None = None
+    role: str
+    status: str = "active"
+
+
+class PlatformOrganization(ApiModel):
+    id: str
+    name: str
+    status: str = "active"
+    membership_role: str | None = None
+    logo_url: str | None = None
+
+
+class PlatformContext(ApiModel):
+    user: PlatformUser
+    organization: PlatformOrganization | None = None
+    membership_role: str | None = None
+    role_label: str | None = None
+    role_description: str | None = None
+    permissions: list[str]
+    is_super_admin: bool = False
+    terms_accepted: bool = False
+    terms_version: str | None = None
+
+
+class OnboardingCompanyIn(ApiModel):
+    name: str = Field(min_length=1, max_length=160)
+    country: str = Field(default="Sri Lanka", max_length=80)
+    registration_type: Literal["PV", "BR", "NONE"] | None = None
+    registration_number: str | None = Field(default=None, max_length=80)
+    lock_domain: bool = False
+
+
+class OnboardingProjectIn(CreateProject):
+    pass
+
+
+class OnboardingCompanyOut(ApiModel):
+    id: str
+    name: str
+    role: str = "admin"
+
+
+class OnboardingProjectOut(ApiModel):
+    id: str
+    name: str
+
+
+class AcceptTermsIn(ApiModel):
+    version: str = Field(min_length=1, max_length=64)
+
+    @field_validator("version")
+    @classmethod
+    def version_not_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Accept the current terms to continue.")
+        return cleaned
+
+
+class AcceptTermsOut(ApiModel):
+    ok: bool = True
+    terms_version: str
+
+
+class OnboardingExistingCompany(ApiModel):
+    id: str
+    name: str
+    domain: str | None = None
+
+
+class OnboardingStatusOut(ApiModel):
+    path: str
+    domain: str | None = None
+    suggested_name: str = ""
+    existing_company: OnboardingExistingCompany | None = None
+    former_company_name: str | None = None
+    former_reason: str | None = None
+    has_company: bool
+    has_project: bool
+    pending_project_count: int = 0
+
+
+class InviteRowIn(ApiModel):
+    email: str = Field(default="", max_length=254)
+    role: str | None = Field(default=None, max_length=80)
+    workspace_ids: list[str] = Field(default_factory=list)
+
+
+class InviteBatchIn(ApiModel):
+    invites: list[InviteRowIn] = Field(default_factory=list)
+
+
+class InviteFailureOut(ApiModel):
+    email: str
+    reason: str
+
+
+class InviteBatchOut(ApiModel):
+    sent: int
+    existing_accounts: list[str] = Field(default_factory=list)
+    failures: list[InviteFailureOut] = Field(default_factory=list)
+
+
+class InvitePatchIn(ApiModel):
+    role: str | None = Field(default=None, max_length=80)
+    workspace_ids: list[str] | None = None
+
+
+class InviteClaimIn(ApiModel):
+    token: str | None = Field(default=None, max_length=200)
+
+
+class InviteClaimOut(ApiModel):
+    claimed: bool
+    already_member: bool = False
+    company_id: str | None = None
+    company_name: str | None = None
+    role: str | None = None
+
+
+class CompanyOut(ApiModel):
+    id: str
+    name: str
+    domain: str | None = None
+    registration_type: str | None = None
+    registration_number: str | None = None
+    tax_id: str | None = None
+    country: str
+    currency: str
+    phone: str | None = None
+    logo_url: str | None = None
+    role: str
+    permissions: list[str]
+
+
+class CompanyPatchIn(ApiModel):
+    name: str = Field(min_length=1, max_length=160)
+    country: str = Field(default="Sri Lanka", max_length=80)
+    tax_id: str | None = Field(default=None, max_length=80)
+    phone: str | None = Field(default=None, max_length=40)
+
+
+class CompanyDeleteIn(ApiModel):
+    confirm_name: str = Field(min_length=1, max_length=160)
+
+
+class AccountDeletionOut(ApiModel):
+    kind: Literal["free", "last-admin"]
+    company_name: str | None = None
+    other_members: int | None = None
+
+
+class AccountDeleteIn(ApiModel):
+    confirm_name: str | None = Field(default=None, max_length=160)
+
+
+class MemberOut(ApiModel):
+    id: str
+    email: str
+    full_name: str | None = None
+    role: str
+    role_label: str
+    workspace_ids: list[str] = Field(default_factory=list)
+    created_at: str | None = None
+
+
+class PendingInviteOut(ApiModel):
+    id: str
+    email: str
+    role: str
+    workspace_ids: list[str] = Field(default_factory=list)
+    expires_at: str | None = None
+    created_at: str | None = None
+    existing_account: bool = False
+
+
+class MemberDirectoryOut(ApiModel):
+    members: list[MemberOut]
+    invitations: list[PendingInviteOut]
+
+
+class MemberRoleIn(ApiModel):
+    role: str = Field(min_length=1, max_length=80)
+
+
+class RoleOut(ApiModel):
+    id: str
+    key: str
+    name: str
+    description: str = ""
+    permissions: list[str] = Field(default_factory=list)
+    built_in: bool = False
+
+
+class RoleListOut(ApiModel):
+    roles: list[RoleOut]
+
+
+class CustomRoleIn(ApiModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str | None = Field(default=None, max_length=240)
+    permissions: list[str] = Field(default_factory=list)
+
+
+class MemberProjectIn(ApiModel):
+    project_id: str = Field(min_length=1, max_length=80)
+
 
 class ScopeAnswer(ApiModel):
     choice: str | None = None

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/shared/components/Button";
+import { actionReason } from "@/features/settings/access";
 import type { BoqTemplatePackage } from "../types";
 
 export function BoqToolbar({
@@ -18,6 +19,9 @@ export function BoqToolbar({
   onDownload,
   onExportHistory,
   onSettings,
+  canExport = true,
+  canTemplates = true,
+  canSetup = true,
 }: {
   title: string;
   status: "ready" | "updating";
@@ -32,9 +36,12 @@ export function BoqToolbar({
   onDownload: (format: "pdf" | "xlsx" | "csv" | "json") => void;
   onExportHistory: () => void;
   onSettings: () => void;
+  canExport?: boolean;
+  canTemplates?: boolean;
+  canSetup?: boolean;
 }) {
   const [downloadOpen, setDownloadOpen] = useState(false);
-  const downloadDisabled = saving || stale;
+  const downloadDisabled = saving || stale || !canExport;
 
   function chooseDownload(format: "pdf" | "xlsx" | "csv" | "json") {
     setDownloadOpen(false);
@@ -57,19 +64,20 @@ export function BoqToolbar({
               className="h-9 min-w-52 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-300"
               value={templateId}
               onChange={(event) => onTemplateChange(event.target.value)}
-              disabled={saving}
+              disabled={saving || !canTemplates}
+              title={canTemplates ? undefined : actionReason("boq:templates_manage")}
             >
               {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
             </select>
-            <Button variant="secondary" disabled={saving} onClick={onAddTemplate}>+ Add template</Button>
-            <Button variant="ghost" disabled={saving || !templateId} onClick={onManageTemplates}>Manage templates</Button>
+            <Button variant="secondary" title={canTemplates ? undefined : actionReason("boq:templates_manage")} disabled={saving || !canTemplates} onClick={onAddTemplate}>+ Add template</Button>
+            <Button variant="ghost" title={canTemplates ? undefined : actionReason("boq:templates_manage")} disabled={saving || !templateId || !canTemplates} onClick={onManageTemplates}>Manage templates</Button>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" disabled={saving} onClick={onRefresh}>Refresh</Button>
           <div className="relative">
-            <Button disabled={downloadDisabled} onClick={() => setDownloadOpen((value) => !value)}>Download ▾</Button>
+            <Button disabled={downloadDisabled} title={canExport ? undefined : actionReason("boq:export")} onClick={() => setDownloadOpen((value) => !value)}>Download ▾</Button>
             {downloadOpen ? (
               <div className="absolute right-0 z-30 mt-2 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
                 <DownloadOption label="PDF" onClick={() => chooseDownload("pdf")} />
@@ -81,7 +89,7 @@ export function BoqToolbar({
               </div>
             ) : null}
           </div>
-          <Button variant="secondary" disabled={saving} onClick={onSettings}>Settings</Button>
+          <Button variant="secondary" title={canSetup ? undefined : actionReason("boq:rates_manage")} disabled={saving || !canSetup} onClick={onSettings}>Settings</Button>
         </div>
       </div>
     </div>

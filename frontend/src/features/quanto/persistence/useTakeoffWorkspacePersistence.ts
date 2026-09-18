@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useDemoStore } from "@/features/demo/store";
-import { apiRequestHeaders, requestJson } from "@/shared/services/apiClient";
+import { requestJson } from "@/shared/services/apiClient";
 import { useMeasurementStore } from "../measurements/measurementStore";
 import { useSpecialStore } from "../specialStore";
 import { useStructuralStore } from "../structuralStore";
@@ -88,7 +88,6 @@ export function useTakeoffWorkspacePersistence(projectId: string) {
       try {
         await requestJson(path, {
           method: "PUT",
-          headers: { "Content-Type": "application/json", ...apiRequestHeaders() },
           body: JSON.stringify({ state: snapshot() }),
         });
         if (!cancelled) dispatchTakeoffStatus({ saving: "saved" });

@@ -74,3 +74,10 @@ htmlcov/
 *.bak
 *~
 .ipynb_checkpoints/
+
+# Local planning docs (specs/plans) - our own use, not committed
+docs/superpowers/
+
+# Next.js auto-generates these on every `next dev` run (agentRules)
+frontend/AGENTS.md
+frontend/CLAUDE.md

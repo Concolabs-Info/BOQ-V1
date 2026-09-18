@@ -23,6 +23,7 @@ import {
   requestGuardedAction,
   useEditSessionStore,
 } from "./editing/editSessionStore";
+import { canMutateTakeoffGeometry } from "./takeoffGeometryAccess";
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 type Snapshot = { flights: Flight[]; piles: Pile[]; caps: PileCap[] };
 function stage<T>(
@@ -31,6 +32,7 @@ function stage<T>(
   original: T,
   restore: (value: T) => void,
 ): boolean {
+  if (!canMutateTakeoffGeometry()) return false;
   const edit = useEditSessionStore.getState();
   if (edit.saving) return false;
   if (edit.key === key || edit.key?.startsWith("geometry:")) return true;
@@ -127,7 +129,8 @@ export const useSpecialStore = create<State>()(
         const selectedIds = current.includes(id) ? current.filter((value) => value !== id) : [...current, id];
         requestGuardedAction(() => set({ selectedIds, selectedId: selectedIds.at(-1) || null }), "change selection");
       },
-      translateSelected: (ids, dx, dy) =>
+      translateSelected: (ids, dx, dy) => {
+        if (!canMutateTakeoffGeometry()) return;
         set((s) => {
           const selected = new Set(ids);
           const movePoint = (point: { x: number; y: number }) => ({
@@ -167,8 +170,10 @@ export const useSpecialStore = create<State>()(
             ),
             workbookConfirmed: {},
           };
-        }),
-      captureUndo: () =>
+        });
+      },
+      captureUndo: () => {
+        if (!canMutateTakeoffGeometry()) return;
         set((s) => ({
           undoStack: [
             ...s.undoStack.slice(-19),
@@ -179,9 +184,11 @@ export const useSpecialStore = create<State>()(
             },
           ],
           redoStack: [],
-        })),
+        }));
+      },
       undo: () =>
         set((s) => {
+          if (!canMutateTakeoffGeometry()) return {};
           const p = s.undoStack.at(-1);
           return p
             ? {
@@ -195,6 +202,7 @@ export const useSpecialStore = create<State>()(
         }),
       redo: () =>
         set((s) => {
+          if (!canMutateTakeoffGeometry()) return {};
           const next=(s.redoStack || []).at(-1);
           return next?{...clone(next),undoStack:[...s.undoStack.slice(-19),{flights:clone(s.flights),piles:clone(s.piles),caps:clone(s.caps)}],redoStack:s.redoStack.slice(0,-1),selectedId:null,selectedIds:[]}:{};
         }),

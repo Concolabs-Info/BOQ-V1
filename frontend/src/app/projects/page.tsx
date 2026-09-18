@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PlatformShell } from "@/features/platform/components/PlatformShell";
+import { getPlatformContext } from "@/features/platform/services/platformService";
 import { getCachedProjects, listProjects } from "@/features/projects/services/projectService";
 import { Button } from "@/shared/components/Button";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { appRoutes } from "@/shared/constants/appRoutes";
+import { workspaceHome } from "@/features/settings/access";
 import type { ProjectListResponse, ProjectStatus } from "@/shared/types/apiTypes";
 
 const PAGE_SIZE = 12;
@@ -31,6 +33,28 @@ export default function ProjectsPage() {
   const [offset, setOffset] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [canCreate, setCanCreate] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [companyName, setCompanyName] = useState<string | null>(null);
+  const [permissions, setPermissions] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    getPlatformContext()
+      .then((context) => {
+        if (!mounted) return;
+        setCanCreate(context.permissions.includes("pipeline:upload"));
+        setIsOwner(context.membership_role === "admin" || context.user.role === "admin");
+        setCompanyName(context.organization?.name ?? null);
+        setPermissions(context.permissions);
+      })
+      .catch(() => {
+        if (mounted) setCanCreate(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -99,9 +123,11 @@ export default function ProjectsPage() {
           </label>
           <Button className="h-11 rounded-xl px-5">Search</Button>
         </form>
-        <Link href={appRoutes.createProject}>
-          <Button className="h-11 w-full rounded-xl px-5 sm:w-auto">Create Project</Button>
-        </Link>
+        {canCreate ? (
+          <Link href={appRoutes.createProject}>
+            <Button className="h-11 w-full rounded-xl px-5 sm:w-auto">Create Project</Button>
+          </Link>
+        ) : null}
       </div>
 
       {error ? <div className="mb-5"><ErrorMessage message={error} /></div> : null}
@@ -113,11 +139,25 @@ export default function ProjectsPage() {
 
       {!isLoading && response.projects.length === 0 ? (
         <section className="rounded-[28px] border border-slate-200 bg-white p-10 text-center shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-950">No projects found</h2>
+          <h2 className="text-xl font-semibold text-slate-950">
+            {search || status ? "No projects found" : "No projects yet"}
+          </h2>
           <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-500">
-            Adjust the search or create a new project.
+            {search || status
+              ? "Try a different search."
+              : isOwner
+                ? "Create a project to get started, or add someone to one from Settings → Members."
+                : companyName
+                  ? `You're in ${companyName}. You'll see a job here once an owner adds you to it.`
+                  : "You'll see a job here after an owner adds you to it."}
           </p>
-          <div className="mt-6"><Link href={appRoutes.createProject}><Button>Create Project</Button></Link></div>
+          {isOwner ? (
+            <div className="mt-6">
+              <Link href={appRoutes.createProject}>
+                <Button>Create Project</Button>
+              </Link>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -127,7 +167,7 @@ export default function ProjectsPage() {
             <article key={project.id} className="flex min-h-[250px] flex-col rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm transition hover:border-blue-200 hover:shadow-md">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <Link href={appRoutes.workspace(project.id)} className="block truncate text-lg font-semibold text-slate-950 hover:text-blue-700">
+                  <Link href={`/workspace/${project.id}`} className="block truncate text-lg font-semibold text-slate-950 hover:text-blue-700">
                     {project.name}
                   </Link>
                   <p className="mt-1 truncate text-sm text-slate-500">{project.project_number || "No project number"}</p>
@@ -145,11 +185,11 @@ export default function ProjectsPage() {
               </dl>
 
               <div className="mt-auto flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
-                <Link href={appRoutes.workspace(project.id)} className="text-sm font-semibold text-slate-700 hover:text-blue-700">
+                <Link href={`/workspace/${project.id}`} className="text-sm font-semibold text-slate-700 hover:text-blue-700">
                   Project details
                 </Link>
                 <Link
-                  href={appRoutes.workflowUpload(project.id)}
+                  href={permissions ? workspaceHome(project.id, permissions) : appRoutes.workspace(project.id)}
                   className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-blue-700"
                 >
                   Continue Project

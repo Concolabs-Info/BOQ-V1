@@ -7,29 +7,26 @@ import { LoadingState } from "@/shared/components/LoadingState";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { PlatformShell } from "./PlatformShell";
 import { ActionCard, Card, DataTable, StatCard } from "./PlatformCards";
+import { AccountProfileForm, AccountSecurityCard } from "@/features/settings/components/AccountSettings";
+import { CompanySettingsForm } from "@/features/settings/components/CompanySettingsForm";
+import { MembersManager } from "@/features/settings/components/MembersManager";
+import { RolesManager } from "@/features/settings/components/RolesManager";
+import { SettingsAccessGuard } from "@/features/settings/components/SettingsAccessGuard";
+import { SettingsShell } from "@/features/settings/components/SettingsShell";
+import { getCompanySettings, getMemberDirectory, settingsError } from "@/features/settings/api";
 import {
   createOrganization,
   createSubscriptionPlan,
   createSuperAdmin,
   getAdminOverview,
-  getAccountSettings,
-  getOrganizationOverview,
-  getOrganizationSettings,
-  getProfile,
   getUsage,
-  inviteOrganizationMember,
   listAuditLogs,
   listBillingHistory,
   listNotifications,
-  listOrganizationMembers,
-  listOrganizationRoles,
   listOrganizations,
   listSubscriptionPlans,
   listSuperAdmins,
   requestPasswordReset,
-  updateAccountSettings,
-  updateOrganizationSettings,
-  updateProfile,
   type PlatformRecord,
 } from "../services/platformService";
 
@@ -214,85 +211,71 @@ export function SubscriptionPlansPage() {
 }
 
 export function OrganizationDashboardPage() {
-  const { record, isLoading, error } = useRecord(getOrganizationOverview);
-  const organization = (record?.organization as PlatformRecord | undefined) ?? {};
-  const subscription = (record?.subscription as PlatformRecord | undefined) ?? {};
+  const [name, setName] = useState("Company");
+  const [memberCount, setMemberCount] = useState(0);
+  const [inviteCount, setInviteCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([getCompanySettings(), getMemberDirectory()])
+      .then(([company, directory]) => {
+        if (!mounted) return;
+        setName(company.name);
+        setMemberCount(directory.members.length);
+        setInviteCount(directory.invitations.length);
+      })
+      .catch((nextError) => {
+        if (mounted) setError(settingsError(nextError));
+      })
+      .finally(() => {
+        if (mounted) setIsLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   return (
-    <PlatformShell title="Organization" eyebrow="Management" activeNavHref={appRoutes.organization}>
-      {isLoading ? <LoadingState label="Loading organization" /> : null}
+    <SettingsShell title="Company">
+      {isLoading ? <LoadingState label="Loading company" /> : null}
       {error ? <ErrorMessage message={error} /> : null}
-      {!isLoading && !record?.organization ? (
-        <Card><p className="text-sm text-slate-600">No organization workspace is linked to this account.</p></Card>
-      ) : null}
-      {record?.organization ? (
+      {!isLoading && !error ? (
         <>
           <Card className="mb-6">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Workspace</p>
-            <h2 className="mt-2 text-xl font-semibold text-slate-950">{String(organization.name ?? "Organization")}</h2>
-            <p className="mt-1 text-sm capitalize text-slate-500">{String(organization.status ?? "active")}</p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-950">{name}</h2>
+            <p className="mt-1 text-sm text-slate-500">One company per account.</p>
           </Card>
-          <div className="grid gap-5 md:grid-cols-3">
-            <StatCard label="Members" value={String(record?.members ?? 0)} />
-            <StatCard label="Projects" value={String(record?.projects ?? 0)} />
-            <StatCard label="Plan" value={String(subscription.plan_name ?? "Starter")} />
+          <div className="grid gap-5 md:grid-cols-2">
+            <StatCard label="Members" value={String(memberCount)} />
+            <StatCard label="Pending invites" value={String(inviteCount)} />
           </div>
           <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            <ActionCard title="Members" description="Invite users and manage workspace access." href={appRoutes.organizationMembers} action="Manage" />
-            <ActionCard title="Roles" description="Review the available roles and permissions." href={appRoutes.organizationRoles} action="View" />
-            <ActionCard title="Billing" description="Review the current plan and billing history." href={appRoutes.organizationBilling} action="Open" />
-            <ActionCard title="Usage" description="Review project and storage usage." href={appRoutes.usage} action="View" />
-            <ActionCard title="Settings" description="Manage organization preferences." href={appRoutes.organizationSettings} action="Open" />
+            <ActionCard title="Members" description="Invite people, change roles, and revoke pending invites." href={appRoutes.organizationMembers} action="Manage" />
+            <ActionCard title="Roles" description="Built-in and custom roles for your team." href={appRoutes.organizationRoles} action="Manage" />
+            <ActionCard title="Company" description="Name, country, tax number, and phone." href={appRoutes.organizationSettings} action="Open" />
           </div>
         </>
       ) : null}
-    </PlatformShell>
+    </SettingsShell>
   );
 }
 
 export function MembersPage() {
-  const { rows, isLoading, error, reload } = useRecords(listOrganizationMembers);
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState("member");
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    await inviteOrganizationMember({ email, role });
-    setEmail("");
-    setRole("member");
-    await reload();
-  }
-
   return (
-    <PlatformShell title="Members" eyebrow="Organization">
-      <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-        <Card>
-          <h2 className="text-xl font-semibold text-slate-950">Invite member</h2>
-          <form className="mt-5 space-y-4" onSubmit={submit}>
-            <Input label="Email" value={email} onChange={setEmail} type="email" required />
-            <Select label="Role" value={role} onChange={setRole} options={["organization_admin", "project_manager", "quantity_surveyor", "reviewer", "viewer"]} />
-            <Button className="w-full rounded-xl">Send invitation</Button>
-          </form>
-        </Card>
-        <Card>
-          {isLoading ? <LoadingState label="Loading members" /> : null}
-          {error ? <ErrorMessage message={error} /> : null}
-          <DataTable columns={["email", "full_name", "role", "status", "created_at"]} rows={rows} />
-        </Card>
-      </div>
-    </PlatformShell>
+    <SettingsShell title="Members">
+      <MembersManager />
+    </SettingsShell>
   );
 }
 
 export function RolesPage() {
-  const { rows, isLoading, error } = useRecords(listOrganizationRoles);
   return (
-    <PlatformShell title="Roles and Permissions" eyebrow="Organization">
-      <Card>
-        {isLoading ? <LoadingState label="Loading roles" /> : null}
-        {error ? <ErrorMessage message={error} /> : null}
-        <DataTable columns={["name", "slug", "permissions"]} rows={rows} />
-      </Card>
-    </PlatformShell>
+    <SettingsShell title="Roles">
+      <RolesManager />
+    </SettingsShell>
   );
 }
 
@@ -301,13 +284,15 @@ export function RolesPage() {
 export function BillingPage({ title = "Billing" }: { title?: string }) {
   const { rows, isLoading, error } = useRecords(listBillingHistory);
   return (
-    <PlatformShell title={title} eyebrow="Billing">
-      <Card>
-        {isLoading ? <LoadingState label="Loading billing history" /> : null}
-        {error ? <ErrorMessage message={error} /> : null}
-        <DataTable columns={["provider", "amount", "currency", "status", "description", "created_at"]} rows={rows} />
-      </Card>
-    </PlatformShell>
+    <SettingsAccessGuard>
+      <PlatformShell title={title} eyebrow="Billing">
+        <Card>
+          {isLoading ? <LoadingState label="Loading billing history" /> : null}
+          {error ? <ErrorMessage message={error} /> : null}
+          <DataTable columns={["provider", "amount", "currency", "status", "description", "created_at"]} rows={rows} />
+        </Card>
+      </PlatformShell>
+    </SettingsAccessGuard>
   );
 }
 
@@ -354,113 +339,34 @@ export function NotificationsPage() {
 }
 
 export function ProfilePage() {
-  const { record, isLoading, error } = useRecord(getProfile);
-  const profile = (record?.profile as PlatformRecord | undefined) ?? {};
-  const [fullName, setFullName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [jobTitle, setJobTitle] = useState("");
-  const [timezone, setTimezone] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    setFullName(String(profile.full_name ?? ""));
-    setPhone(String(profile.phone ?? ""));
-    setJobTitle(String(profile.job_title ?? ""));
-    setTimezone(String(profile.timezone ?? ""));
-  }, [record]);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    await updateProfile({ full_name: fullName, phone, job_title: jobTitle, timezone });
-    setMessage("Profile updated.");
-  }
-
   return (
-    <PlatformShell title="Profile" eyebrow="Account">
-      <Card className="max-w-2xl">
-        {isLoading ? <LoadingState label="Loading profile" /> : null}
-        {error ? <ErrorMessage message={error} /> : null}
-        <form className="space-y-4" onSubmit={submit}>
-          <Input label="Full name" value={fullName} onChange={setFullName} />
-          <Input label="Phone" value={phone} onChange={setPhone} />
-          <Input label="Job title" value={jobTitle} onChange={setJobTitle} />
-          <Input label="Timezone" value={timezone} onChange={setTimezone} />
-          <Button className="rounded-xl">Save profile</Button>
-          {message ? <p className="text-sm font-medium text-emerald-700">{message}</p> : null}
-        </form>
-      </Card>
-    </PlatformShell>
+    <SettingsShell title="Account">
+      <AccountProfileForm />
+    </SettingsShell>
   );
 }
 
 export function SettingsPage({ scope = "account" }: { scope?: "account" | "organization" | "admin" }) {
-  const [emailUpdates, setEmailUpdates] = useState("enabled");
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    const loader = scope === "organization" ? getOrganizationSettings : getAccountSettings;
-    loader()
-      .then((settings) => {
-        if (mounted) setEmailUpdates(String(settings.email_updates ?? "enabled"));
-      })
-      .catch((nextError) => {
-        if (mounted) setError(nextError instanceof Error ? nextError.message : "Settings could not be loaded.");
-      })
-      .finally(() => {
-        if (mounted) setIsLoading(false);
-      });
-    return () => { mounted = false; };
-  }, [scope]);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setIsSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      if (scope === "organization") {
-        await updateOrganizationSettings({ email_updates: emailUpdates });
-      } else {
-        await updateAccountSettings({ email_updates: emailUpdates });
-      }
-      setMessage("Settings saved.");
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Settings could not be saved.");
-    } finally {
-      setIsSaving(false);
-    }
+  if (scope === "organization") {
+    return (
+      <SettingsShell title="Company">
+        <CompanySettingsForm />
+      </SettingsShell>
+    );
   }
-
   return (
-    <PlatformShell title="Settings" eyebrow={scope === "admin" ? "Administration" : scope === "organization" ? "Organization" : "Account"}>
-      <Card className="max-w-2xl">
-        {isLoading ? <LoadingState label="Loading settings" /> : null}
-        {error ? <div className="mb-4"><ErrorMessage message={error} /></div> : null}
-        {!isLoading ? (
-          <form className="space-y-4" onSubmit={submit}>
-            <Select label="Email notifications" value={emailUpdates} onChange={setEmailUpdates} options={["enabled", "disabled"]} />
-            <Button className="rounded-xl" disabled={isSaving}>{isSaving ? "Saving" : "Save settings"}</Button>
-            {message ? <p className="text-sm font-medium text-emerald-700">{message}</p> : null}
-          </form>
-        ) : null}
-      </Card>
-    </PlatformShell>
+    <SettingsShell title="Account">
+      <AccountProfileForm />
+    </SettingsShell>
   );
 }
 
 
 export function AccountSecurityPage() {
   return (
-    <PlatformShell title="Security" eyebrow="Account">
-      <Card className="max-w-2xl">
-        <h2 className="text-xl font-semibold text-slate-950">Password and access</h2>
-        <p className="mt-3 text-sm leading-6 text-slate-500">Password reset is available from the login screen. Two-factor authentication can be connected in the next security phase.</p>
-      </Card>
-    </PlatformShell>
+    <SettingsShell title="Security">
+      <AccountSecurityCard />
+    </SettingsShell>
   );
 }
 

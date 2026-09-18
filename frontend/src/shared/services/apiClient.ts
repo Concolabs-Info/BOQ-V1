@@ -1,16 +1,26 @@
+import { bearerHeader } from "./bearerHeader";
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-const AUTH_TOKEN_KEY = "construction_plan_extractor_token";
 const CACHE_PREFIX = "cpe_cache:";
+
+export type ApiErrorDetails = {
+  code?: string;
+  message?: string;
+  field?: string;
+  existing_company?: { id: string; name: string; domain?: string | null };
+};
 
 export class ApiRequestError extends Error {
   status: number;
   rawMessage?: string;
+  details?: ApiErrorDetails;
 
-  constructor(status: number, message: string, rawMessage?: string) {
+  constructor(status: number, message: string, rawMessage?: string, details?: ApiErrorDetails) {
     super(message);
     this.name = "ApiRequestError";
     this.status = status;
     this.rawMessage = rawMessage;
+    this.details = details;
   }
 }
 
@@ -19,24 +29,16 @@ export function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
 
-export function authHeader(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  const token = window.localStorage.getItem(AUTH_TOKEN_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
+type SessionTokenGetter = () => Promise<string | null>;
+let sessionTokenGetter: SessionTokenGetter | null = null;
+
+export function setSessionTokenGetter(getter: SessionTokenGetter | null): void {
+  sessionTokenGetter = getter;
 }
 
-function isLocalBrowser(): boolean {
-  if (typeof window === "undefined") return false;
-  return ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(window.location.hostname);
-}
-
-export function localDevHeader(): Record<string, string> {
-  return isLocalBrowser() ? { "X-Local-Dev-Bypass": "1" } : {};
-}
-
-
-export function apiRequestHeaders(): Record<string, string> {
-  return { ...localDevHeader(), ...authHeader() };
+export async function apiRequestHeaders(): Promise<Record<string, string>> {
+  const token = sessionTokenGetter ? await sessionTokenGetter() : null;
+  return bearerHeader(token);
 }
 
 function canUseStorage(): boolean {
@@ -61,6 +63,20 @@ export function setCachedJson<T>(path: string, value: T): void {
   if (!canUseStorage()) return;
   try {
     window.sessionStorage.setItem(cacheKey(path), JSON.stringify(value));
+  } catch {
+    // cache is only used to keep the UI instant
+  }
+}
+
+export function clearAllCachedJson(): void {
+  if (!canUseStorage()) return;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < window.sessionStorage.length; i += 1) {
+      const key = window.sessionStorage.key(i);
+      if (key && key.startsWith(CACHE_PREFIX)) keys.push(key);
+    }
+    keys.forEach((key) => window.sessionStorage.removeItem(key));
   } catch {
     // cache is only used to keep the UI instant
   }
@@ -102,15 +118,19 @@ export function userFacingApiError(status: number, rawMessage: string): string {
   return rawMessage || "This action could not be completed.";
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+async function readErrorPayload(response: Response): Promise<{ message: string; details?: ApiErrorDetails }> {
   try {
     const payload = await response.json();
-    if (typeof payload?.detail === "string") return payload.detail;
-    if (typeof payload?.message === "string") return payload.message;
+    if (typeof payload?.detail === "string") return { message: payload.detail };
+    if (payload?.detail && typeof payload.detail === "object" && !Array.isArray(payload.detail)) {
+      const detail = payload.detail as ApiErrorDetails;
+      return { message: detail.message || response.statusText || "Request failed.", details: detail };
+    }
+    if (typeof payload?.message === "string") return { message: payload.message };
   } catch {
     // use status text below
   }
-  return response.statusText || "Request failed.";
+  return { message: response.statusText || "Request failed." };
 }
 
 function downloadFileName(response: Response, fallbackFileName: string): string {
@@ -137,13 +157,13 @@ export async function downloadApiFile(path: string, fallbackFileName: string): P
   try {
     const response = await fetch(apiUrl(path), {
       method: "GET",
-      headers: apiRequestHeaders(),
+      headers: await apiRequestHeaders(),
       cache: "no-store",
     });
 
     if (!response.ok) {
-      const rawMessage = await readErrorMessage(response);
-      throw new ApiRequestError(response.status, userFacingApiError(response.status, rawMessage), rawMessage);
+      const { message: rawMessage, details } = await readErrorPayload(response);
+      throw new ApiRequestError(response.status, userFacingApiError(response.status, rawMessage), rawMessage, details);
     }
 
     const blob = await response.blob();
@@ -173,30 +193,56 @@ async function readResponse<T>(response: Response): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-export async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
-  const useCache = requestCanUseCache(path, options);
+type JsonRequestOptions = RequestInit & { skipCache?: boolean };
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchOnce<T>(path: string, fetchOptions: RequestInit): Promise<{ ok: true; data: T } | { ok: false; status: number; rawMessage: string; details?: ApiErrorDetails }> {
+  const response = await fetch(apiUrl(path), {
+    ...fetchOptions,
+    headers: {
+      ...(fetchOptions.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+      ...(await apiRequestHeaders()),
+      ...(fetchOptions.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const { message: rawMessage, details } = await readErrorPayload(response);
+    return { ok: false, status: response.status, rawMessage, details };
+  }
+  return { ok: true, data: await readResponse<T>(response) };
+}
+
+export async function requestJson<T>(path: string, options?: JsonRequestOptions): Promise<T> {
+  const skipCache = options?.skipCache === true;
+  const fetchOptions: RequestInit = { ...options };
+  delete (fetchOptions as JsonRequestOptions).skipCache;
+  const useCache = !skipCache && requestCanUseCache(path, fetchOptions);
 
   try {
-    const response = await fetch(apiUrl(path), {
-      ...options,
-      headers: {
-        ...(options?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-        ...localDevHeader(),
-        ...authHeader(),
-        ...(options?.headers || {}),
-      },
-    });
-
-    if (!response.ok) {
-      const rawMessage = await readErrorMessage(response);
-      const cached = useCache ? getCachedJson<T>(path) : null;
-      if (cached) return cached;
-      throw new ApiRequestError(response.status, userFacingApiError(response.status, rawMessage), rawMessage);
+    let result = await fetchOnce<T>(path, fetchOptions);
+    // A 401 right after signing in can be a real "your session is gone", or
+    // it can be this request racing ahead of Clerk finishing its bootstrap
+    // on a fresh page load (setActive() is immediately followed by a full
+    // reload elsewhere in the app, which throws away the in-memory Clerk
+    // client and forces it to re-hydrate from scratch). One short retry
+    // tells the two apart without making a genuinely signed-out user wait.
+    if (!result.ok && result.status === 401) {
+      await delay(400);
+      result = await fetchOnce<T>(path, fetchOptions);
     }
 
-    const data = await readResponse<T>(response);
-    if (useCache) setCachedJson(path, data);
-    return data;
+    if (!result.ok) {
+      const cached = useCache ? getCachedJson<T>(path) : null;
+      if (cached) return cached;
+      throw new ApiRequestError(result.status, userFacingApiError(result.status, result.rawMessage), result.rawMessage, result.details);
+    }
+
+    if (useCache) setCachedJson(path, result.data);
+    return result.data;
   } catch (error) {
     const cached = useCache ? getCachedJson<T>(path) : null;
     if (cached) return cached;

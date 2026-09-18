@@ -1,14 +1,16 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createProject } from "@/features/projects/services/projectService";
 import { Button } from "@/shared/components/Button";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { appRoutes } from "@/shared/constants/appRoutes";
+import { useAccess } from "@/features/platform/hooks/useAccess";
 
 export function ProjectCreateForm() {
   const router = useRouter();
+  const { can, ready } = useAccess();
   const [name, setName] = useState("");
   const [projectNumber, setProjectNumber] = useState("");
   const [clientName, setClientName] = useState("");
@@ -16,6 +18,10 @@ export function ProjectCreateForm() {
   const [description, setDescription] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (ready && !can("pipeline:upload")) router.replace(appRoutes.projects);
+  }, [can, ready, router]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

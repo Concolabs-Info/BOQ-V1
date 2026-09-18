@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import type { Point } from "@/features/drawing/types";
+import { useTakeoffGeometryAllowed } from "@/features/quanto/takeoffGeometryAccess";
 
 export function RoomEdgeEditor({
   points,
@@ -19,6 +20,7 @@ export function RoomEdgeEditor({
   onMove: (index: number, delta: Point) => void;
 }) {
   const origins = useRef<Record<number, Point>>({});
+  const geometryAllowed = useTakeoffGeometryAllowed();
   return (
     <g>
       {points.map((start, index) => {
@@ -33,11 +35,11 @@ export function RoomEdgeEditor({
             stroke={selectedIndex === index ? "#0f172a" : "transparent"}
             strokeWidth={selectedIndex === index ? 3 : 14}
             vectorEffect="non-scaling-stroke"
-            className={mode === "add" ? "cursor-crosshair" : mode === "move" ? "cursor-move" : "cursor-pointer"}
+            className={!geometryAllowed ? "cursor-not-allowed" : mode === "add" ? "cursor-crosshair" : mode === "move" ? "cursor-move" : "cursor-pointer"}
             onClick={(event) => {
               event.stopPropagation();
               onSelect(index);
-              if (mode !== "add") return;
+              if (!geometryAllowed || mode !== "add") return;
               const svg = event.currentTarget.ownerSVGElement;
               const matrix = svg?.getScreenCTM();
               if (!matrix) return;
@@ -45,7 +47,7 @@ export function RoomEdgeEditor({
               onAddPoint(index, point);
             }}
             onPointerDown={(event) => {
-              if (mode !== "move") return;
+              if (!geometryAllowed || mode !== "move") return;
               event.stopPropagation();
               onSelect(index);
               const svg = event.currentTarget.ownerSVGElement;

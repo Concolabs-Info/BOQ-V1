@@ -2,12 +2,13 @@ import { apiRequestHeaders, apiUrl } from "@/shared/services/apiClient";
 import type { BeamEditorState, BeamStateResponse } from "./types";
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
+  const authHeaders = await apiRequestHeaders();
   const response = await fetch(apiUrl(path), {
     ...init,
     cache: "no-store",
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...apiRequestHeaders(),
+      ...authHeaders,
       ...(init?.headers || {}),
     },
   });

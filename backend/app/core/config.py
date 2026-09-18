@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     model_retries: int = 2
     model_concurrency: int = 4
 
+    clerk_jwt_key: str | None = None
+    clerk_issuer: str | None = None
+    clerk_secret_key: str | None = None
+    app_origin: str = "http://localhost:3000"
+    resend_api_key: str | None = None
+    resend_from_email: str | None = None
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [v.strip() for v in self.cors_origins.split(",") if v.strip()]
