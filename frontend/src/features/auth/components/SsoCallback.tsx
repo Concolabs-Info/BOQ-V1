@@ -5,9 +5,15 @@ import { AuthenticateWithRedirectCallback } from "@clerk/nextjs";
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { MinimalShell } from "@/features/onboarding/components/MinimalShell";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { oauthCallbackHadError, oauthPaths } from "../oauth";
+
+// If Clerk hasn't redirected us onward by then, either the IdP reported its
+// error through a query param we don't recognize or something else stalled.
+// Rather than spin forever, offer a manual way out.
+const STALL_TIMEOUT_MS = 12_000;
 
 /**
  * Completes Google/Microsoft redirect. Transfers between sign-in and
@@ -19,10 +25,18 @@ export function SsoCallback({ intent }: { intent: "sign-in" | "sign-up" }) {
   const searchParams = useSearchParams();
   const outcome = oauthCallbackHadError(searchParams.toString());
   const backHref = intent === "sign-up" ? "/sign-up" : "/sign-in";
+  const [stalled, setStalled] = useState(false);
 
-  if (outcome) {
+  useEffect(() => {
+    if (outcome) return;
+    const timer = window.setTimeout(() => setStalled(true), STALL_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [outcome]);
+
+  if (outcome || stalled) {
+    const sub = outcome === "cancelled" ? t("cancelled") : outcome === "failed" ? t("failed") : t("timedOut");
     return (
-      <MinimalShell heading={t("couldNotFinish")} sub={outcome === "cancelled" ? t("cancelled") : t("failed")} width="sm">
+      <MinimalShell heading={t("couldNotFinish")} sub={sub} width="sm">
         <p className="text-center text-sm text-muted-foreground">
           <Link href={backHref} className="font-medium text-primary underline-offset-4 hover:underline">
             {t("backToAuth")}

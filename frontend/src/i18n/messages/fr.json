@@ -16,6 +16,7 @@
       "couldNotFinish": "Impossible de terminer la connexion",
       "cancelled": "Cette connexion a été annulée. Vous pouvez réessayer.",
       "failed": "Impossible de vous connecter avec ce compte. Réessayez, ou utilisez l'e-mail.",
+      "timedOut": "Cela prend plus de temps que prévu.",
       "backToAuth": "Réessayer"
     },
     "signIn": {

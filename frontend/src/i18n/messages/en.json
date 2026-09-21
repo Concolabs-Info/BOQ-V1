@@ -16,6 +16,7 @@
       "couldNotFinish": "Couldn't finish that sign-in",
       "cancelled": "That sign-in was cancelled. You can try again.",
       "failed": "We couldn't sign you in with that account. Try again, or use email.",
+      "timedOut": "This is taking longer than expected.",
       "backToAuth": "Try again"
     },
     "signIn": {

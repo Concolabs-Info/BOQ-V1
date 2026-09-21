@@ -16,6 +16,7 @@
       "couldNotFinish": "No se pudo completar el acceso",
       "cancelled": "Cancelaste el acceso. Puedes intentarlo de nuevo.",
       "failed": "No pudimos entrar con esa cuenta. Inténtalo de nuevo, o usa el correo.",
+      "timedOut": "Esto está tardando más de lo esperado.",
       "backToAuth": "Intentar de nuevo"
     },
     "signIn": {
