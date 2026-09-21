@@ -186,57 +186,6 @@ def test_create_project_requires_name():
     assert response.status_code == 422
 
 
-def test_accept_terms_requires_authentication():
-    response = client.post("/api/v1/platform/onboarding/terms", json={"version": "2026-09-17"})
-    assert response.status_code == 401
-
-
-def test_accept_terms_stores_the_version(monkeypatch):
-    _auth()
-    seen = {}
-
-    def fake_accept(user_id, version):
-        seen["user_id"] = user_id
-        seen["version"] = version
-        return version
-
-    monkeypatch.setattr(platform, "accept_terms", fake_accept)
-    response = client.post("/api/v1/platform/onboarding/terms", json={"version": "2026-09-17"})
-    _clear()
-    assert response.status_code == 200
-    assert response.json() == {"ok": True, "terms_version": "2026-09-17"}
-    assert seen == {"user_id": "user_1", "version": "2026-09-17"}
-
-
-def test_accept_terms_requires_version():
-    _auth()
-    response = client.post("/api/v1/platform/onboarding/terms", json={"version": ""})
-    _clear()
-    assert response.status_code == 422
-
-
-def test_accept_terms_rejects_whitespace_version():
-    _auth()
-    response = client.post("/api/v1/platform/onboarding/terms", json={"version": "   "})
-    _clear()
-    assert response.status_code == 422
-
-
-def test_accept_terms_maps_stale_version(monkeypatch):
-    _auth()
-
-    def boom(user_id, version):
-        from app.modules.platform.terms import TermsError
-
-        raise TermsError("invalid", "Accept the current terms to continue.")
-
-    monkeypatch.setattr(platform, "accept_terms", boom)
-    response = client.post("/api/v1/platform/onboarding/terms", json={"version": "1999-01-01"})
-    _clear()
-    assert response.status_code == 400
-    assert response.json()["detail"]["code"] == "invalid"
-
-
 def test_create_project_requires_company(monkeypatch):
     _auth()
 

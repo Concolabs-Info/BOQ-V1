@@ -1,7 +1,7 @@
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ...modules.pre.schemas import ViewportDiscipline, ViewportSubject, ViewportViewKind
 
@@ -196,23 +196,6 @@ class OnboardingCompanyOut(ApiModel):
 class OnboardingProjectOut(ApiModel):
     id: str
     name: str
-
-
-class AcceptTermsIn(ApiModel):
-    version: str = Field(min_length=1, max_length=64)
-
-    @field_validator("version")
-    @classmethod
-    def version_not_blank(cls, value: str) -> str:
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("Accept the current terms to continue.")
-        return cleaned
-
-
-class AcceptTermsOut(ApiModel):
-    ok: bool = True
-    terms_version: str
 
 
 class OnboardingExistingCompany(ApiModel):

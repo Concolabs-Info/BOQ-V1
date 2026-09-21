@@ -13,6 +13,7 @@ from .onboarding_path import (
     resolve_onboarding_path,
     suggested_company_name,
 )
+from .terms import CURRENT_TERMS_VERSION
 
 try:
     from psycopg.errors import UniqueViolation
@@ -226,7 +227,7 @@ def create_company(
     number = (registration_number or "").strip() or None
     if not lock_domain:
         if reg_type not in {"PV", "BR", "NONE"}:
-            raise OnboardingError("invalid", "Choose one.", field="regType")
+            raise OnboardingError("invalid", "Pick one to continue.", field="regType")
         if reg_type in {"PV", "BR"} and not number:
             raise OnboardingError(
                 "invalid",
@@ -263,6 +264,13 @@ def create_company(
                 (user.email,),
             )
             clear_displacement(user.id, conn)
+            # Creating a company is the onboarding action the terms consent
+            # line sits under, so acceptance is recorded here rather than
+            # through a separate accept step.
+            conn.execute(
+                "UPDATE app_user SET terms_accepted_at = now(), terms_version = %s WHERE id = %s",
+                (CURRENT_TERMS_VERSION, user.id),
+            )
     except UniqueViolation as exc:
         text = str(exc).lower()
         if "uq_company_domain" in text or "company_domain" in text:
@@ -304,7 +312,7 @@ def create_first_project(
 
     clean_name = name.strip()
     if not clean_name:
-        raise OnboardingError("invalid", "Project name is required.", field="name")
+        raise OnboardingError("invalid", "Give the project a name to continue.", field="name")
 
     with transaction() as conn:
         project = conn.execute(

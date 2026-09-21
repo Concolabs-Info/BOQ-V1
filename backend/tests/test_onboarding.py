@@ -231,6 +231,8 @@ def test_create_company_inserts_company_and_admin_member(monkeypatch):
     assert any("DELETE FROM former_member" in sql for sql, _params in conn.calls)
     assert any("UPDATE invitation SET status = 'revoked'" in sql for sql, _params in conn.calls)
     assert seen["clerk"] == "inv-1"
+    terms_params = next(params for sql, params in conn.calls if "UPDATE app_user SET terms_accepted_at" in sql)
+    assert terms_params == (onboarding.CURRENT_TERMS_VERSION, "user_1")
 
 
 def test_create_company_none_registration_flags_duplicate_review(monkeypatch):

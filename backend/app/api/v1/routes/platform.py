@@ -46,7 +46,6 @@ from ....modules.platform.onboarding import (
     create_first_project,
     onboarding_status,
 )
-from ....modules.platform.terms import TermsError, accept_terms
 from ..schemas import (
     CompanyOut,
     CompanyPatchIn,
@@ -64,8 +63,6 @@ from ..schemas import (
     MemberOut,
     MemberProjectIn,
     MemberRoleIn,
-    AcceptTermsIn,
-    AcceptTermsOut,
     OnboardingCompanyIn,
     OnboardingCompanyOut,
     OnboardingExistingCompany,
@@ -166,18 +163,6 @@ def get_onboarding_status(
             skip_removed=founder or after_deleted,
         )
     )
-
-
-@router.post("/platform/onboarding/terms", response_model=AcceptTermsOut)
-def post_onboarding_terms(
-    body: AcceptTermsIn,
-    current_user: CurrentUser = Depends(get_current_user),
-) -> AcceptTermsOut:
-    try:
-        version = accept_terms(current_user.id, body.version)
-    except TermsError as exc:
-        raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
-    return AcceptTermsOut(ok=True, terms_version=version)
 
 
 @router.post("/platform/onboarding/company", response_model=OnboardingCompanyOut, status_code=201)
