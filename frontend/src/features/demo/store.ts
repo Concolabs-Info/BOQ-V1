@@ -83,6 +83,45 @@ function stageLiveChange<T>(key: string, title: string, original: T, restore: (v
   edit.begin({ key, title, original: clone(original), draft: null, commit: () => undefined, discard: () => restore(clone(original)) });
   return true;
 }
+type BoqOverrideOriginal = { previous: Partial<BoqRow> | undefined; had: boolean };
+type BoqOverrideOriginals = Record<string, BoqOverrideOriginal>;
+
+function restoreBoqOverrides(originals: BoqOverrideOriginals) {
+  useDemoStore.setState((st) => {
+    const overrides = { ...st.boqOverrides };
+    Object.entries(originals).forEach(([id, original]) => {
+      if (original.had && original.previous) overrides[id] = original.previous;
+      else delete overrides[id];
+    });
+    return { boqOverrides: overrides };
+  });
+}
+
+function stageBoqOverrideChange(id: string, original: BoqOverrideOriginal): boolean {
+  const edit = useEditSessionStore.getState();
+  if (edit.saving) return false;
+  if (edit.key === "boq:items") {
+    const originals = edit.original as BoqOverrideOriginals | null;
+    if (originals && !Object.prototype.hasOwnProperty.call(originals, id)) {
+      originals[id] = clone(original);
+    }
+    return true;
+  }
+  if (edit.key) {
+    edit.requestAction(() => undefined, "edit BOQ row changes");
+    return false;
+  }
+  const originals: BoqOverrideOriginals = { [id]: clone(original) };
+  edit.begin({
+    key: "boq:items",
+    title: "BOQ row changes",
+    original: originals,
+    draft: null,
+    commit: () => undefined,
+    discard: () => restoreBoqOverrides(originals),
+  });
+  return true;
+}
 const hasBoqField = (original: object, patch: object, ignored: string[] = ["status", "color"]) =>
   Object.keys(patch).some((key) => !ignored.includes(key) && JSON.stringify((original as Record<string, unknown>)[key]) !== JSON.stringify((patch as Record<string, unknown>)[key]));
 type GeometrySnapshot = {
@@ -625,7 +664,7 @@ export const useDemoStore = create<DemoState>()(
       updateBoqOverride: (id, patch) => {
         const previous = get().boqOverrides[id];
         const had = Object.prototype.hasOwnProperty.call(get().boqOverrides, id);
-        if (!stageLiveChange(`boq:item:${id}`, `BOQ item ${id}`, { previous, had }, (original) => set((st) => { const overrides = { ...st.boqOverrides }; original.had ? overrides[id] = original.previous : delete overrides[id]; return { boqOverrides: overrides }; }))) return;
+        if (!stageBoqOverrideChange(id, { previous, had })) return;
         set((st) => ({
           boqOverrides: {
             ...st.boqOverrides,

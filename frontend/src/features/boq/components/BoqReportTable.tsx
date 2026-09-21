@@ -6,18 +6,20 @@ function quantityLabel(row: BoqRow): string {
   return row.quantity.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+function EmptyValue({ children }: { children: string }) {
+  return <span className="font-medium text-slate-400">{children}</span>;
+}
+
 export function BoqReportTable({
   rows,
-  selectedRowId,
   showRates,
   showAmounts,
-  onSelect,
+  onPickRate,
 }: {
   rows: BoqRow[];
-  selectedRowId: string | null;
   showRates: boolean;
   showAmounts: boolean;
-  onSelect: (row: BoqRow) => void;
+  onPickRate: (row: BoqRow) => void;
 }) {
   const groups=rows.reduce<Array<{key:string;bill:string;section:string;rows:BoqRow[]}>>((result,row)=>{const bill=`Bill ${row.bill_no||"09"} — ${row.bill_name||"Other items"}`;const section=`${row.subcategory_code||"General"} — ${row.subcategory_name||row.section||"General"}`;const key=`${bill}|${section}`;const current=result[result.length-1];if(current?.key===key)current.rows.push(row);else result.push({key,bill,section,rows:[row]});return result},[]);
   return (
@@ -40,10 +42,9 @@ export function BoqReportTable({
           {group.rows.map((row) => (
             <tr
               key={row.id}
-              className={`cursor-pointer border-t border-slate-200 align-top transition hover:bg-blue-50/40 ${selectedRowId === row.id ? "bg-blue-50" : ""} ${row.excluded ? "opacity-50" : ""}`}
-              onClick={() => onSelect(row)}
+              className={`border-t border-slate-200 align-top ${row.excluded ? "opacity-50" : ""}`}
             >
-              <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">{row.boq_item_number || row.subcategory_code || "—"}</td>
+              <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">{row.boq_item_number || row.subcategory_code || <EmptyValue>No item</EmptyValue>}</td>
               <td className="min-w-[440px] px-4 py-3">
                 <p className="leading-6 text-slate-800">{row.description}</p>
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
@@ -58,8 +59,15 @@ export function BoqReportTable({
               </td>
               <td className="px-4 py-3">{row.unit}</td>
               <td className="px-4 py-3 text-right font-semibold text-slate-900">{quantityLabel(row)}</td>
-              {showRates ? <td className="px-4 py-3 text-right">{row.rate == null ? "—" : row.rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td> : null}
-              {showAmounts ? <td className="px-4 py-3 text-right font-semibold">{row.amount == null ? "—" : row.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td> : null}
+              {showRates ? (
+                <td className="px-4 py-3 text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <span>{row.rate == null ? <EmptyValue>No rate</EmptyValue> : row.rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-sm font-bold text-blue-700 hover:bg-blue-50" onClick={() => onPickRate(row)} aria-label="Select rate">+</button>
+                  </div>
+                </td>
+              ) : null}
+              {showAmounts ? <td className="px-4 py-3 text-right font-semibold">{row.amount == null ? <EmptyValue>Not priced</EmptyValue> : row.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td> : null}
             </tr>
           ))}
           <tr className="border-t border-slate-200 bg-slate-50"><td></td><td className="px-4 py-2 text-xs font-semibold text-slate-600">Section subtotal</td><td></td><td></td>{showRates?<td></td>:null}{showAmounts?<td className="px-4 py-2 text-right text-xs font-semibold text-slate-800">{group.rows.reduce((sum,row)=>sum+Number(row.amount||0),0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>:null}</tr>
