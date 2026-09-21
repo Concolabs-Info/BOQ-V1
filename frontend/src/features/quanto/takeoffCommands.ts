@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import { isTakeoffViewCommand } from "@/features/settings/access";
+import { canMutateTakeoffGeometry, denyTakeoffGeometryEdit } from "./takeoffGeometryAccess";
 
 export const TAKEOFF_COMMAND_EVENT = "quanto:takeoff-command";
 export const TAKEOFF_VIEW_EVENT = "quanto:takeoff-view";
@@ -38,6 +40,10 @@ export function commandId(tab: string, group: string, label: string) {
 }
 
 export function dispatchTakeoffCommand(command: TakeoffCommand) {
+  if (!canMutateTakeoffGeometry() && !isTakeoffViewCommand(command.tab, command.label)) {
+    denyTakeoffGeometryEdit();
+    return;
+  }
   window.dispatchEvent(
     new CustomEvent<TakeoffCommand>(TAKEOFF_COMMAND_EVENT, { detail: command }),
   );

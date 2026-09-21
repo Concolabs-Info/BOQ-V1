@@ -1,0 +1,158 @@
+"""Clerk Backend API helpers. Authentication only — no Organizations calls."""
+import re
+from dataclasses import dataclass
+from typing import Any
+
+import httpx
+
+from .config import get_settings
+
+# Clerk resource ids are always "<prefix>_<base62>", e.g. "user_2abc123",
+# "inv_2xyz789". Anything else can't be a real Clerk id, so reject it before
+# it becomes part of a request URL instead of trusting it verbatim.
+_CLERK_ID_RE = re.compile(r"^[a-z]+_[A-Za-z0-9]+$")
+
+
+class ClerkApiError(Exception):
+    pass
+
+
+def _require_clerk_id(value: str, *, what: str) -> str:
+    if not _CLERK_ID_RE.match(value):
+        raise ClerkApiError(f"Invalid {what}")
+    return value
+
+
+@dataclass(frozen=True)
+class ClerkProfile:
+    email: str
+    full_name: str | None
+
+
+@dataclass(frozen=True)
+class ClerkInvitation:
+    id: str
+    email: str
+
+
+def _secret_key() -> str:
+    settings = get_settings()
+    if not settings.clerk_secret_key:
+        raise ClerkApiError("CLERK_SECRET_KEY is not configured")
+    return settings.clerk_secret_key
+
+
+def _error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+        errors = payload.get("errors") if isinstance(payload, dict) else None
+        if isinstance(errors, list) and errors:
+            first = errors[0] if isinstance(errors[0], dict) else {}
+            return str(first.get("long_message") or first.get("message") or f"Clerk API returned {response.status_code}")
+    except Exception:
+        pass
+    return f"Clerk API returned {response.status_code}"
+
+
+def fetch_clerk_user(user_id: str) -> ClerkProfile:
+    """One-time lookup used the first time get_current_user() sees a Clerk user id."""
+    user_id = _require_clerk_id(user_id, what="Clerk user id")
+    response = httpx.get(
+        f"https://api.clerk.com/v1/users/{user_id}",
+        headers={"Authorization": f"Bearer {_secret_key()}"},
+        timeout=5.0,
+    )
+    if response.status_code != 200:
+        raise ClerkApiError(_error_message(response))
+
+    data = response.json()
+    primary_id = data.get("primary_email_address_id")
+    email = next(
+        (e["email_address"] for e in data.get("email_addresses", []) if e.get("id") == primary_id),
+        None,
+    )
+    if not email:
+        raise ClerkApiError(f"Clerk user {user_id} has no primary email address")
+
+    full_name = " ".join(filter(None, [data.get("first_name"), data.get("last_name")])) or None
+    return ClerkProfile(email=email, full_name=full_name)
+
+
+def delete_user(user_id: str) -> None:
+    """Delete a Clerk user. 404 means the account is already gone."""
+    user_id = _require_clerk_id(user_id, what="Clerk user id")
+    response = httpx.delete(
+        f"https://api.clerk.com/v1/users/{user_id}",
+        headers={"Authorization": f"Bearer {_secret_key()}"},
+        timeout=10.0,
+    )
+    if response.status_code in {200, 204, 404}:
+        return
+    raise ClerkApiError(_error_message(response))
+
+
+def create_invitation(
+    email: str,
+    *,
+    redirect_url: str,
+    public_metadata: dict[str, Any] | None = None,
+    expires_in_days: int = 14,
+) -> ClerkInvitation:
+    """Application invitation. Clerk emails the user. Not an organization invite."""
+    response = httpx.post(
+        "https://api.clerk.com/v1/invitations",
+        headers={
+            "Authorization": f"Bearer {_secret_key()}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "email_address": email,
+            "redirect_url": redirect_url,
+            "notify": True,
+            "ignore_existing": True,
+            "expires_in_days": expires_in_days,
+            "public_metadata": public_metadata or {},
+        },
+        timeout=10.0,
+    )
+    if response.status_code not in {200, 201}:
+        raise ClerkApiError(_error_message(response))
+    data = response.json()
+    return ClerkInvitation(id=str(data.get("id") or ""), email=email)
+
+
+def revoke_invitation(invitation_id: str) -> None:
+    """Revoke a Clerk application invitation. 404 means it is already gone."""
+    if not invitation_id:
+        return
+    invitation_id = _require_clerk_id(invitation_id, what="Clerk invitation id")
+    response = httpx.post(
+        f"https://api.clerk.com/v1/invitations/{invitation_id}/revoke",
+        headers={"Authorization": f"Bearer {_secret_key()}"},
+        timeout=10.0,
+    )
+    if response.status_code in {200, 201, 404}:
+        return
+    raise ClerkApiError(_error_message(response))
+
+
+def pending_invitation_id_for_email(email: str) -> str | None:
+    response = httpx.get(
+        "https://api.clerk.com/v1/invitations",
+        headers={"Authorization": f"Bearer {_secret_key()}"},
+        params={"status": "pending", "limit": 100},
+        timeout=10.0,
+    )
+    if response.status_code != 200:
+        raise ClerkApiError(_error_message(response))
+    payload = response.json()
+    rows = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return None
+    needle = email.strip().lower()
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("email_address") or "").strip().lower() == needle:
+            return str(item.get("id") or "") or None
+    return None

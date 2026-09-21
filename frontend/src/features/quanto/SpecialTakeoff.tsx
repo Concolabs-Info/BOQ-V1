@@ -22,6 +22,7 @@ import {
   scaleForViewport,
 } from "@/features/demo/builders";
 import { useSpecialStore } from "./specialStore";
+import { canMutateTakeoffGeometry, useTakeoffGeometryAllowed } from "./takeoffGeometryAccess";
 import type { Flight, Pile, PileCap, SpecialElement } from "./specialTypes";
 import type { BBox, Point } from "@/features/demo/types";
 import { appRoutes } from "@/shared/constants/appRoutes";
@@ -129,6 +130,12 @@ function SpecialDimension({
     [drawAction,setDrawAction]=useState<"create"|"subtract"|"cutout">("create"),
     [selectionBox,setSelectionBox]=useState<{start:Point;current:Point}|null>(null);
   const clipboard = useRef<Array<Flight | Pile | PileCap>>([]);
+  const geometryAllowed = useTakeoffGeometryAllowed();
+  useEffect(() => {
+    if (geometryAllowed) return;
+    setMode((current) => (current === "draw" ? "select" : current));
+    setDraft([]);
+  }, [geometryAllowed]);
   const visibleFlights = st.flights.filter((x) => x.viewportId === viewport.id),
     visiblePiles = st.piles.filter((x) => x.viewportId === viewport.id),
     visibleCaps = st.caps.filter((x) => x.viewportId === viewport.id);
@@ -156,6 +163,7 @@ function SpecialDimension({
       return;
     }
     if (mode === "select") { st.select(null); return; }
+    if (!canMutateTakeoffGeometry()) return;
     if (mode !== "draw") return;
     if (element === "foundation" && kind === "pile") {
       if (!st.pileFamilies.length) return;
@@ -1372,7 +1380,7 @@ function MovePolygon({
     <g
       className="cursor-move"
       onPointerDown={(e) => {
-        if (e.button !== 0) return;
+        if (e.button !== 0 || !canMutateTakeoffGeometry()) return;
         const p = svgPoint(e as never);
         if (p) {
           e.currentTarget.setPointerCapture(e.pointerId);
@@ -1435,7 +1443,7 @@ function MoveBox({
     <g
       className="cursor-move"
       onPointerDown={(e) => {
-        if (e.button !== 0) return;
+        if (e.button !== 0 || !canMutateTakeoffGeometry()) return;
         const p = svgPoint(e as never);
         if (p) {
           e.currentTarget.setPointerCapture(e.pointerId);
@@ -1488,7 +1496,7 @@ function Vertex({ p, onMove }: { p: Point; onMove: (p: Point) => void }) {
       vectorEffect="non-scaling-stroke"
       className="cursor-crosshair"
       onPointerDown={(e) => {
-        if (e.button !== 0) return;
+        if (e.button !== 0 || !canMutateTakeoffGeometry()) return;
         e.stopPropagation();
         e.currentTarget.setPointerCapture(e.pointerId);
       }}

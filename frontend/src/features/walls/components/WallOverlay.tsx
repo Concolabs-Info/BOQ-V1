@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { Point } from "@/features/drawing/types";
+import { canMutateTakeoffGeometry } from "@/features/quanto/takeoffGeometryAccess";
 import type { Centerline, Wall } from "../types";
 
 type DragTarget = "line" | "start" | "end";
@@ -78,7 +79,7 @@ export function WallOverlay({
   function beginDrag(target: DragTarget, event: React.PointerEvent<SVGElement>) {
     event.stopPropagation();
     onSelect();
-    if (!edit) return;
+    if (!edit || !canMutateTakeoffGeometry()) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {

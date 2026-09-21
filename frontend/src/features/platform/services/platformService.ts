@@ -1,4 +1,4 @@
-import { getCachedJson, requestJson } from "@/shared/services/apiClient";
+import { getCachedJson, requestJson, setCachedJson } from "@/shared/services/apiClient";
 import type { ProjectListItem } from "@/shared/types/apiTypes";
 
 export type PlatformContext = {
@@ -14,10 +14,15 @@ export type PlatformContext = {
     name: string;
     status: string;
     membership_role?: string;
+    logo_url?: string | null;
   } | null;
-  membership_role?: string;
+  membership_role?: string | null;
+  role_label?: string | null;
+  role_description?: string | null;
   permissions: string[];
   is_super_admin: boolean;
+  terms_accepted?: boolean;
+  terms_version?: string | null;
 };
 
 export type PlatformRecord = Record<string, unknown>;
@@ -40,6 +45,13 @@ export type DashboardSummary = {
   };
 };
 
+export const COMPANY_LOGO_CHANGED = "quanto:company-logo";
+
+export function notifyCompanyLogoChanged(logoUrl: string | null) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<string | null>(COMPANY_LOGO_CHANGED, { detail: logoUrl }));
+}
+
 const CONTEXT_PATH = "/api/v1/platform/me";
 const DASHBOARD_PATH = "/api/v1/platform/dashboard-summary";
 
@@ -47,8 +59,12 @@ export function getCachedPlatformContext(): PlatformContext | null {
   return getCachedJson<PlatformContext>(CONTEXT_PATH);
 }
 
+export function cachePlatformContext(context: PlatformContext) {
+  setCachedJson(CONTEXT_PATH, context);
+}
+
 export function getPlatformContext() {
-  return requestJson<PlatformContext>(CONTEXT_PATH);
+  return requestJson<PlatformContext>(CONTEXT_PATH, { skipCache: true });
 }
 
 export function getCachedDashboardSummary(): DashboardSummary | null {

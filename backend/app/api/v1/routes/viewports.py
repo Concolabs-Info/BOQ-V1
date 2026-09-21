@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from ....database.connection import fetch_one, transaction
+from ....modules.platform.access import ensure_project_company
 from ....modules.pre.access import ensure_project_mutable, project_for_sheet, project_for_viewport
 from ....services.pdf.geometry import norm01_box_to_page_mpt
 from ....services.pdf.media import ensure_viewport_crop
@@ -98,8 +99,9 @@ def patch_viewport(viewport_id: UUID, body: ViewportPatch):
 
 
 @router.post("/viewports", status_code=201)
-def create_viewport(body: ViewportCreate):
+def create_viewport(body: ViewportCreate, request: Request):
     pid = project_for_sheet(body.sheet_id)
+    ensure_project_company(request, pid)
     if pid:
         try:
             ensure_project_mutable(pid)

@@ -6,6 +6,7 @@ import { PlatformShell } from "@/features/platform/components/PlatformShell";
 import { getCachedDashboardSummary, getDashboardSummary, type DashboardSummary } from "@/features/platform/services/platformService";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { appRoutes } from "@/shared/constants/appRoutes";
+import { workspaceHome, hasPermission } from "@/features/settings/access";
 
 export function DashboardPage() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -22,6 +23,8 @@ export function DashboardPage() {
     return () => { active = false; };
   }, []);
 
+  const canUpload = summary == null || hasPermission(summary.context.permissions, "pipeline:upload");
+
   return (
     <PlatformShell title="Dashboard" eyebrow="Workspace" activeNavHref={appRoutes.dashboard}>
       {error ? <div className="mb-5"><ErrorMessage message={error} /></div> : null}
@@ -29,9 +32,9 @@ export function DashboardPage() {
         <div className="space-y-7">
           <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
             <div className="grid gap-5 md:grid-cols-3">
-              <DashboardCard title="Automated BOQ" href={appRoutes.boqGeneration} action="Start" icon={BoqIcon} />
+              {canUpload ? <DashboardCard title="Automated BOQ" href={appRoutes.boqGeneration} action="Start" icon={BoqIcon} /> : null}
               <DashboardCard title="Project Library" href={appRoutes.projects} action="Open" icon={ProjectIcon} />
-              <DashboardCard title="PDF Generation" href={appRoutes.pdfGeneration} action="Upload PDF" icon={PdfIcon} />
+              {canUpload ? <DashboardCard title="PDF Generation" href={appRoutes.pdfGeneration} action="Upload PDF" icon={PdfIcon} /> : null}
             </div>
           </section>
 
@@ -42,7 +45,7 @@ export function DashboardPage() {
             </div>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               {summary?.recent_projects.length ? summary.recent_projects.slice(0, 4).map((project) => (
-                <Link key={project.id} href={appRoutes.workspace(project.id)} className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-200 hover:shadow-sm">
+                <Link key={project.id} href={workspaceHome(project.id, summary.context.permissions)} className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-200 hover:shadow-sm">
                   <p className="truncate font-semibold text-slate-950">{project.name}</p>
                   <p className="mt-2 truncate text-sm text-slate-500">{[project.project_number, project.client_name].filter(Boolean).join(" · ") || "Construction project"}</p>
                   <span className="mt-4 inline-flex text-xs font-semibold text-blue-700">Open project</span>
@@ -50,7 +53,7 @@ export function DashboardPage() {
               )) : (
                 <div className="col-span-full rounded-2xl border border-dashed border-slate-200 p-8 text-center">
                   <p className="text-sm text-slate-500">No projects are available yet.</p>
-                  <Link href={appRoutes.pdfGeneration} className="mt-3 inline-flex text-sm font-semibold text-blue-700">Start PDF Generation</Link>
+                  {canUpload ? <Link href={appRoutes.pdfGeneration} className="mt-3 inline-flex text-sm font-semibold text-blue-700">Start PDF Generation</Link> : null}
                 </div>
               )}
             </div>

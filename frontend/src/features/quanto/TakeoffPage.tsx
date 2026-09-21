@@ -26,6 +26,8 @@ import {
 import { friendlyRoomLabel } from "./friendlyLabels";
 import { useDemoStore } from "@/features/demo/store";
 import { appRoutes } from "@/shared/constants/appRoutes";
+import { actionReason } from "@/features/settings/access";
+import { useTakeoffGeometryAllowed } from "./takeoffGeometryAccess";
 import type {
   DemoStatus,
   Point,
@@ -401,6 +403,7 @@ function DimensionView({
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [addElementOpen, setAddElementOpen] = useState(false);
   const [pendingAdd, setPendingAdd] = useState<ElementFormValues | null>(null);
+  const geometryAllowed = useTakeoffGeometryAllowed();
   const altPressed = useRef(false);
   const additiveSelectionPressed = useRef(false);
   const canvasScale = useRef(1);
@@ -409,6 +412,13 @@ function DimensionView({
     setSnapState(window.localStorage.getItem("quanto.snap.enabled") === "true");
     setOrthoState(window.localStorage.getItem("quanto.ortho.enabled") === "true");
   }, []);
+  useEffect(() => {
+    if (geometryAllowed) return;
+    setMode((current) => (current === "draw" ? "select" : current));
+    setPendingAdd(null);
+    setDraft([]);
+    setDrawHover(null);
+  }, [geometryAllowed]);
   useEffect(() => {
     if (!pendingAdd) return;
     const cancel = (event: KeyboardEvent) => {
@@ -597,6 +607,7 @@ function DimensionView({
       return;
     }
     if (mode === "draw") {
+      if (!geometryAllowed) return;
       if (
         shape === "polyline" &&
         draft.length >= 3 &&
@@ -2123,6 +2134,8 @@ function DimensionToolbar({
   setShowDrawing: (v: boolean) => void;
 }) {
   const fams = familiesFor(element);
+  const geometryAllowed = useTakeoffGeometryAllowed();
+  const editReason = actionReason("takeoff:edit");
   const [openMenu, setOpenMenu] = useState<"measure" | "layers" | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const drawsAreaPolygon = ["floor", "ceiling", "roof"].includes(element);
@@ -2151,8 +2164,10 @@ function DimensionToolbar({
       </button>
       <button
         type="button"
+        disabled={!geometryAllowed}
+        title={!geometryAllowed ? editReason : undefined}
         onClick={onAddElement}
-        className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+        className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
       >
         ＋ Add element
       </button>
@@ -2192,7 +2207,7 @@ function DimensionToolbar({
           ) : null}
         </div>
       ) : null}
-      <button title={mode === "draw" ? "Exit drawing mode" : "Draw on the plan"} onClick={() => setMode(mode === "draw" ? "select" : "draw")} className={mode === "draw" ? activeTool : toolClass}>{mode === "draw" ? "Drawing" : "Draw"}</button>
+      <button disabled={!geometryAllowed} title={!geometryAllowed ? editReason : mode === "draw" ? "Exit drawing mode" : "Draw on the plan"} onClick={() => { if (!geometryAllowed) return; setMode(mode === "draw" ? "select" : "draw"); }} className={`${mode === "draw" ? activeTool : toolClass} disabled:cursor-not-allowed disabled:opacity-40`}>{mode === "draw" ? "Drawing" : "Draw"}</button>
       <button type="button" title="Open all takeoff commands (Ctrl+K)" onClick={onCommand} className={toolClass}>Commands</button>
       {mode === "draw" ? (
         <div className="flex items-center gap-1 rounded-lg border border-blue-100 bg-blue-50 p-1">

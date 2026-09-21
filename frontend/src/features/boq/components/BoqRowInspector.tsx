@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/shared/components/Button";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
+import { actionReason } from "@/features/settings/access";
 import type { BoqRow } from "../types";
 import { BoqDrawer } from "./BoqDrawer";
 import { BoqSourceItems } from "./BoqSourceItems";
@@ -14,6 +15,7 @@ export function BoqRowInspector({
   error,
   showRates,
   showAmounts,
+  canEdit = true,
   onClose,
   onSave,
 }: {
@@ -23,6 +25,7 @@ export function BoqRowInspector({
   error: string | null;
   showRates: boolean;
   showAmounts: boolean;
+  canEdit?: boolean;
   onClose: () => void;
   onSave: (payload: Record<string, unknown>) => Promise<void>;
 }) {
@@ -58,21 +61,21 @@ export function BoqRowInspector({
         <section className="space-y-4">
           <label className="block">
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Description</span>
-            <textarea className="input mt-2 min-h-32 w-full" value={description} onChange={(event) => setDescription(event.target.value)} />
+            <textarea className="input mt-2 min-h-32 w-full" value={description} onChange={(event) => setDescription(event.target.value)} disabled={!canEdit} title={canEdit ? undefined : actionReason("boq:add_item")} />
           </label>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Section" value={section} onChange={setSection} />
-            <Field label="Item code" value={itemCode} onChange={setItemCode} />
+            <Field label="Section" value={section} onChange={setSection} disabled={!canEdit} />
+            <Field label="Item code" value={itemCode} onChange={setItemCode} disabled={!canEdit} />
             <label>
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Quantity</span>
-              <input className="input mt-2 w-full" type="number" min="0" step="0.001" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} disabled={!row.manual} />
+              <input className="input mt-2 w-full" type="number" min="0" step="0.001" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} disabled={!row.manual || !canEdit} />
               {!row.manual ? <span className="mt-1 block text-xs text-slate-400">Measured from canonical source items.</span> : null}
             </label>
-            <Field label="Unit" value={unit} onChange={setUnit} />
+            <Field label="Unit" value={unit} onChange={setUnit} disabled={!canEdit} />
             {showRates ? (
               <label>
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Unit rate (provisional)</span>
-                <input className="input mt-2 w-full" type="number" min="0" step="0.01" value={rate} onChange={(event) => setRate(event.target.value)} />
+                <input className="input mt-2 w-full" type="number" min="0" step="0.01" value={rate} onChange={(event) => setRate(event.target.value)} disabled={!canEdit} />
                 <span className="mt-1 block text-xs text-slate-400">Editable project rate; replace with an approved quotation or schedule rate.</span>
               </label>
             ) : null}
@@ -85,7 +88,7 @@ export function BoqRowInspector({
           ) : null}
           <label className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700">
             <span>Exclude this item from the report</span>
-            <input type="checkbox" checked={excluded} onChange={(event) => setExcluded(event.target.checked)} />
+            <input type="checkbox" checked={excluded} onChange={(event) => setExcluded(event.target.checked)} disabled={!canEdit} />
           </label>
           {row.missing_fields.length ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -103,7 +106,7 @@ export function BoqRowInspector({
       </div>
       <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-200 bg-white px-6 py-4">
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button disabled={saving || !description.trim() || !unit.trim() || quantity < 0} onClick={() => void onSave({
+        <Button disabled={saving || !canEdit || !description.trim() || !unit.trim() || quantity < 0} title={canEdit ? undefined : actionReason("boq:add_item")} onClick={() => void onSave({
           description: description.trim(),
           section: section.trim() || null,
           item_code: itemCode.trim() || null,
@@ -117,6 +120,6 @@ export function BoqRowInspector({
   );
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span><input className="input mt-2 w-full" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+function Field({ label, value, onChange, disabled = false }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean }) {
+  return <label><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span><input className="input mt-2 w-full" value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} /></label>;
 }

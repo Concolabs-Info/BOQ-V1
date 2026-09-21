@@ -21,6 +21,7 @@ import {
   type TakeoffCommand,
   type TakeoffViewState,
 } from "@/features/quanto/takeoffCommands";
+import { useTakeoffGeometryAllowed } from "@/features/quanto/takeoffGeometryAccess";
 
 export type DrawingCanvasTool = "select" | "pan" | "point" | "draw";
 export type DrawingComparisonImage = { id: string; label: string; imageUrl: string };
@@ -88,6 +89,8 @@ export function DrawingCanvas({
   focusRequest,
   comparisonImages = [],
 }: Props) {
+  const geometryAllowed = useTakeoffGeometryAllowed();
+  const activeTool = geometryAllowed || tool === "pan" || tool === "select" ? tool : "select";
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const pointerRef = useRef<PanDrag | null>(null);
@@ -459,7 +462,7 @@ export function DrawingCanvas({
   );
 
   function pointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    const forcePan = tool === "pan" || event.button === 1 || event.button === 2;
+    const forcePan = activeTool === "pan" || event.button === 1 || event.button === 2;
     if (!forcePan) return;
     previousViewRef.current = { zoom: zoomRef.current, pan: { ...panRef.current } };
     event.preventDefault();
@@ -496,13 +499,13 @@ export function DrawingCanvas({
       suppressClickRef.current = false;
       return;
     }
-    if (tool === "pan" || !onCanvasClick) return;
+    if (activeTool === "pan" || !onCanvasClick) return;
     const point = toSourcePoint(event.clientX, event.clientY);
     if (point) onCanvasClick(point, fitScale * zoomRef.current);
   }
 
   function canvasMove(event: ReactPointerEvent<SVGSVGElement>) {
-    if (tool !== "draw") return;
+    if (activeTool !== "draw") return;
     const point = toSourcePoint(event.clientX, event.clientY);
     if (!point) return;
     onCanvasMove?.(point, fitScale * zoomRef.current);
@@ -515,7 +518,7 @@ export function DrawingCanvas({
   }
 
   function canvasPointerDown(event: ReactPointerEvent<SVGSVGElement>) {
-    if (tool !== "draw" || event.button !== 0 || !onCanvasDragStart) return;
+    if (activeTool !== "draw" || event.button !== 0 || !onCanvasDragStart) return;
     const point = toSourcePoint(event.clientX, event.clientY);
     if (!point) return;
     event.preventDefault();
@@ -575,9 +578,9 @@ export function DrawingCanvas({
   }
 
   const cursorClass =
-    tool === "pan"
+    activeTool === "pan"
       ? "cursor-grab active:cursor-grabbing"
-      : tool === "point" || tool === "draw"
+      : activeTool === "point" || activeTool === "draw"
         ? "cursor-crosshair"
         : "cursor-default";
 

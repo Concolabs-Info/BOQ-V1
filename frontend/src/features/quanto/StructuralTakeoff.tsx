@@ -31,6 +31,7 @@ import {
 import type { BBox, DemoStatus, Point } from "@/features/demo/types";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { useStructuralStore } from "./structuralStore";
+import { canMutateTakeoffGeometry } from "./takeoffGeometryAccess";
 import type {
   BeamRun,
   ColumnFamily,
@@ -2017,7 +2018,7 @@ function ColumnBox({
   } | null>(null);
   const b = columnDrawingBox(item, family);
   function down(e: ReactPointerEvent<SVGRectElement>) {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || !canMutateTakeoffGeometry()) return;
     const p = svgPoint(e as any);
     if (!p) return;
     e.stopPropagation();
@@ -2244,7 +2245,7 @@ function BeamLine({
     );
   }
   function moveWhole(e: ReactPointerEvent<SVGLineElement>) {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || !canMutateTakeoffGeometry()) return;
     const p = svgPoint(e as any);
     if (!p) return;
     e.stopPropagation();
@@ -2335,7 +2336,7 @@ function BeamLine({
               pointerEvents="all"
               className="cursor-crosshair"
               onPointerDown={(e) => {
-                if (e.button !== 0) return;
+                if (e.button !== 0 || !canMutateTakeoffGeometry()) return;
                 e.stopPropagation();
                 e.currentTarget.setPointerCapture(e.pointerId);
                 store.captureUndo();
@@ -2489,7 +2490,7 @@ function SlabShape({
         vectorEffect="non-scaling-stroke"
         className="cursor-move"
         onPointerDown={(e) => {
-          if (e.button !== 0) return;
+          if (e.button !== 0 || !canMutateTakeoffGeometry()) return;
           const point = svgPoint(e as any);
           if (!point) return;
           e.stopPropagation();
@@ -2556,7 +2557,7 @@ function SlabShape({
               vectorEffect="non-scaling-stroke"
               className="cursor-crosshair"
               onPointerDown={(e) => {
-                if (e.button !== 0) return;
+                if (e.button !== 0 || !canMutateTakeoffGeometry()) return;
                 e.stopPropagation();
                 e.currentTarget.setPointerCapture(e.pointerId);
                 store.captureUndo();
@@ -2668,6 +2669,7 @@ function SectionSlabOverlays({ viewportId }: { viewportId: string }) {
     item: SlabPlate,
     part: StoredSectionDrag["part"],
   ) {
+    if (!canMutateTakeoffGeometry()) return;
     const point = svgPoint(event as any);
     if (!point || !item.sectionProfile) return;
     event.stopPropagation();
@@ -2910,6 +2912,7 @@ function EditableSlabSection() {
     item: SectionSlab,
     part: SectionSlabDrag["part"],
   ) {
+    if (!canMutateTakeoffGeometry()) return;
     const p = svgPoint(e as any);
     if (!p) return;
     e.stopPropagation();

@@ -1,51 +1,18 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+import { useEffect, type ReactNode } from "react";
 import { appRoutes } from "@/shared/constants/appRoutes";
-import { getAuthToken, isLocalDevelopmentSession, loadCurrentUser } from "../services/authService";
-
-let verifiedToken: string | null = null;
-let verificationPromise: Promise<unknown> | null = null;
-
-function clearStoredSession() {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem("construction_plan_extractor_token");
-  window.localStorage.removeItem("construction_plan_extractor_user");
-}
 
 export function AuthGuard({ children }: { children: ReactNode }) {
+  const { isLoaded, isSignedIn } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (isLocalDevelopmentSession()) return;
+    if (isLoaded && !isSignedIn) router.replace(appRoutes.login);
+  }, [isLoaded, isSignedIn, router]);
 
-    const token = getAuthToken();
-    if (!token) {
-      router.replace(appRoutes.login);
-      return;
-    }
-
-    if (verifiedToken === token) return;
-    if (!verificationPromise) {
-      verificationPromise = loadCurrentUser()
-        .then((user) => {
-          verifiedToken = token;
-          return user;
-        })
-        .finally(() => {
-          verificationPromise = null;
-        });
-    }
-
-    verificationPromise.catch(() => {
-      if (getAuthToken() === token) {
-        verifiedToken = null;
-        clearStoredSession();
-        router.replace(appRoutes.login);
-      }
-    });
-  }, [router]);
-
+  if (!isLoaded || !isSignedIn) return null;
   return <>{children}</>;
 }
