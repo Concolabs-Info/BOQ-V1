@@ -125,8 +125,8 @@ export function CodeField({
               className={cn(
                 "h-12 min-w-0 flex-1 rounded-xl border bg-white text-center text-lg font-medium text-slate-950 outline-none transition",
                 error
-                  ? "border-red-400 focus:border-red-400 focus:ring-4 focus:ring-red-100"
-                  : "border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-100",
+                  ? "border-destructive focus:border-destructive focus:ring-3 focus:ring-destructive/20"
+                  : "border-slate-200 focus:border-ring focus:ring-1 focus:ring-ring/15",
                 disabled && "opacity-50",
               )}
             />

@@ -1,14 +1,21 @@
 "use client";
+import { FieldErrorText } from "@/shared/components/FieldErrorText";
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
+import { motion } from "framer-motion";
+import { Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useClerk } from "@clerk/nextjs";
-import { Button } from "@/shared/components/Button";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
+import { LoadingButton } from "@/components/ui/loading-button";
 import { appRoutes } from "@/shared/constants/appRoutes";
-import { AuthField } from "./AuthField";
-import { AuthShell } from "./AuthShell";
+import { MinimalShell } from "@/features/onboarding/components/MinimalShell";
+import { onboarding3dButton } from "@/features/onboarding/components/onboardingButtonStyle";
 import { CodeField } from "./CodeField";
-import { SecuredByClerk } from "./SecuredByClerk";
+import { TermsConsentLine } from "@/features/onboarding/components/TermsConsentLine";
 import { thrownErrText } from "../clerk-errors";
 import { passwordLengthPlaceholder } from "../password";
 import { hardNavigate } from "../hard-navigate";
@@ -21,18 +28,21 @@ export function SignInForm({
   redirectUrl,
   invitationTicket,
   switchAccount = false,
+  initialEmail,
 }: {
   redirectUrl?: string;
   invitationTicket?: string;
   switchAccount?: boolean;
+  initialEmail?: string;
 }) {
+  const t = useTranslations("auth.signIn");
   const clerk = useClerk();
   const ready = clerk.loaded;
-  const destination = invitationTicket ? appRoutes.onboardingTerms : (redirectUrl ?? appRoutes.projects);
+  const destination = invitationTicket ? appRoutes.onboarding : (redirectUrl ?? appRoutes.projects);
   const needsNoSession = Boolean(invitationTicket) || switchAccount;
 
   const [mode, setMode] = useState<Mode>("password");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail ?? "");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -287,17 +297,17 @@ export function SignInForm({
 
   const alreadyIn = ready && clerk.session && !invitationTicket && !switchAccount;
 
-  let title = invitationTicket ? "Accept your invitation" : "Welcome back to Quanto";
-  let subtitle = invitationTicket
-    ? "Signing you in to join the company."
+  let title = invitationTicket ? t("titleInvite") : t("titleDefault");
+  let subtitle: string | undefined = invitationTicket
+    ? t("subtitleInvite")
     : switchAccount
-      ? "Sign in with a different account."
+      ? t("subtitleSwitch")
       : redirectUrl
-        ? "Sign in to pick up where you left off."
-        : "Sign in to your company workspace.";
+        ? t("subtitleRedirect")
+        : t("subtitleDefault");
 
   if (alreadyIn) {
-    subtitle = "You're already signed in. Taking you to your workspace…";
+    subtitle = undefined;
   } else if (mode === "mfa") {
     if (mfaKind === "totp") {
       title = "Two-step verification";
@@ -323,11 +333,30 @@ export function SignInForm({
   let body: ReactNode;
 
   if (alreadyIn) {
-    body = null;
+    body = (
+      <div className="flex flex-col items-center gap-5">
+        <motion.div
+          initial={{ scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 320, damping: 22 }}
+          className="flex size-20 items-center justify-center rounded-full bg-primary/10 text-primary"
+        >
+          <Loader2 className="size-8 animate-spin" aria-hidden="true" />
+        </motion.div>
+        <motion.p
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15, duration: 0.3 }}
+          className="text-lg font-medium leading-7 text-foreground"
+        >
+          {t("alreadySignedInBody")}
+        </motion.p>
+      </div>
+    );
   } else if (mode === "mfa") {
     body = (
       <div className="flex flex-col gap-5">
-        <form onSubmit={(event) => void submitMfa(event)} className="flex flex-col gap-4">
+        <form onSubmit={(event) => void submitMfa(event)} className="flex flex-col gap-5">
           <CodeField
             id="mfa-code"
             required
@@ -338,20 +367,19 @@ export function SignInForm({
             autoFocus
             disabled={busy}
           />
-          <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
-            {busy ? "Verifying…" : "Verify and sign in"}
-          </Button>
+          <LoadingButton type="submit" pending={busy || !ready} className={`h-11 w-full ${onboarding3dButton}`}>
+            {busy ? t("verifying") : t("verifyButton")}
+          </LoadingButton>
         </form>
-        <button type="button" onClick={backToPassword} className="self-start text-sm font-medium text-blue-700 underline underline-offset-2 hover:no-underline">
-          Back to sign in
+        <button type="button" onClick={backToPassword} className="self-start text-sm font-medium text-primary underline-offset-4 hover:underline">
+          {t("backToSignIn")}
         </button>
-        <SecuredByClerk />
       </div>
     );
   } else if (mode === "email-code") {
     body = (
       <div className="flex flex-col gap-5">
-        <form onSubmit={(event) => void submitEmailCode(event)} className="flex flex-col gap-4">
+        <form onSubmit={(event) => void submitEmailCode(event)} className="flex flex-col gap-5">
           <CodeField
             id="email-code"
             required
@@ -362,45 +390,49 @@ export function SignInForm({
             autoFocus
             disabled={busy}
           />
-          <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
-            {busy ? "Verifying…" : "Verify and sign in"}
-          </Button>
+          <LoadingButton type="submit" pending={busy || !ready} className={`h-11 w-full ${onboarding3dButton}`}>
+            {busy ? t("verifying") : t("verifyButton")}
+          </LoadingButton>
         </form>
-        <button type="button" onClick={backToPassword} className="self-start text-sm font-medium text-blue-700 underline underline-offset-2 hover:no-underline">
-          Back to sign in
+        <button type="button" onClick={backToPassword} className="self-start text-sm font-medium text-primary underline-offset-4 hover:underline">
+          {t("backToSignIn")}
         </button>
-        <SecuredByClerk />
       </div>
     );
   } else if (mode === "reset-request") {
     body = (
       <div className="flex flex-col gap-5">
-        <form onSubmit={(event) => void requestReset(event)} className="flex flex-col gap-4">
-          <AuthField
-            id="email"
-            label="Work email"
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            autoFocus
-          />
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
-            {busy ? "Sending…" : "Send reset code"}
-          </Button>
+        <form onSubmit={(event) => void requestReset(event)} className="flex flex-col gap-5">
+          <FieldGroup>
+            <Field className="!gap-1">
+              <FieldLabel htmlFor="email" required>{t("workEmail")}</FieldLabel>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                required
+                placeholder="Enter your email address..."
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoFocus
+                className="h-10"
+              />
+            </Field>
+          </FieldGroup>
+          <FieldErrorText>{error}</FieldErrorText>
+          <LoadingButton type="submit" pending={busy || !ready} className={`h-11 w-full ${onboarding3dButton}`}>
+            {busy ? t("sendingCode") : t("sendResetCode")}
+          </LoadingButton>
         </form>
-        <button type="button" onClick={backToPassword} className="self-start text-sm font-medium text-blue-700 underline underline-offset-2 hover:no-underline">
-          Back to sign in
+        <button type="button" onClick={backToPassword} className="self-start text-sm font-medium text-primary underline-offset-4 hover:underline">
+          {t("backToSignIn")}
         </button>
-        <SecuredByClerk />
       </div>
     );
   } else if (mode === "reset-code") {
     body = (
       <div className="flex flex-col gap-5">
-        <form onSubmit={(event) => void submitReset(event)} className="flex flex-col gap-4">
+        <form onSubmit={(event) => void submitReset(event)} className="flex flex-col gap-5">
           <CodeField
             id="code"
             label="Reset code"
@@ -410,83 +442,107 @@ export function SignInForm({
             autoFocus
             disabled={busy}
           />
-          <AuthField
-            id="new-password"
-            label="New password"
-            type="password"
-            autoComplete="new-password"
-            placeholder={passwordLengthPlaceholder()}
-            required
-            value={newPassword}
-            onChange={(event) => {
-              setNewPassword(event.target.value);
-              if (error) setError(null);
-            }}
-            error={error ?? undefined}
-          />
-          <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
-            {busy ? "Updating…" : "Set new password"}
-          </Button>
+          <FieldGroup>
+            <Field data-invalid={Boolean(error)} className="!gap-1">
+              <FieldLabel htmlFor="new-password" required>{t("newPassword")}</FieldLabel>
+              <PasswordInput
+                id="new-password"
+                autoComplete="new-password"
+                placeholder={passwordLengthPlaceholder()}
+                required
+                value={newPassword}
+                onChange={(event) => {
+                  setNewPassword(event.target.value);
+                  if (error) setError(null);
+                }}
+                aria-invalid={Boolean(error)}
+                className="h-10"
+              />
+              <FieldErrorText>{error}</FieldErrorText>
+            </Field>
+          </FieldGroup>
+          <LoadingButton type="submit" pending={busy || !ready} className={`h-11 w-full ${onboarding3dButton}`}>
+            {busy ? t("updatingPassword") : t("setNewPassword")}
+          </LoadingButton>
         </form>
-        <SecuredByClerk />
       </div>
     );
   } else {
     body = (
       <div className="flex flex-col gap-5">
-        <form onSubmit={(event) => void submitPassword(event)} className="flex flex-col gap-4">
-          <AuthField
-            id="email"
-            label="Work email"
-            type="email"
-            autoComplete="email"
-            required
-            placeholder="you@company.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            autoFocus
-          />
-          <AuthField
-            id="password"
-            label="Password"
-            type="password"
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            error={error ?? undefined}
-            hint={
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("reset-request");
-                  setError(null);
-                  setNotice(null);
-                }}
-                className="text-sm text-slate-500 hover:text-slate-950"
-              >
-                Forgot password?
-              </button>
-            }
-          />
-          <Button type="submit" pending={busy || !ready} className="h-11 w-full rounded-xl">
-            {busy ? "Signing in…" : "Sign in"}
-          </Button>
+        <form onSubmit={(event) => void submitPassword(event)} className="flex flex-col gap-5">
+          <FieldGroup>
+            <Field className="!gap-1">
+              <FieldLabel htmlFor="email" required>{t("workEmail")}</FieldLabel>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                required
+                placeholder="Enter your email address..."
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoFocus={!initialEmail}
+                className="h-10"
+              />
+            </Field>
+            <Field data-invalid={Boolean(error)} className="!gap-1">
+              <div className="flex items-center justify-between gap-3">
+                <FieldLabel htmlFor="password" required>{t("password")}</FieldLabel>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("reset-request");
+                    setError(null);
+                    setNotice(null);
+                  }}
+                  className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {t("forgotPassword")}
+                </button>
+              </div>
+              <PasswordInput
+                id="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoFocus={Boolean(initialEmail)}
+                aria-invalid={Boolean(error)}
+                className="h-10"
+              />
+              <FieldErrorText>{error}</FieldErrorText>
+            </Field>
+          </FieldGroup>
+          <LoadingButton type="submit" pending={busy || !ready} className={`h-11 w-full ${onboarding3dButton}`}>
+            {busy ? t("signingIn") : t("signInButton")}
+          </LoadingButton>
         </form>
-        <p className="text-sm text-slate-500">
-          New to Quanto?{" "}
-          <Link href="/sign-up" className="font-medium text-blue-700 hover:underline">
-            Create an account
-          </Link>
-        </p>
-        <SecuredByClerk />
+        <TermsConsentLine action={t("consentAction")} />
       </div>
     );
   }
 
+  const footer =
+    !alreadyIn && !invitationTicket && !switchAccount && mode === "password" ? (
+      <>
+        {t("noAccount")}{" "}
+        <Link href="/sign-up" className="font-medium text-primary underline-offset-4 hover:underline">
+          {t("signUpLink")}
+        </Link>
+      </>
+    ) : null;
+
   return (
-    <AuthShell title={title} subtitle={subtitle} from="sign-in">
+    <MinimalShell
+      heading={title}
+      sub={subtitle}
+      footer={footer}
+      width="sm"
+      stepKey={alreadyIn ? "already-in" : mode}
+      card={!alreadyIn}
+    >
       {body}
-    </AuthShell>
+    </MinimalShell>
   );
 }

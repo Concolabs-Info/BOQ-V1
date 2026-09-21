@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { SignInForm } from "@/features/auth/components/SignInForm";
@@ -14,6 +15,7 @@ export default async function SignInPage({
   const ticket = firstParam(params.__clerk_ticket);
   const status = firstParam(params.__clerk_status);
   const wantsSwitch = firstParam(params.switch) === "1";
+  const initialEmail = firstParam(params.email);
 
   if (ticket && status === "sign_up") {
     redirect(`/sign-up?${new URLSearchParams({ __clerk_ticket: ticket, __clerk_status: status })}`);
@@ -25,5 +27,9 @@ export default async function SignInPage({
     redirect(redirectUrl ?? appRoutes.projects);
   }
 
-  return <SignInForm redirectUrl={redirectUrl} invitationTicket={ticket} switchAccount={wantsSwitch} />;
+  return (
+    <Suspense fallback={null}>
+      <SignInForm redirectUrl={redirectUrl} invitationTicket={ticket} switchAccount={wantsSwitch} initialEmail={initialEmail} />
+    </Suspense>
+  );
 }

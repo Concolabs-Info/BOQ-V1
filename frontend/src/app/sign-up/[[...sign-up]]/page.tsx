@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { SignUpForm } from "@/features/auth/components/SignUpForm";
 import { firstParam } from "@/features/auth/url";
@@ -17,5 +18,9 @@ export default async function SignUpPage({
   }
   if (ticket && status === "complete") redirect(appRoutes.projects);
 
-  return <SignUpForm invitationTicket={ticket} />;
+  return (
+    <Suspense fallback={null}>
+      <SignUpForm invitationTicket={ticket} />
+    </Suspense>
+  );
 }
