@@ -19,7 +19,6 @@ export function backLabel(href: string) {
   if (pathname.startsWith("/sign-in") || pathname.startsWith("/login") || pathname.startsWith("/forgot-password")) {
     return "Back to sign in";
   }
-  if (pathname.startsWith("/onboarding/terms")) return "Back to terms";
   if (pathname.startsWith("/onboarding")) return "Back to setup";
   if (pathname.startsWith("/account")) return "Back to account";
   if (pathname.startsWith("/organization")) return "Back to settings";
@@ -49,4 +48,8 @@ export function helpHref(returnTo: string) {
 
 export function termsHref(returnTo: string) {
   return `/legal/terms?from=${encodeURIComponent(returnTo)}`;
+}
+
+export function privacyHref(returnTo: string) {
+  return `/legal/privacy?from=${encodeURIComponent(returnTo)}`;
 }
