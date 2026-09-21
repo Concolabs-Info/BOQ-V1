@@ -6,6 +6,7 @@ import { QueryProvider } from "@/shared/providers/QueryProvider";
 import { ClerkSessionBridge } from "@/features/auth/components/ClerkSessionBridge";
 import { RememberReturnPath } from "@/features/legal/RememberReturnPath";
 import { CompanyGate } from "@/features/onboarding/components/CompanyGate";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
 import { Suspense } from "react";
 
 export const metadata: Metadata = {
@@ -26,10 +27,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           <ClerkSessionBridge>
             <QueryProvider>
-              <Suspense fallback={null}>
-                <RememberReturnPath />
-              </Suspense>
-              <CompanyGate>{children}</CompanyGate>
+              <LocaleProvider>
+                <Suspense fallback={null}>
+                  <RememberReturnPath />
+                </Suspense>
+                <CompanyGate>{children}</CompanyGate>
+              </LocaleProvider>
             </QueryProvider>
           </ClerkSessionBridge>
         </ClerkProvider>
