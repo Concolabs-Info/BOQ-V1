@@ -61,7 +61,7 @@ function SelectTrigger({
         else if (ref) ref.current = node;
       }}
       className={cn(
-        "flex h-11 w-full min-w-0 items-center justify-between gap-2 overflow-hidden rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-950 outline-none transition select-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:border-blue-500 data-[popup-open]:ring-4 data-[popup-open]:ring-blue-100",
+        "flex h-11 w-full min-w-0 items-center justify-between gap-2 overflow-hidden rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-950 outline-none transition select-none focus:border-ring focus:ring-1 focus:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:border-ring data-[popup-open]:ring-1 data-[popup-open]:ring-ring/15",
         staticClassName(className),
       )}
     >
@@ -112,19 +112,24 @@ function SelectContent({
         alignOffset={alignOffset}
         alignItemWithTrigger={alignItemWithTrigger}
         className="z-50 outline-none"
-        style={sizeStyle}
+        style={{ ...sizeStyle, ...style }}
       >
         <SelectPrimitive.Popup
           data-slot="select-content"
           {...props}
           style={{ ...sizeStyle, ...style }}
           className={cn(
-            "max-h-80 overflow-x-hidden overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 text-slate-950 shadow-lg outline-none",
+            // Rounding + clipping lives here, scrolling lives on the inner
+            // div below — on the same element, some browsers render the
+            // native scrollbar's square corners past the border-radius.
+            "overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-950 shadow-lg outline-none",
             "origin-[var(--transform-origin)] transition data-[starting-style]:scale-95 data-[starting-style]:opacity-0 data-[ending-style]:scale-95 data-[ending-style]:opacity-0",
             staticClassName(className),
           )}
         >
-          <SelectPrimitive.List>{children}</SelectPrimitive.List>
+          <div className="max-h-80 overflow-x-hidden overflow-y-auto p-1">
+            <SelectPrimitive.List>{children}</SelectPrimitive.List>
+          </div>
         </SelectPrimitive.Popup>
       </SelectPrimitive.Positioner>
     </SelectPrimitive.Portal>

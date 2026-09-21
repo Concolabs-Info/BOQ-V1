@@ -136,10 +136,6 @@ select {
   contain-intrinsic-size: auto 76px;
 }
 
-
-
-
-
 @media (max-width: 1100px) {
   .workspace-grid {
     grid-template-columns: 170px minmax(0, 1fr) 310px;
@@ -156,5 +152,46 @@ select {
 
   .textarea {
     @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100;
+  }
+}
+
+@layer base {
+  :root {
+    --background: #ffffff;
+    --foreground: #172033;
+    --card: #ffffff;
+    --card-foreground: #172033;
+    --popover: #ffffff;
+    --popover-foreground: #172033;
+    --primary: #2563eb;
+    --primary-foreground: #ffffff;
+    --secondary: #f1f5f9;
+    --secondary-foreground: #172033;
+    --muted: #f1f5f9;
+    --muted-foreground: #64748b;
+    --accent: #eff6ff;
+    --accent-foreground: #1e3a8a;
+    --destructive: #dc2626;
+    --destructive-foreground: #ffffff;
+    --border: #e2e8f0;
+    --input: #e2e8f0;
+    --ring: #93c5fd;
+    --chart-1: #2563eb;
+    --chart-2: #0ea5e9;
+    --chart-3: #64748b;
+    --chart-4: #94a3b8;
+    --chart-5: #cbd5e1;
+    --radius: 0.75rem;
+    --sidebar: #f8fafc;
+    --sidebar-foreground: #172033;
+    --sidebar-primary: #2563eb;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #eff6ff;
+    --sidebar-accent-foreground: #1e3a8a;
+    --sidebar-border: #e2e8f0;
+    --sidebar-ring: #93c5fd;
+  }
+  * {
+    @apply border-border;
   }
 }

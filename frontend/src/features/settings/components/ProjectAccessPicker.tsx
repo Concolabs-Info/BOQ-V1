@@ -92,7 +92,7 @@ function ProjectSelect({
       <Menu.Trigger
         disabled={disabled || projects.length === 0}
         className={cn(
-          "inline-flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 text-left text-sm font-medium text-slate-800 outline-none transition hover:border-slate-300 data-[disabled]:opacity-50 data-[popup-open]:border-blue-500 data-[popup-open]:ring-4 data-[popup-open]:ring-blue-100",
+          "inline-flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 text-left text-sm font-medium text-slate-800 outline-none transition hover:border-slate-300 data-[disabled]:opacity-50 data-[popup-open]:border-ring data-[popup-open]:ring-1 data-[popup-open]:ring-ring/15",
           className,
         )}
       >
