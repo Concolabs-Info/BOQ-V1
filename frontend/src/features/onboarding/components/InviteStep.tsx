@@ -92,17 +92,17 @@ export function InviteStep({
               transition={{ duration: 0.2, ease: "easeOut" }}
               className="-m-1 overflow-hidden p-1"
             >
-              <div className="flex items-center gap-2 pb-1">
-                <div className="flex flex-1 flex-col gap-2 sm:flex-row">
+              <div className="flex items-start gap-2 pb-1">
+                <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row">
                   <Input
                     type="email"
                     placeholder="name@company.com"
-                    className="h-10 flex-1"
+                    className="h-10 min-w-0 flex-1"
                     value={row.email}
                     onChange={(event) => update(index, { email: event.target.value })}
                   />
                   <Select value={row.role} onValueChange={(next) => update(index, { role: String(next) })}>
-                    <SelectTrigger className="!h-10 sm:w-[11rem] sm:shrink-0">
+                    <SelectTrigger className="!h-10 w-full sm:w-[11rem] sm:shrink-0">
                       <SelectValue>{roleLabel(row.role)}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
@@ -143,7 +143,7 @@ export function InviteStep({
           <ProjectAccessField projects={projects} selectedIds={projectIds} disabled={pending} onChange={setProjectIds} />
         </div>
       ) : (
-        <p className="flex items-center gap-1 text-sm leading-6 text-muted-foreground">
+        <p className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-sm leading-6 text-muted-foreground">
           {t("addLaterHintBefore")}
           <ArrowRight className="size-3.5" aria-hidden="true" />
           {t("addLaterHintAfter")}
@@ -157,11 +157,11 @@ export function InviteStep({
           type="button"
           pending={pending}
           onClick={() => void send()}
-          className={`h-11 ${onboarding3dButton}`}
+          className={`h-11 w-full sm:flex-1 ${onboarding3dButton}`}
         >
           {pending ? t("sending") : t("sendButton")}
         </LoadingButton>
-        <Button type="button" variant="ghost" disabled={pending} onClick={onDone} className="h-11">
+        <Button type="button" variant="ghost" disabled={pending} onClick={onDone} className="h-11 w-full sm:w-auto">
           {t("skip")}
         </Button>
       </div>

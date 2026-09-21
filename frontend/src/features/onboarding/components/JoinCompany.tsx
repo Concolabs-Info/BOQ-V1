@@ -28,8 +28,8 @@ export function JoinCompany({
       >
         {t("requestButton")}
       </Button>
-      <p className="text-sm leading-6 text-muted-foreground">{t("hint", { name: label })}</p>
-      <Link href={`${appRoutes.onboarding}?founder=1`} className="text-sm font-medium text-primary hover:underline">
+      <p className="text-pretty text-sm leading-6 text-muted-foreground">{t("hint", { name: label })}</p>
+      <Link href={`${appRoutes.onboarding}?founder=1`} className="text-pretty text-sm font-medium text-primary hover:underline">
         {t("setUpInstead")}
       </Link>
     </div>

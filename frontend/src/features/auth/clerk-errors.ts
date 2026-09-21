@@ -9,7 +9,7 @@ import { CLERK_PASSWORD_MIN_LENGTH } from "./password";
 // MFA) — cross-checked against Clerk's own list of error codes so nothing
 // reachable here gets skipped. Anything not listed still falls back to
 // Clerk's own message, so an unmapped code never goes silent; codes for
-// features we don't use (passkeys, web3, organizations, avatars, phone
+// features we don't use (passkeys, web3, organizations, phone
 // numbers, usernames) are deliberately left unmapped since they can't occur.
 const FRIENDLY_MESSAGES: Record<string, string> = {
   // Wrong credentials
@@ -47,11 +47,31 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
   action_blocked: "We couldn't complete that for security reasons. Try again in a moment.",
 
   session_exists: "You're already signed in.",
+  identifier_already_signed_in: "You're already signed in with another account. Sign out first, then try again.",
+
+  // Google / Microsoft
+  oauth_access_denied: "That sign-in was cancelled. You can try again.",
+  oauth_access_denied__user_denied: "That sign-in was cancelled. You can try again.",
+  external_account_not_found: "We couldn't find a Quanto account for that Google or Microsoft login. Create one, or use email.",
+  external_account_exists: "That Google or Microsoft account is already connected to another Quanto user.",
+  identification_claimed: "That Google or Microsoft account is already used on Quanto. Try signing in instead.",
+  oauth_identification_claimed: "That Google or Microsoft account is already used on Quanto. Try signing in instead.",
+  strategy_for_user_invalid: "That sign-in method isn't available for this account. Try email, or the other provider.",
+  oauth_provider_not_enabled: "That sign-in method isn't available right now. Use Google, or email.",
 };
+
+export function oauthStrategyUnavailableText(): string {
+  return FRIENDLY_MESSAGES.oauth_provider_not_enabled;
+}
 
 export function thrownErrText(err: unknown): string {
   if (isClerkAPIResponseError(err)) {
     const first = err.errors[0];
+    const text = `${first?.longMessage ?? ""} ${first?.message ?? ""}`;
+    const paramName = first?.meta && "paramName" in first.meta ? String(first.meta.paramName) : "";
+    if (paramName === "strategy" || /does not match one of the allowed values for parameter strategy/i.test(text)) {
+      return FRIENDLY_MESSAGES.oauth_provider_not_enabled;
+    }
     if (first?.code && FRIENDLY_MESSAGES[first.code]) return FRIENDLY_MESSAGES[first.code];
     return first?.longMessage ?? first?.message ?? "Something went wrong. Try again.";
   }

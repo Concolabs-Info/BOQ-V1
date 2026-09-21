@@ -5,7 +5,6 @@ import { Button } from "@/shared/components/Button";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { LoadingState } from "@/shared/components/LoadingState";
 import { CountrySelect } from "@/features/onboarding/components/CountrySelect";
-import { currencyForCountry } from "@/features/onboarding/countries";
 import { useAssetUrl, invalidateAsset } from "@/features/floor-plans/hooks/useAssetUrl";
 import { getPlatformContext, notifyCompanyLogoChanged } from "@/features/platform/services/platformService";
 import {
@@ -223,8 +222,7 @@ export function CompanySettingsForm() {
         <SettingsCard
           title="Country"
           titleId="co-country-heading"
-          description="Rates and BOQ exports use this country's currency."
-          footerHint={`Currency: ${currencyForCountry(country)}`}
+          description="Where the company is based."
           footer={
             canManage ? (
               <Button type="submit" className="rounded-xl" disabled={disabled}>

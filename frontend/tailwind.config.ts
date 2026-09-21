@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import plugin from "tailwindcss/plugin";
 
 const config: Config = {
   content: [
@@ -74,7 +75,14 @@ const config: Config = {
       }
     }
   },
-  plugins: [require("tailwindcss-animate")]
+  plugins: [
+    require("tailwindcss-animate"),
+    plugin(({ addVariant }) => {
+      // Enough width (tablet+) or enough height (Pro Max / desktop) for the
+      // original, detailed onboarding chrome. Short phones stay compact.
+      addVariant("roomy", "@media (min-width: 640px), (min-height: 46.25rem)");
+    }),
+  ],
 };
 
 export default config;

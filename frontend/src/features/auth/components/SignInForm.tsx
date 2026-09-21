@@ -20,6 +20,7 @@ import { thrownErrText } from "../clerk-errors";
 import { passwordLengthPlaceholder } from "../password";
 import { hardNavigate } from "../hard-navigate";
 import { signOutIfSignedIn } from "../sign-out-if-signed-in";
+import { SocialAuthButtons } from "./SocialAuthButtons";
 
 type Mode = "password" | "reset-request" | "reset-code" | "email-code" | "mfa";
 type SignInResource = ReturnType<typeof useClerk>["client"]["signIn"];
@@ -53,6 +54,7 @@ export function SignInForm({
   const ticketTried = useRef(false);
   const clearingSession = useRef(false);
   const landing = useRef(false);
+  const resumedOauth = useRef(false);
 
   function land() {
     hardNavigate(destination);
@@ -76,6 +78,15 @@ export function SignInForm({
       clearingSession.current = false;
     });
   }, [ready, needsNoSession, clerk.session, clerk]);
+
+  useEffect(() => {
+    if (!ready || resumedOauth.current || invitationTicket || !clerk.client?.signIn) return;
+    const si = clerk.client.signIn;
+    const status = String(si.status ?? "");
+    if (status !== "needs_second_factor" && status !== "needs_client_trust" && status !== "needs_new_password") return;
+    resumedOauth.current = true;
+    void routeNext(si).catch((err) => setError(thrownErrText(err)));
+  }, [ready, invitationTicket, clerk]);
 
   useEffect(() => {
     if (!ready || !invitationTicket || ticketTried.current || clerk.session) return;
@@ -470,6 +481,15 @@ export function SignInForm({
   } else {
     body = (
       <div className="flex flex-col gap-5">
+        {!invitationTicket ? (
+          <SocialAuthButtons
+            intent="sign-in"
+            completePath={redirectUrl ?? appRoutes.projects}
+            selectAccount={switchAccount}
+            disabled={busy || !ready}
+            onError={setError}
+          />
+        ) : null}
         <form onSubmit={(event) => void submitPassword(event)} className="flex flex-col gap-5">
           <FieldGroup>
             <Field className="!gap-1">

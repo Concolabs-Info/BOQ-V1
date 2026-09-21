@@ -3,16 +3,28 @@
     "settingUp": "Configurando",
     "loadingSetup": "Cargando la configuración de tu empresa",
     "couldNotLoad": "No se pudo cargar la configuración",
-    "copyright": "© {year} Quanto"
+    "copyright": "© {year} Quanto",
+    "back": "Atrás"
   },
   "auth": {
+    "social": {
+      "continueWithGoogle": "Continuar con Google",
+      "continueWithMicrosoft": "Continuar con Microsoft",
+      "orDivider": "o",
+      "finishing": "Iniciando sesión…",
+      "finishingSignUp": "Creando tu cuenta…",
+      "couldNotFinish": "No se pudo completar el acceso",
+      "cancelled": "Cancelaste el acceso. Puedes intentarlo de nuevo.",
+      "failed": "No pudimos entrar con esa cuenta. Inténtalo de nuevo, o usa el correo.",
+      "backToAuth": "Intentar de nuevo"
+    },
     "signIn": {
       "titleDefault": "¡Bienvenido de nuevo!",
       "titleInvite": "¡Tienes una invitación!",
       "subtitleInvite": "Iniciando tu sesión. Pronto formarás parte del equipo.",
       "subtitleSwitch": "Inicia sesión con otra cuenta.",
       "subtitleRedirect": "Nos alegra verte. Sigamos donde lo dejaste.",
-      "subtitleDefault": "Inicia sesión para seguir trabajando en Quanto.",
+      "subtitleDefault": "Usa Google, Microsoft o tu correo.",
       "alreadySignedInBody": "Te estamos llevando a tu espacio de trabajo.",
       "titleMfaTotp": "Verificación en dos pasos",
       "subtitleMfaTotp": "Introduce el código de 6 dígitos de tu app de autenticación.",
@@ -38,11 +50,11 @@
       "backToSignIn": "Volver a iniciar sesión",
       "noAccount": "¿No tienes una cuenta?",
       "signUpLink": "Regístrate",
-      "consentAction": "hacer clic en \"Iniciar sesión\""
+      "consentAction": "continuar"
     },
     "signUp": {
       "titleDefault": "Construyamos algo grandioso",
-      "subtitleDefault": "Introduce tu correo y te enviaremos un código de verificación.",
+      "subtitleDefault": "Usa Google o Microsoft, o introduce tu correo.",
       "titleJoining": "¡Ya casi formas parte del equipo!",
       "subtitleJoining": "Establece un nombre y una contraseña para unirte. Tu correo ya está confirmado.",
       "titleCode": "Revisa tu correo",
@@ -61,9 +73,11 @@
       "notYourEmail": "¿No es tu correo? Cámbialo",
       "alreadyHaveAccount": "¿Ya tienes una cuenta?",
       "signInLink": "Inicia sesión",
-      "consentAction": "hacer clic en \"Continuar\"",
+      "consentAction": "continuar",
       "accountExists": "Parece que ya tienes una cuenta con ese correo.",
-      "accountExistsLink": "Inicia sesión en su lugar"
+      "accountExistsLink": "Inicia sesión en su lugar",
+      "titleFinishProfile": "¿Cómo te llamamos?",
+      "subtitleFinishProfile": "Tu cuenta está conectada. Añade tu nombre para terminar y configuramos tu empresa."
     }
   },
   "onboarding": {
@@ -91,7 +105,9 @@
       "createCompanyLockedTitle": "Configura {name}",
       "createCompanyLockedTitleAfterDelete": "Configura {name} de nuevo",
       "createCompanyLockedSub": "Serás el propietario. Detectamos el dominio de tu correo de trabajo.",
-      "createCompanyLockedSubAfterDelete": "Tu empresa anterior fue eliminada. Crea una nueva para seguir trabajando en tus proyectos."
+      "createCompanyLockedSubAfterDelete": "Tu empresa anterior fue eliminada. Crea una nueva para seguir trabajando en tus proyectos.",
+      "editCompanyTitle": "Datos de tu empresa",
+      "editCompanySub": "Cambia lo que necesites y continúa."
     },
     "acceptInvite": {
       "joining": "Uniéndote a {name}…",
@@ -106,9 +122,10 @@
     "createCompanyLocked": {
       "companyName": "Nombre de la empresa",
       "country": "País",
-      "currency": "Moneda: {currency}",
       "createButton": "Crear empresa",
       "creating": "Creando…",
+      "continueButton": "Continuar",
+      "saving": "Guardando…",
       "consentAction": "crear una empresa"
     },
     "createCompanyManual": {
@@ -116,9 +133,10 @@
       "hasRegNumber": "Tengo un número de PV o BR",
       "hasRegNumberHint": "Opcional. Añádelo ahora o más adelante desde Configuración.",
       "country": "País",
-      "currency": "Moneda: {currency}",
       "createButton": "Crear empresa",
       "creating": "Creando…",
+      "continueButton": "Continuar",
+      "saving": "Guardando…",
       "consentAction": "crear una empresa"
     },
     "firstProject": {
@@ -159,7 +177,7 @@
       "createProjectButton": "Crear tu primer proyecto"
     },
     "welcome": {
-      "body": "Todo está listo y preparado. Manos a la obra."
+      "body": "Todo está listo y preparado.\nManos a la obra."
     },
     "removedFromCompany": {
       "titleDeleted": "{name} ya no está en Quanto",

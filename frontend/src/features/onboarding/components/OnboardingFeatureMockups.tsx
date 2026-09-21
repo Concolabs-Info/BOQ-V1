@@ -13,7 +13,7 @@ import { MousePointer2, Plus, Redo2, Ruler, Undo2, UserRound, ZoomIn } from "luc
 function ToolbarButton({ icon, label, active }: { icon: ReactNode; label: string; active?: boolean }) {
   return (
     <span
-      className={`flex items-center gap-1 rounded px-1.5 py-1 text-[9px] font-medium ${
+      className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[9px] font-medium ${
         active ? "bg-primary/10 text-primary" : "text-muted-foreground"
       }`}
     >
@@ -25,17 +25,16 @@ function ToolbarButton({ icon, label, active }: { icon: ReactNode; label: string
 
 export function PlanReviewMockup() {
   return (
-    <div className="w-80 rounded-xl border border-border bg-card p-4 shadow-md">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-semibold text-foreground">Ground Floor Plan</span>
+    <div className="w-full min-w-0 max-w-80 rounded-xl border border-border bg-card p-2.5 shadow-md roomy:p-4">
+      <div className="mb-1.5 flex min-w-0 items-center justify-between gap-2 roomy:mb-2">
+        <span className="truncate text-sm font-semibold text-foreground">Ground Floor Plan</span>
         <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
           <ZoomIn className="size-3" aria-hidden="true" />
           100%
         </span>
       </div>
 
-      {/* Mini toolbar, mirroring the real takeoff editor's commands */}
-      <div className="mb-2 flex items-center gap-0.5 rounded-md border border-border bg-muted/40 p-0.5">
+      <div className="mb-2 hidden items-center gap-0.5 overflow-x-auto rounded-md border border-border bg-muted/40 p-0.5 roomy:flex [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <ToolbarButton icon={<MousePointer2 className="size-3" aria-hidden="true" />} label="Select" active />
         <ToolbarButton icon={<Ruler className="size-3" aria-hidden="true" />} label="Measure" />
         <span className="mx-0.5 h-4 w-px bg-border" />
@@ -43,8 +42,8 @@ export function PlanReviewMockup() {
         <ToolbarButton icon={<Redo2 className="size-3" aria-hidden="true" />} label="Redo" />
       </div>
 
-      <div className="flex h-32 items-center justify-center rounded-lg bg-muted/50">
-        <svg viewBox="0 0 140 100" className="h-28 w-40" fill="none">
+      <div className="flex h-[4.75rem] items-center justify-center rounded-lg bg-muted/50 roomy:h-32">
+        <svg viewBox="0 0 140 100" className="h-full w-full max-w-40" fill="none">
           {/* Selected room — actively being measured */}
           <rect x="83" y="5" width="52" height="24" className="fill-primary/15" />
           <rect x="83" y="5" width="52" height="24" className="stroke-primary" strokeWidth="1.5" strokeDasharray="3 2" />
@@ -129,13 +128,13 @@ export function TakeoffMockup() {
   ];
 
   return (
-    <div className="w-80 rounded-xl border border-border bg-card p-4 shadow-md">
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-sm font-semibold text-foreground">BOQ Summary</span>
+    <div className="w-full min-w-0 max-w-80 rounded-xl border border-border bg-card p-2.5 shadow-md roomy:p-4">
+      <div className="mb-2 flex min-w-0 items-center justify-between gap-2 roomy:mb-3">
+        <span className="truncate text-sm font-semibold text-foreground">BOQ Summary</span>
         <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">Auto-generated</span>
       </div>
       <div className="flex flex-col gap-1">
-        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-2 text-[10px] text-muted-foreground">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-2 px-2 text-[10px] text-muted-foreground roomy:gap-3">
           <span>Item</span>
           <span>Qty</span>
           <span>Rate</span>
@@ -144,7 +143,7 @@ export function TakeoffMockup() {
         {rows.map(([item, qty, rate, amount]) => (
           <div
             key={item}
-            className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 rounded-md bg-muted/50 px-2 py-1.5"
+            className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded-md bg-muted/50 px-2 py-1 roomy:gap-3 roomy:py-1.5"
           >
             <span className="truncate text-xs text-foreground">{item}</span>
             <span className="text-xs text-muted-foreground">{qty}</span>
@@ -169,9 +168,9 @@ export function MultiProjectMockup() {
   ];
 
   return (
-    <div className="grid w-80 grid-cols-2 gap-2.5">
+    <div className="grid w-full min-w-0 max-w-80 grid-cols-2 gap-1.5 roomy:gap-2.5">
       {tiles.map((tile) => (
-        <div key={tile.name} className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 shadow-md">
+        <div key={tile.name} className="flex flex-col gap-1.5 rounded-xl border border-border bg-card p-2.5 shadow-md roomy:gap-2 roomy:p-3">
           <div className="flex items-center justify-between">
             <span className={`size-2 rounded-full ${tile.accent}`} />
             <span className="text-[10px] text-muted-foreground">{tile.progress}%</span>
@@ -182,7 +181,7 @@ export function MultiProjectMockup() {
           </div>
         </div>
       ))}
-      <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border p-3 text-muted-foreground">
+      <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border p-2.5 text-muted-foreground roomy:p-3">
         <Plus className="size-4" aria-hidden="true" />
         <span className="text-[10px]">New project</span>
       </div>
@@ -198,16 +197,19 @@ export function InviteMockup() {
   ];
 
   return (
-    <div className="w-80 rounded-xl border border-border bg-card p-4 shadow-md">
-      <div className="mb-3 flex items-center justify-between">
+    <div className="w-full min-w-0 max-w-80 rounded-xl border border-border bg-card p-2.5 shadow-md roomy:p-4">
+      <div className="mb-2 flex items-center justify-between roomy:mb-3">
         <span className="text-sm font-semibold text-foreground">Team</span>
         <span className="text-[10px] text-muted-foreground">{people.length} invited</span>
       </div>
-      <div className="flex flex-col gap-2.5">
-        {people.map((person) => (
-          <div key={person.name} className="flex items-center gap-2.5">
+      <div className="flex flex-col gap-1.5 roomy:gap-2.5">
+        {people.map((person, personIndex) => (
+          <div
+            key={person.name}
+            className={`flex items-center gap-2 roomy:gap-2.5 ${personIndex === people.length - 1 ? "hidden roomy:flex" : ""}`}
+          >
             <div
-              className={`flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-white shadow-sm ${person.gradient}`}
+              className={`flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-white shadow-sm roomy:size-8 ${person.gradient}`}
             >
               <UserRound className="size-4" aria-hidden="true" />
             </div>

@@ -71,18 +71,18 @@ export function RemovedFromCompany({
       sub={deleted ? t("subDeleted") : t("subRemoved")}
     >
       <div className="flex flex-col gap-4 text-sm">
-        <p className="leading-6 text-muted-foreground">{deleted ? t("bodyDeleted") : t("bodyRemoved")}</p>
+        <p className="text-pretty leading-6 text-muted-foreground">{deleted ? t("bodyDeleted") : t("bodyRemoved")}</p>
         <LoadingButton
           type="button"
-          className={`h-11 w-fit ${onboarding3dButton}`}
+          className={`h-11 w-full sm:w-fit ${onboarding3dButton}`}
           pending={pending}
           onClick={() => void joinIfInvited()}
         >
           {pending ? t("checking") : t("checkInvite")}
         </LoadingButton>
-        {note ? <p className="text-sm leading-6 text-muted-foreground">{note}</p> : null}
-        <SignOutButton className="inline-flex w-fit items-center justify-center text-sm font-medium text-primary underline-offset-4 hover:underline" />
-        <Link href={`${appRoutes.onboarding}?founder=1`} className="w-fit text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground">
+        {note ? <p className="text-pretty text-sm leading-6 text-muted-foreground">{note}</p> : null}
+        <SignOutButton className="inline-flex w-full items-center justify-center text-sm font-medium text-primary underline-offset-4 hover:underline sm:w-fit" />
+        <Link href={`${appRoutes.onboarding}?founder=1`} className="w-full text-center text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground sm:w-fit sm:text-left">
           {t("setUpInstead")}
         </Link>
       </div>

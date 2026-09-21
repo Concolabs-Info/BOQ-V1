@@ -28,18 +28,18 @@ export function OnboardingCapabilities({
   ];
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3 roomy:gap-4">
       <FeaturePreviewCarousel slides={slides} />
-      <div className="flex flex-col gap-3 sm:flex-row">
+      <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
         <Button
           type="button"
           variant="outline"
-          className={`h-11 sm:flex-1 ${onboarding3dButtonSecondary}`}
+          className={`h-10 w-full roomy:h-11 sm:flex-1 ${onboarding3dButtonSecondary}`}
           onClick={onGoToDashboard}
         >
           {t("goToDashboard")}
         </Button>
-        <Button type="button" className={`h-11 sm:flex-1 ${onboarding3dButton}`} onClick={onCreateProject}>
+        <Button type="button" className={`h-10 w-full roomy:h-11 sm:flex-1 ${onboarding3dButton}`} onClick={onCreateProject}>
           {t("createProjectButton")}
         </Button>
       </div>

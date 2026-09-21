@@ -3,16 +3,28 @@
     "settingUp": "සකසමින්",
     "loadingSetup": "ඔබේ සමාගමේ සැකසුම් පූරණය වෙමින්",
     "couldNotLoad": "සැකසුම් පූරණය කළ නොහැකි විය",
-    "copyright": "© {year} Quanto"
+    "copyright": "© {year} Quanto",
+    "back": "ආපසු"
   },
   "auth": {
+    "social": {
+      "continueWithGoogle": "Google සමඟ ඉදිරියට",
+      "continueWithMicrosoft": "Microsoft සමඟ ඉදිරියට",
+      "orDivider": "හෝ",
+      "finishing": "ඔබව පුරනය කරමින්…",
+      "finishingSignUp": "ඔබේ ගිණුම සාදමින්…",
+      "couldNotFinish": "පුරනය වීම අවසන් කළ නොහැකි විය",
+      "cancelled": "එම පුරනය වීම අවලංගු විය. නැවත උත්සාහ කළ හැක.",
+      "failed": "එම ගිණුමෙන් පුරනය විය නොහැකි විය. නැවත උත්සාහ කරන්න, නැතහොත් විද්‍යුත් තැපෑල භාවිතා කරන්න.",
+      "backToAuth": "නැවත උත්සාහ කරන්න"
+    },
     "signIn": {
       "titleDefault": "නැවත සාදරයෙන් පිළිගනිමු!",
       "titleInvite": "ඔබට ආරාධනාවක් ලැබී ඇත!",
       "subtitleInvite": "ඔබව පුරනය කරමින් සිටියි. ඉක්මනින්ම ඔබ කණ්ඩායමට එකතු වනු ඇත.",
       "subtitleSwitch": "වෙනත් ගිණුමකින් පුරන්න.",
       "subtitleRedirect": "ඔබව නැවත දැකීම සතුටක්. ඔබ නතර කළ තැනින් ඉදිරියට යමු.",
-      "subtitleDefault": "Quanto හි ඔබේ වැඩ දිගටම කරගෙන යාමට පුරන්න.",
+      "subtitleDefault": "Google, Microsoft, හෝ ඔබේ විද්‍යුත් තැපෑල භාවිතා කරන්න.",
       "alreadySignedInBody": "ඔබව ඔබේ වැඩබිමට රැගෙන යමින් සිටියි.",
       "titleMfaTotp": "ද්වි-පියවර සත්‍යාපනය",
       "subtitleMfaTotp": "ඔබේ සත්‍යාපන යෙදුමේ ඇති අංක 6ක කේතය ඇතුළත් කරන්න.",
@@ -38,11 +50,11 @@
       "backToSignIn": "පුරනය වීමට ආපසු",
       "noAccount": "ගිණුමක් නැද්ද?",
       "signUpLink": "ලියාපදිංචි වන්න",
-      "consentAction": "\"පුරන්න\" ක්ලික් කිරීමෙන්"
+      "consentAction": "ඉදිරියට යාමෙන්"
     },
     "signUp": {
       "titleDefault": "අපි විශිෂ්ට යමක් තනමු",
-      "subtitleDefault": "ඔබේ විද්‍යුත් තැපෑල ඇතුළත් කරන්න, අපි සත්‍යාපන කේතයක් එවන්නෙමු.",
+      "subtitleDefault": "Google හෝ Microsoft භාවිතා කරන්න, නැතහොත් ඔබේ විද්‍යුත් තැපෑල ඇතුළත් කරන්න.",
       "titleJoining": "ඔබ දැන් කණ්ඩායමට එකතු වීමට ආසන්නයි!",
       "subtitleJoining": "එකතු වීමට නමක් සහ මුරපදයක් සකසන්න. ඔබේ විද්‍යුත් තැපෑල දැනටමත් තහවුරු කර ඇත.",
       "titleCode": "ඔබේ විද්‍යුත් තැපෑල පරීක්ෂා කරන්න",
@@ -61,9 +73,11 @@
       "notYourEmail": "එය ඔබේ විද්‍යුත් තැපෑල නොවේද? එය වෙනස් කරන්න",
       "alreadyHaveAccount": "දැනටමත් ගිණුමක් තිබේද?",
       "signInLink": "පුරන්න",
-      "consentAction": "\"ඉදිරියට\" ක්ලික් කිරීමෙන්",
+      "consentAction": "ඉදිරියට යාමෙන්",
       "accountExists": "එම විද්‍යුත් තැපෑලෙන් දැනටමත් ගිණුමක් ඇති බව පෙනේ.",
-      "accountExistsLink": "ඒ වෙනුවට පුරන්න"
+      "accountExistsLink": "ඒ වෙනුවට පුරන්න",
+      "titleFinishProfile": "අපි ඔබට කුමක් ලෙස ඇමතිය යුතුද?",
+      "subtitleFinishProfile": "ඔබේ ගිණුම සම්බන්ධයි. අවසන් කිරීමට ඔබේ නම එක් කරන්න, එවිට අපි ඔබේ සමාගම සකසන්නෙමු."
     }
   },
   "onboarding": {
@@ -91,7 +105,9 @@
       "createCompanyLockedTitle": "{name} සකසන්න",
       "createCompanyLockedTitleAfterDelete": "{name} නැවත සකසන්න",
       "createCompanyLockedSub": "ඔබ හිමිකරු වනු ඇත. ඔබේ කාර්යාල විද්‍යුත් තැපැල් වසම අපි ගැලපුවෙමු.",
-      "createCompanyLockedSubAfterDelete": "ඔබේ පෙර සමාගම මකා දමන ලදී. ඔබේ ව්‍යාපෘතිවල දිගටම වැඩ කිරීමට නවකයක් තනන්න."
+      "createCompanyLockedSubAfterDelete": "ඔබේ පෙර සමාගම මකා දමන ලදී. ඔබේ ව්‍යාපෘතිවල දිගටම වැඩ කිරීමට නවකයක් තනන්න.",
+      "editCompanyTitle": "ඔබේ සමාගමේ විස්තර",
+      "editCompanySub": "වෙනස් කළ යුතු දේ යාවත්කාලීන කර ඉදිරියට යන්න."
     },
     "acceptInvite": {
       "joining": "{name} වෙත එකතු වෙමින්…",
@@ -106,9 +122,10 @@
     "createCompanyLocked": {
       "companyName": "සමාගමේ නම",
       "country": "රට",
-      "currency": "මුදල් ඒකකය: {currency}",
       "createButton": "සමාගම තනන්න",
       "creating": "තනමින්…",
+      "continueButton": "ඉදිරියට",
+      "saving": "සුරකිමින්…",
       "consentAction": "සමාගමක් තැනීමෙන්"
     },
     "createCompanyManual": {
@@ -116,9 +133,10 @@
       "hasRegNumber": "මට PV හෝ BR අංකයක් ඇත",
       "hasRegNumberHint": "විකල්පයි. දැන් හෝ පසුව සැකසුම් හරහා එකතු කරන්න.",
       "country": "රට",
-      "currency": "මුදල් ඒකකය: {currency}",
       "createButton": "සමාගම තනන්න",
       "creating": "තනමින්…",
+      "continueButton": "ඉදිරියට",
+      "saving": "සුරකිමින්…",
       "consentAction": "සමාගමක් තැනීමෙන්"
     },
     "firstProject": {
@@ -159,7 +177,7 @@
       "createProjectButton": "ඔබේ පළමු ව්‍යාපෘතිය තනන්න"
     },
     "welcome": {
-      "body": "සියල්ල සකසා සූදානම්. දැන් තැනීම ආරම්භ කරමු."
+      "body": "සියල්ල සකසා සූදානම්.\nදැන් තැනීම ආරම්භ කරමු."
     },
     "removedFromCompany": {
       "titleDeleted": "{name} තවදුරටත් Quanto හි නොමැත",

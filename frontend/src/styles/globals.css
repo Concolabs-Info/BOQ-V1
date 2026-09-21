@@ -23,6 +23,17 @@ body {
   min-height: 100%;
 }
 
+/* Auth/onboarding shells are viewport-locked. Prevent html/body from growing a
+   document scrollbar (Windows classic bars sit on the window edge and look like
+   the page itself is scrolling). */
+html:has([data-fit-viewport]),
+body:has([data-fit-viewport]) {
+  height: 100%;
+  max-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   font-size: 15px;

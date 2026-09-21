@@ -20,7 +20,6 @@ export default function HelpPage({
         <li>Sign up with your work email. You&apos;ll create a company, or request to join one that&apos;s already on Quanto.</li>
         <li>If your company is already on Quanto, you&apos;ll be asked to request access instead of creating a new one.</li>
         <li>Not registered yet? Choose &ldquo;Not registered yet&rdquo; during setup. You can add your PV or BR number later in Company Settings.</li>
-        <li>Country sets your BOQ currency (Sri Lanka defaults to LKR).</li>
       </ul>
 
       <h2>Inviting your team</h2>

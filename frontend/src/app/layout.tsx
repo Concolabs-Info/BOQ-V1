@@ -1,6 +1,6 @@
 import "../styles/tokens.css";
 import "../styles/globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { QueryProvider } from "@/shared/providers/QueryProvider";
 import { ClerkSessionBridge } from "@/features/auth/components/ClerkSessionBridge";
@@ -12,6 +12,12 @@ import { Suspense } from "react";
 export const metadata: Metadata = {
   title: "Quanto",
   description: "Interactive construction takeoff and BOQ production"
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

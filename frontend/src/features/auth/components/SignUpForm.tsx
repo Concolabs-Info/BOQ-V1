@@ -18,14 +18,11 @@ import { TermsConsentLine } from "@/features/onboarding/components/TermsConsentL
 import { isAccountExistsError, thrownErrText } from "../clerk-errors";
 import { passwordLengthPlaceholder } from "../password";
 import { hardNavigate } from "../hard-navigate";
+import { splitName } from "../name";
+import { isOauthSignUpAttempt, oauthPaths } from "../oauth";
+import { canContinuePendingSignUp } from "../sign-up-email-start";
 import { signOutIfSignedIn } from "../sign-out-if-signed-in";
-
-function splitName(fullName: string): { firstName: string; lastName: string } {
-  const trimmed = fullName.trim().replace(/\s+/g, " ");
-  const spaceIndex = trimmed.indexOf(" ");
-  if (spaceIndex === -1) return { firstName: trimmed, lastName: "" };
-  return { firstName: trimmed.slice(0, spaceIndex), lastName: trimmed.slice(spaceIndex + 1) };
-}
+import { SocialAuthButtons } from "./SocialAuthButtons";
 
 // Practical check, not full RFC 5322 — catches the common slips (no "@",
 // no dot in the domain, stray spaces) without rejecting real addresses.
@@ -62,7 +59,13 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
   useEffect(() => {
     if (!ready || joining) return;
     const signUp = clerk.client.signUp;
-    if (!signUp.status || signUp.status === "complete" || !signUp.emailAddress) return;
+    if (!signUp.status || signUp.status === "complete") return;
+
+    if (signUp.status === "missing_requirements" && isOauthSignUpAttempt(signUp)) {
+      hardNavigate(oauthPaths.continueSignUp);
+      return;
+    }
+    if (!signUp.emailAddress) return;
 
     if (signUp.verifications.emailAddress?.status === "verified") {
       setEmail(signUp.emailAddress);
@@ -116,17 +119,25 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
     setBusy(true);
     try {
       const signUp = clerk.client.signUp;
-      const alreadyStarted = Boolean(signUp.status) && signUp.status !== "complete";
-      if (alreadyStarted) {
-        // Returning from the code step after "Not your email? Change it".
-        await signUp.update({ emailAddress: cleanedEmail });
-      } else {
+      // Same email on an in-progress attempt: just resend the code. Calling
+      // update() with that email is what Clerk reports as "identifier exists"
+      // even though no User has been created yet (back from the code step,
+      // a refresh, an abandoned start in this browser).
+      if (!canContinuePendingSignUp(signUp, cleanedEmail)) {
         await signUp.create({ emailAddress: cleanedEmail });
       }
       await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
       setStep("code");
     } catch (err) {
-      if (isAccountExistsError(err)) {
+      const signUp = clerk.client.signUp;
+      if (isAccountExistsError(err) && canContinuePendingSignUp(signUp, cleanedEmail)) {
+        try {
+          await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+          setStep("code");
+        } catch (retryErr) {
+          setError(thrownErrText(retryErr));
+        }
+      } else if (isAccountExistsError(err)) {
         setEmailExists(true);
       } else {
         setError(thrownErrText(err));
@@ -253,6 +264,14 @@ export function SignUpForm({ invitationTicket }: { invitationTicket?: string } =
     <MinimalShell heading={heading} sub={subtitle} footer={footer} width="sm" stepKey={step}>
       {step === "email" ? (
         <div className="flex flex-col gap-5">
+          <SocialAuthButtons
+            intent="sign-up"
+            disabled={busy || !ready}
+            onError={(message) => {
+              setEmailExists(false);
+              setError(message);
+            }}
+          />
           <form onSubmit={(event) => void submitEmail(event)} className="flex flex-col gap-4">
             <FieldGroup>
               <Field data-invalid={Boolean(emailError)} className="!gap-1">

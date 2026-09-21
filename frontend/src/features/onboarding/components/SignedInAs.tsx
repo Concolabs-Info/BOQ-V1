@@ -11,8 +11,8 @@ export function SignedInAs() {
   const email = user.primaryEmailAddress?.emailAddress ?? user.username ?? "";
 
   return (
-    <p className="text-xs text-slate-500">
-      Signed in{email ? ` as ${email}` : ""}.{" "}
+    <p className="max-w-full text-pretty px-1 text-center text-xs text-slate-500">
+      Signed in{email ? <> as <span className="break-all">{email}</span></> : ""}.{" "}
       <button
         type="button"
         onClick={() => void signOutAndGo(clerk)}

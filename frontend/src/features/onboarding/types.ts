@@ -38,3 +38,11 @@ export type CreatedProject = {
   name: string;
 };
 
+export type CompanyDraft = {
+  name: string;
+  country: string;
+  hasRegNumber: boolean;
+  regKind: "PV" | "BR";
+  regNumber: string;
+};
+

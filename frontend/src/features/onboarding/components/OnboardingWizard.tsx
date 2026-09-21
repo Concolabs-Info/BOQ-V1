@@ -6,8 +6,9 @@ import { useTranslations } from "next-intl";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { LoadingState } from "@/shared/components/LoadingState";
 import { appRoutes } from "@/shared/constants/appRoutes";
+import { getCompanySettings } from "@/features/settings/api";
 import { getOnboardingStatus } from "../api";
-import type { CreatedProject, OnboardingStatus, WizardStep } from "../types";
+import type { CompanyDraft, CreatedProject, OnboardingStatus, WizardStep } from "../types";
 import { AcceptInviteStep } from "./AcceptInviteStep";
 import { CreateCompanyLocked } from "./CreateCompanyLocked";
 import { CreateCompanyManual } from "./CreateCompanyManual";
@@ -30,8 +31,23 @@ export function OnboardingWizard() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [step, setStep] = useState<WizardStep>("branch");
   const [companyName, setCompanyName] = useState<string | null>(null);
+  const [companySaved, setCompanySaved] = useState(false);
+  const [companyDraft, setCompanyDraft] = useState<CompanyDraft>({
+    name: "",
+    country: "Sri Lanka",
+    hasRegNumber: false,
+    regKind: "PV",
+    regNumber: "",
+  });
   const [firstProject, setFirstProject] = useState<CreatedProject | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  function rememberCompany(company: { name: string }) {
+    setCompanyName(company.name);
+    setCompanyDraft((current) => ({ ...current, name: company.name }));
+    setCompanySaved(true);
+    setStep("capabilities");
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -44,8 +60,25 @@ export function OnboardingWizard() {
           return;
         }
         if (next.path === "CONTINUE_WIZARD") {
-          setCompanyName(next.existing_company?.name ?? null);
+          const existingName = next.existing_company?.name ?? "";
+          setCompanyName(existingName || null);
+          setCompanySaved(true);
+          setCompanyDraft((current) => ({ ...current, name: existingName || current.name }));
           setStep("capabilities");
+          void getCompanySettings()
+            .then((company) => {
+              if (!mounted) return;
+              setCompanyDraft({
+                name: company.name,
+                country: company.country || "Sri Lanka",
+                hasRegNumber: company.registration_type === "PV" || company.registration_type === "BR",
+                regKind: company.registration_type === "BR" ? "BR" : "PV",
+                regNumber: company.registration_number || "",
+              });
+            })
+            .catch(() => {
+              /* Draft stays empty until they open company details; Back still works. */
+            });
         }
       })
       .catch((caught) => {
@@ -112,6 +145,8 @@ export function OnboardingWizard() {
         width="2xl"
         stepKey="capabilities"
         footer={<SignedInAs />}
+        onBack={() => setStep("branch")}
+        dense
       >
         <OnboardingCapabilities
           onCreateProject={() => setStep("project")}
@@ -129,6 +164,7 @@ export function OnboardingWizard() {
         width="lg"
         stepKey="project"
         footer={<SignedInAs />}
+        onBack={() => setStep("capabilities")}
       >
         <FirstProjectStep
           onCreated={(project) => {
@@ -146,7 +182,14 @@ export function OnboardingWizard() {
       ? t("inviteTeamSubWithProject", { project: firstProject.name })
       : t("inviteTeamSub");
     return (
-      <MinimalShell heading={t("inviteTeamTitle")} sub={sub} width="lg" stepKey="invite" footer={<SignedInAs />}>
+      <MinimalShell
+        heading={t("inviteTeamTitle")}
+        sub={sub}
+        width="lg"
+        stepKey="invite"
+        footer={<SignedInAs />}
+        onBack={() => setStep(firstProject ? "capabilities" : "project")}
+      >
         <InviteStep
           projects={firstProject ? [{ id: firstProject.id, name: firstProject.name }] : []}
           onDone={() => setStep("welcome")}
@@ -160,6 +203,7 @@ export function OnboardingWizard() {
       <MinimalShell
         heading={t("welcomeTitle")}
         sub={t("welcomeSub")}
+        width="sm"
         stepKey="welcome"
         card={false}
         footer={<SignedInAs />}
@@ -172,21 +216,28 @@ export function OnboardingWizard() {
   // step === "branch": company creation / join.
   let heading = afterDelete ? t("createCompanyTitleAfterDelete") : t("createCompanyTitle");
   let sub = afterDelete ? t("createCompanySubAfterDelete") : t("createCompanySub");
+  if (companySaved) {
+    heading = t("editCompanyTitle");
+    sub = t("editCompanySub");
+  }
 
   if (status.path === "CREATE_WITH_DOMAIN_LOCK") {
     const suggested = status.suggested_name || "your company";
-    heading = afterDelete
-      ? t("createCompanyLockedTitleAfterDelete", { name: suggested })
-      : t("createCompanyLockedTitle", { name: suggested });
-    sub = afterDelete ? t("createCompanyLockedSubAfterDelete") : t("createCompanyLockedSub");
+    if (!companySaved) {
+      heading = afterDelete
+        ? t("createCompanyLockedTitleAfterDelete", { name: suggested })
+        : t("createCompanyLockedTitle", { name: suggested });
+      sub = afterDelete ? t("createCompanyLockedSubAfterDelete") : t("createCompanyLockedSub");
+    }
     return (
       <MinimalShell heading={heading} sub={sub} width="lg" stepKey="branch-locked" footer={<SignedInAs />}>
         <CreateCompanyLocked
-          suggestedName={status.suggested_name}
-          onCreated={(company) => {
-            setCompanyName(company.name);
-            setStep("capabilities");
-          }}
+          name={companyDraft.name || status.suggested_name}
+          country={companyDraft.country}
+          existing={companySaved}
+          onNameChange={(name) => setCompanyDraft((current) => ({ ...current, name }))}
+          onCountryChange={(country) => setCompanyDraft((current) => ({ ...current, country }))}
+          onCreated={rememberCompany}
         />
       </MinimalShell>
     );
@@ -195,10 +246,10 @@ export function OnboardingWizard() {
   return (
     <MinimalShell heading={heading} sub={sub} width="lg" stepKey="branch-manual" footer={<SignedInAs />}>
       <CreateCompanyManual
-        onCreated={(company) => {
-          setCompanyName(company.name);
-          setStep("capabilities");
-        }}
+        draft={companyDraft}
+        existing={companySaved}
+        onDraftChange={(patch) => setCompanyDraft((current) => ({ ...current, ...patch }))}
+        onCreated={rememberCompany}
       />
     </MinimalShell>
   );

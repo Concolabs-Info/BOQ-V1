@@ -14,7 +14,7 @@ export function TermsConsentLine({ action }: { action: string }) {
   const searchParams = useSearchParams();
   const returnTo = currentReturnTo(pathname, searchParams.toString());
   return (
-    <p className="mx-auto max-w-xs text-center text-xs leading-5 text-muted-foreground">
+    <p className="mx-auto w-full max-w-sm text-pretty px-1 text-center text-xs leading-5 text-muted-foreground">
       By {action}, you agree to Quanto&rsquo;s{" "}
       <Link href={termsHref(returnTo)} className="font-medium underline underline-offset-4 hover:text-primary">
         Terms of Service

@@ -37,9 +37,9 @@ export function OnboardingWelcome({ onContinue }: { onContinue: () => void }) {
         <motion.div
           exit={{ opacity: 0, scale: 0.96, y: -6 }}
           transition={{ duration: OUTRO_MS / 1000, ease: "easeIn" }}
-          className="flex flex-col items-center gap-5"
+          className="mx-auto flex w-full max-w-xs flex-col items-center gap-4 text-center"
         >
-          <div className="relative flex size-20 items-center justify-center">
+          <div className="relative flex size-14 items-center justify-center">
             <motion.span
               initial={{ opacity: 0.5, scale: 0.8 }}
               animate={{ opacity: 0, scale: 1.6 }}
@@ -50,16 +50,16 @@ export function OnboardingWelcome({ onContinue }: { onContinue: () => void }) {
               initial={{ scale: 0.6, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ type: "spring", stiffness: 320, damping: 22 }}
-              className="flex size-20 items-center justify-center rounded-full bg-primary/10 text-primary"
+              className="flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary"
             >
-              <Check className="size-9" aria-hidden="true" strokeWidth={2.5} />
+              <Check className="size-7" aria-hidden="true" strokeWidth={2.5} />
             </motion.div>
           </div>
           <motion.p
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.15, duration: 0.3 }}
-            className="text-lg font-medium leading-7 text-foreground"
+            className="whitespace-pre-line text-balance text-base font-medium leading-6 text-foreground roomy:text-lg roomy:leading-7"
           >
             {t("body")}
           </motion.p>
