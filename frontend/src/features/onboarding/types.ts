@@ -7,7 +7,7 @@ export type OnboardingPath =
   | "REMOVED"
   | "DONE";
 
-export type WizardStep = "branch" | "invite" | "project";
+export type WizardStep = "branch" | "capabilities" | "project" | "invite" | "welcome";
 
 export type ExistingCompany = {
   id: string;
@@ -38,22 +38,3 @@ export type CreatedProject = {
   name: string;
 };
 
-export type FlowStep = {
-  title: string;
-  blurb: string;
-};
-
-export const FLOW_STEPS: readonly FlowStep[] = [
-  { title: "Account", blurb: "Your name, email and password" },
-  { title: "Company", blurb: "Name and country" },
-  { title: "Project", blurb: "Your first job" },
-  { title: "Invite team", blurb: "Optional teammates" },
-  { title: "Terms", blurb: "Read and agree to continue" },
-];
-
-export const INVITE_FLOW_STEPS: readonly FlowStep[] = [
-  { title: "Account", blurb: "Your name, email and password" },
-  { title: "Terms", blurb: "Read and agree to continue" },
-];
-
-export const WIZARD_STEP_OFFSET = 1;

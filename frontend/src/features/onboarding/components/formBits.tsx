@@ -9,16 +9,11 @@ export function QuantoMark({ className = "h-10 w-10" }: { className?: string }) 
   );
 }
 
-export function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return <p className="text-sm text-red-600">{message}</p>;
-}
-
 export function FieldLabel({ htmlFor, children, required = false }: { htmlFor?: string; children: ReactNode; required?: boolean }) {
   return (
-    <label htmlFor={htmlFor} className="flex items-center gap-1 text-sm font-medium text-slate-950">
+    <label htmlFor={htmlFor} className="flex items-center gap-1 text-sm font-medium text-foreground">
       {children}
-      {required ? <span className="text-red-600">*</span> : null}
+      {required ? <span className="text-destructive">*</span> : null}
     </label>
   );
 }

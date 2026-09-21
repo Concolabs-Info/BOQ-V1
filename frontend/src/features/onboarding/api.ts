@@ -1,7 +1,4 @@
-import { fetchTermsMeta, hasAcceptedTerms } from "@/features/legal/termsClient";
-import { getPlatformContext } from "@/features/platform/services/platformService";
 import { removeCachedJson, requestJson } from "@/shared/services/apiClient";
-import { appRoutes } from "@/shared/constants/appRoutes";
 import type { CreatedCompany, CreatedProject, OnboardingStatus } from "./types";
 
 const STATUS_PATH = "/api/v1/platform/onboarding/status";
@@ -83,40 +80,4 @@ export function claimInvitation(token?: string | null) {
     removeCachedJson(ME_PATH);
     return result;
   });
-}
-
-export function acceptTerms(version: string) {
-  return requestJson<{ ok: boolean; terms_version: string }>("/api/v1/platform/onboarding/terms", {
-    method: "POST",
-    body: JSON.stringify({ version }),
-    skipCache: true,
-  }).then((result) => {
-    removeCachedJson(ME_PATH);
-    return result;
-  });
-}
-
-export async function currentTermsAccepted() {
-  try {
-    const [context, meta] = await Promise.all([getPlatformContext(), fetchTermsMeta()]);
-    return hasAcceptedTerms(context, meta);
-  } catch {
-    return false;
-  }
-}
-
-export async function continueAfterTerms(): Promise<string> {
-  try {
-    const claimed = await claimInvitation();
-    if (claimed.claimed || claimed.already_member) {
-      return appRoutes.projects;
-    }
-  } catch {
-    // No open invite — fall through to onboarding or the project library.
-  }
-  const status = await getOnboardingStatus();
-  if (status.has_company || status.path === "DONE") {
-    return appRoutes.projects;
-  }
-  return appRoutes.onboarding;
 }

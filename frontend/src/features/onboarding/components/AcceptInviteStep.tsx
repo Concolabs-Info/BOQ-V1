@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/shared/components/Button";
+import { useTranslations } from "next-intl";
+import { LoadingButton } from "@/components/ui/loading-button";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { ApiRequestError } from "@/shared/services/apiClient";
-import { claimInvitation, currentTermsAccepted, declinePendingInvites } from "../api";
+import { claimInvitation, declinePendingInvites } from "../api";
 import type { ExistingCompany } from "../types";
-import { SignedInAs } from "./SignedInAs";
+import { onboarding3dButton } from "./onboardingButtonStyle";
+import { TermsConsentLine } from "./TermsConsentLine";
 
 export function AcceptInviteStep({
   company,
@@ -16,6 +18,7 @@ export function AcceptInviteStep({
   company: ExistingCompany | null;
   projectCount?: number;
 }) {
+  const t = useTranslations("onboarding.acceptInvite");
   const router = useRouter();
   const started = useRef(false);
   const label = company?.name ?? "the company";
@@ -25,10 +28,6 @@ export function AcceptInviteStep({
   async function join() {
     setPending(true);
     setError(null);
-    if (!(await currentTermsAccepted())) {
-      router.replace(appRoutes.onboardingTerms);
-      return;
-    }
     try {
       const result = await claimInvitation();
       if (result.claimed || result.already_member) {
@@ -40,7 +39,7 @@ export function AcceptInviteStep({
       if (caught instanceof ApiRequestError && caught.status === 410) {
         setError("This invitation has expired. Ask an admin to send a new one.");
       } else {
-        setError(caught instanceof Error ? caught.message : "We couldn't finish joining. Try again.");
+        setError(caught instanceof Error ? caught.message : `We couldn't get you into ${label}. Mind trying again?`);
       }
     } finally {
       setPending(false);
@@ -56,32 +55,30 @@ export function AcceptInviteStep({
   return (
     <div className="flex flex-col gap-5">
       {pending && !error ? (
-        <p className="text-sm leading-6 text-slate-500">Joining {label}…</p>
+        <p className="text-sm leading-6 text-muted-foreground">{t("joining", { name: label })}</p>
       ) : null}
       {error ? (
         <>
-          <p className="text-sm leading-6 text-red-600">{error}</p>
-          <Button type="button" className="h-11 w-full rounded-xl" onClick={() => void join()}>
-            Try again
-          </Button>
+          <p className="text-sm leading-6 text-destructive">{error}</p>
+          <LoadingButton type="button" className={`h-11 w-full ${onboarding3dButton}`} onClick={() => void join()}>
+            {t("tryAgain")}
+          </LoadingButton>
         </>
       ) : !pending ? (
-        <Button type="button" className="h-11 w-full rounded-xl" onClick={() => void join()}>
-          Join {label}
-        </Button>
+        <LoadingButton type="button" className={`h-11 w-full ${onboarding3dButton}`} onClick={() => void join()}>
+          {t("joinButton", { name: label })}
+        </LoadingButton>
       ) : null}
       {projectCount > 0 ? (
-        <p className="text-sm leading-6 text-slate-500">
-          You'll only see the {projectCount === 1 ? "project they picked" : `${projectCount} projects they picked`}.
+        <p className="text-sm leading-6 text-muted-foreground">
+          {projectCount === 1 ? t("projectCountSingular") : t("projectCountPlural", { count: projectCount })}
         </p>
       ) : (
-        <p className="text-sm leading-6 text-slate-500">
-          You can join now. An owner can add you to a project from Settings after.
-        </p>
+        <p className="text-sm leading-6 text-muted-foreground">{t("noProjectYet")}</p>
       )}
       <button
         type="button"
-        className="self-start text-sm font-medium text-slate-500 underline underline-offset-2 hover:text-slate-950"
+        className="self-start text-sm font-medium text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
         disabled={pending}
         onClick={() => {
           void (async () => {
@@ -94,9 +91,9 @@ export function AcceptInviteStep({
           })();
         }}
       >
-        Set up a new company with this account instead
+        {t("setUpInstead")}
       </button>
-      <SignedInAs />
+      <TermsConsentLine action={t("consentAction")} />
     </div>
   );
 }

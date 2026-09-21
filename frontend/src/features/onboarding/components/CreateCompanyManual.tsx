@@ -1,56 +1,56 @@
 "use client";
 
 import { useState } from "react";
-import { AuthField } from "@/features/auth/components/AuthField";
-import { Button } from "@/shared/components/Button";
+import { AnimatePresence, motion } from "framer-motion";
+import { useTranslations } from "next-intl";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { LoadingButton } from "@/components/ui/loading-button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FieldErrorText } from "@/shared/components/FieldErrorText";
 import { ApiRequestError } from "@/shared/services/apiClient";
-import { cn } from "@/shared/lib/cn";
 import { createOnboardingCompany } from "../api";
 import { currencyForCountry } from "../countries";
+import type { CreatedCompany } from "../types";
 import { CountrySelect } from "./CountrySelect";
-import { FieldError, FieldLabel } from "./formBits";
+import { onboarding3dButton } from "./onboardingButtonStyle";
+import { TermsConsentLine } from "./TermsConsentLine";
 
-type RegType = "PV" | "BR" | "NONE";
+type RegKind = "PV" | "BR";
 
-const REG_OPTIONS: { value: RegType; label: string; placeholder?: string }[] = [
-  { value: "PV", label: "Private company (PV number)", placeholder: "PV 00123456" },
-  { value: "BR", label: "Business name (BR number)", placeholder: "W/12/3456" },
-  { value: "NONE", label: "Not registered yet / registered outside Sri Lanka" },
-];
+const REG_PLACEHOLDER: Record<RegKind, string> = {
+  PV: "PV 00123456",
+  BR: "W/12/3456",
+};
 
-export function CreateCompanyManual({ onCreated }: { onCreated: () => void }) {
+export function CreateCompanyManual({ onCreated }: { onCreated: (company: CreatedCompany) => void }) {
+  const t = useTranslations("onboarding.createCompanyManual");
   const [name, setName] = useState("");
-  const [regType, setRegType] = useState<RegType | "">("");
+  const [hasRegNumber, setHasRegNumber] = useState(false);
+  const [regKind, setRegKind] = useState<RegKind>("PV");
   const [regNumber, setRegNumber] = useState("");
   const [country, setCountry] = useState("Sri Lanka");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  const showNumber = regType === "PV" || regType === "BR";
-  const placeholder = REG_OPTIONS.find((option) => option.value === regType)?.placeholder;
-
   async function submit() {
     setErrors({});
     setFormError(null);
-    if (!regType) {
-      setErrors({ regType: "Choose one." });
-      return;
-    }
     setPending(true);
     try {
-      await createOnboardingCompany({
+      const created = await createOnboardingCompany({
         name,
         country,
-        registration_type: regType,
-        registration_number: showNumber ? regNumber : undefined,
+        registration_type: hasRegNumber ? regKind : "NONE",
+        registration_number: hasRegNumber ? regNumber : undefined,
       });
-      onCreated();
+      onCreated(created);
     } catch (error) {
       if (error instanceof ApiRequestError && error.details?.field) {
         setErrors({ [error.details.field]: error.rawMessage || error.message });
       } else {
-        setFormError(error instanceof Error ? error.message : "Something went wrong. Please try again.");
+        setFormError(error instanceof Error ? error.message : "That didn't save. Mind trying again?");
       }
     } finally {
       setPending(false);
@@ -65,67 +65,85 @@ export function CreateCompanyManual({ onCreated }: { onCreated: () => void }) {
         void submit();
       }}
     >
-      <AuthField
-        id="company-name"
-        label="Company name"
-        required
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        autoFocus
-        error={errors.name}
-      />
+      <FieldGroup>
+        <Field data-invalid={Boolean(errors.name)} className="!gap-1">
+          <FieldLabel htmlFor="company-name" required>{t("companyName")}</FieldLabel>
+          <Input
+            id="company-name"
+            required
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            autoFocus
+            aria-invalid={Boolean(errors.name)}
+            className="h-10"
+          />
+          <FieldErrorText>{errors.name}</FieldErrorText>
+        </Field>
+      </FieldGroup>
 
-      <fieldset className="flex flex-col gap-2">
-        <legend className="mb-1">
-          <FieldLabel required>Registration type</FieldLabel>
-        </legend>
-        {REG_OPTIONS.map((option) => (
-          <label
-            key={option.value}
-            className={cn(
-              "flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm",
-              regType === option.value ? "border-blue-600 bg-blue-50 text-slate-950" : "border-slate-200 text-slate-700",
-            )}
-          >
-            <input
-              type="radio"
-              name="regType"
-              value={option.value}
-              checked={regType === option.value}
-              onChange={() => setRegType(option.value)}
-              className="accent-blue-600"
-            />
-            {option.label}
-          </label>
-        ))}
-        <FieldError message={errors.regType} />
-      </fieldset>
+      <div className="flex flex-col gap-3 rounded-lg border border-input px-3 py-2.5">
+        <label className="flex cursor-pointer items-center justify-between gap-3 text-sm">
+          <span>
+            <span className="font-medium text-foreground">{t("hasRegNumber")}</span>
+            <span className="block text-xs text-muted-foreground">{t("hasRegNumberHint")}</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={hasRegNumber}
+            onChange={(event) => setHasRegNumber(event.target.checked)}
+            className="size-4 shrink-0 accent-primary"
+          />
+        </label>
 
-      {showNumber ? (
-        <AuthField
-          id="reg-number"
-          label="Registration number"
-          required
-          value={regNumber}
-          placeholder={placeholder}
-          onChange={(event) => setRegNumber(event.target.value)}
-          error={errors.registrationNumber}
-        />
-      ) : null}
-
-      <div className="flex flex-col gap-2">
-        <FieldLabel htmlFor="country" required>
-          Country
-        </FieldLabel>
-        <CountrySelect id="country" value={country} onChange={setCountry} />
-        <p className="text-xs text-slate-500">Currency: {currencyForCountry(country)}</p>
+        <AnimatePresence initial={false}>
+          {hasRegNumber ? (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="-m-1 overflow-hidden p-1"
+            >
+              <div className="flex flex-col gap-2 pt-1 sm:flex-row">
+                <Select value={regKind} onValueChange={(next) => setRegKind(next as RegKind)}>
+                  <SelectTrigger className="sm:w-40 sm:shrink-0">
+                    <SelectValue>{regKind === "PV" ? "PV number" : "BR number"}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="PV">PV number</SelectItem>
+                    <SelectItem value="BR">BR number</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="flex flex-1 flex-col gap-1.5">
+                  <Input
+                    id="reg-number"
+                    required
+                    value={regNumber}
+                    placeholder={REG_PLACEHOLDER[regKind]}
+                    onChange={(event) => setRegNumber(event.target.value)}
+                    aria-invalid={Boolean(errors.registrationNumber)}
+                    className="h-10"
+                  />
+                  <FieldErrorText>{errors.registrationNumber}</FieldErrorText>
+                </div>
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </div>
 
-      {formError ? <p className="text-sm text-red-600">{formError}</p> : null}
+      <div className="flex flex-col gap-2">
+        <FieldLabel htmlFor="country">{t("country")}</FieldLabel>
+        <CountrySelect id="country" value={country} onChange={setCountry} />
+        <p className="text-xs text-muted-foreground">{t("currency", { currency: currencyForCountry(country) })}</p>
+      </div>
 
-      <Button type="submit" pending={pending} className="h-11 w-full rounded-xl">
-        {pending ? "Creating…" : "Create company"}
-      </Button>
+      <FieldErrorText>{formError}</FieldErrorText>
+
+      <LoadingButton type="submit" pending={pending} className={`h-11 w-full ${onboarding3dButton}`}>
+        {pending ? t("creating") : t("createButton")}
+      </LoadingButton>
+      <TermsConsentLine action={t("consentAction")} />
     </form>
   );
 }

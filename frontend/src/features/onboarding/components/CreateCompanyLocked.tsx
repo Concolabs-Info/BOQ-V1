@@ -1,21 +1,27 @@
 "use client";
+import { FieldErrorText } from "@/shared/components/FieldErrorText";
 
 import { useState } from "react";
-import { AuthField } from "@/features/auth/components/AuthField";
-import { Button } from "@/shared/components/Button";
+import { useTranslations } from "next-intl";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { LoadingButton } from "@/components/ui/loading-button";
 import { ApiRequestError } from "@/shared/services/apiClient";
 import { createOnboardingCompany } from "../api";
 import { currencyForCountry } from "../countries";
+import type { CreatedCompany } from "../types";
 import { CountrySelect } from "./CountrySelect";
-import { FieldLabel } from "./formBits";
+import { onboarding3dButton } from "./onboardingButtonStyle";
+import { TermsConsentLine } from "./TermsConsentLine";
 
 export function CreateCompanyLocked({
   suggestedName,
   onCreated,
 }: {
   suggestedName: string;
-  onCreated: () => void;
+  onCreated: (company: CreatedCompany) => void;
 }) {
+  const t = useTranslations("onboarding.createCompanyLocked");
   const [name, setName] = useState(suggestedName);
   const [country, setCountry] = useState("Sri Lanka");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -27,13 +33,13 @@ export function CreateCompanyLocked({
     setFormError(null);
     setPending(true);
     try {
-      await createOnboardingCompany({ name, country, lock_domain: true });
-      onCreated();
+      const created = await createOnboardingCompany({ name, country, lock_domain: true });
+      onCreated(created);
     } catch (error) {
       if (error instanceof ApiRequestError && error.details?.field) {
         setErrors({ [error.details.field]: error.rawMessage || error.message });
       } else {
-        setFormError(error instanceof Error ? error.message : "Something went wrong. Please try again.");
+        setFormError(error instanceof Error ? error.message : "That didn't save. Mind trying again?");
       }
     } finally {
       setPending(false);
@@ -48,29 +54,34 @@ export function CreateCompanyLocked({
         void submit();
       }}
     >
-      <AuthField
-        id="company-name"
-        label="Company name"
-        required
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        autoFocus
-        error={errors.name}
-      />
+      <FieldGroup>
+        <Field data-invalid={Boolean(errors.name)} className="!gap-1">
+          <FieldLabel htmlFor="company-name" required>{t("companyName")}</FieldLabel>
+          <Input
+            id="company-name"
+            required
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            autoFocus
+            aria-invalid={Boolean(errors.name)}
+            className="h-10"
+          />
+          <FieldErrorText>{errors.name}</FieldErrorText>
+        </Field>
+      </FieldGroup>
 
       <div className="flex flex-col gap-2">
-        <FieldLabel htmlFor="country" required>
-          Country
-        </FieldLabel>
+        <FieldLabel htmlFor="country">{t("country")}</FieldLabel>
         <CountrySelect id="country" value={country} onChange={setCountry} />
-        <p className="text-xs text-slate-500">Currency: {currencyForCountry(country)}</p>
+        <p className="text-xs text-muted-foreground">{t("currency", { currency: currencyForCountry(country) })}</p>
       </div>
 
-      {formError ? <p className="text-sm text-red-600">{formError}</p> : null}
+      <FieldErrorText>{formError}</FieldErrorText>
 
-      <Button type="submit" pending={pending} className="h-11 w-full rounded-xl">
-        {pending ? "Creating…" : "Create company"}
-      </Button>
+      <LoadingButton type="submit" pending={pending} className={`h-11 w-full ${onboarding3dButton}`}>
+        {pending ? t("creating") : t("createButton")}
+      </LoadingButton>
+      <TermsConsentLine action={t("consentAction")} />
     </form>
   );
 }

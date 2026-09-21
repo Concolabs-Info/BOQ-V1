@@ -1,20 +1,23 @@
 "use client";
 
 import { Suspense } from "react";
+import { useTranslations } from "next-intl";
 import { LoadingState } from "@/shared/components/LoadingState";
-import { BrandRailNote } from "@/features/onboarding/components/OnboardingStepper";
-import { OnboardingShell } from "@/features/onboarding/components/OnboardingShell";
+import { MinimalShell } from "@/features/onboarding/components/MinimalShell";
 import { OnboardingWizard } from "@/features/onboarding/components/OnboardingWizard";
+
+function OnboardingLoadingFallback() {
+  const t = useTranslations("shell");
+  return (
+    <MinimalShell heading={t("settingUp")}>
+      <LoadingState label={t("loadingSetup")} />
+    </MinimalShell>
+  );
+}
 
 export default function OnboardingPage() {
   return (
-    <Suspense
-      fallback={
-        <OnboardingShell rail={<BrandRailNote />} heading="Setting up">
-          <LoadingState label="Loading your company setup" />
-        </OnboardingShell>
-      }
-    >
+    <Suspense fallback={<OnboardingLoadingFallback />}>
       <OnboardingWizard />
     </Suspense>
   );

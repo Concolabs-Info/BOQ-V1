@@ -4,7 +4,6 @@ export const appRoutes = {
   resetPassword: "/sign-in",
   dashboard: "/projects",
   onboarding: "/onboarding",
-  onboardingTerms: "/onboarding/terms",
   createProject: "/projects/new",
   upload: "/projects",
   projects: "/projects",

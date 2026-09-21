@@ -2,74 +2,54 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { LoadingState } from "@/shared/components/LoadingState";
 import { appRoutes } from "@/shared/constants/appRoutes";
-import { fetchTermsMeta, hasAcceptedTerms } from "@/features/legal/termsClient";
-import { getPlatformContext } from "@/features/platform/services/platformService";
-import { listProjects } from "@/features/projects/services/projectService";
 import { getOnboardingStatus } from "../api";
-import { FLOW_STEPS, WIZARD_STEP_OFFSET, type CreatedProject, type OnboardingStatus, type WizardStep } from "../types";
+import type { CreatedProject, OnboardingStatus, WizardStep } from "../types";
 import { AcceptInviteStep } from "./AcceptInviteStep";
 import { CreateCompanyLocked } from "./CreateCompanyLocked";
 import { CreateCompanyManual } from "./CreateCompanyManual";
 import { FirstProjectStep } from "./FirstProjectStep";
 import { InviteStep } from "./InviteStep";
 import { JoinCompany } from "./JoinCompany";
-import { BrandRailNote, OnboardingStepper } from "./OnboardingStepper";
-import { OnboardingShell } from "./OnboardingShell";
+import { MinimalShell } from "./MinimalShell";
+import { OnboardingCapabilities } from "./OnboardingCapabilities";
+import { OnboardingWelcome } from "./OnboardingWelcome";
 import { RemovedFromCompany } from "./RemovedFromCompany";
 import { SignedInAs } from "./SignedInAs";
 
-const STEP_INDEX: Record<WizardStep, number> = { branch: 0, project: 1, invite: 2 };
-
 export function OnboardingWizard() {
+  const t = useTranslations("onboarding.wizard");
+  const shellT = useTranslations("shell");
   const router = useRouter();
   const searchParams = useSearchParams();
   const asFounder = searchParams.get("founder") === "1";
   const afterDelete = searchParams.get("after") === "deleted";
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [step, setStep] = useState<WizardStep>("branch");
+  const [companyName, setCompanyName] = useState<string | null>(null);
   const [firstProject, setFirstProject] = useState<CreatedProject | null>(null);
-  const [resumeProjects, setResumeProjects] = useState<{ id: string; name: string }[]>([]);
-  const [resumingWizard, setResumingWizard] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     getOnboardingStatus(asFounder, afterDelete)
-      .then(async (next) => {
+      .then((next) => {
         if (!mounted) return;
         setStatus(next);
         if (next.path === "DONE") {
-          try {
-            const [context, meta] = await Promise.all([getPlatformContext(), fetchTermsMeta()]);
-            if (!mounted) return;
-            if (hasAcceptedTerms(context, meta)) {
-              router.replace(appRoutes.projects);
-              return;
-            }
-            // Signed out (or just closed the tab) after creating a project
-            // but before reaching invite or terms - resume at invite rather
-            // than warping straight to terms, the same way skipping the
-            // project step does within one session.
-            const projects = await listProjects({ limit: 100, offset: 0 }).catch(() => ({ projects: [] }));
-            if (!mounted) return;
-            setResumeProjects(projects.projects.map((project) => ({ id: project.id, name: project.name })));
-            setResumingWizard(true);
-            setStep("invite");
-          } catch {
-            if (mounted) {
-              setResumingWizard(true);
-              setStep("invite");
-            }
-          }
+          router.replace(appRoutes.projects);
           return;
         }
-        if (next.path === "CONTINUE_WIZARD") setStep("project");
+        if (next.path === "CONTINUE_WIZARD") {
+          setCompanyName(next.existing_company?.name ?? null);
+          setStep("capabilities");
+        }
       })
       .catch((caught) => {
-        if (mounted) setError(caught instanceof Error ? caught.message : "Onboarding could not be loaded.");
+        if (mounted) setError(caught instanceof Error ? caught.message : "We couldn't load your setup. Try refreshing the page.");
       });
     return () => {
       mounted = false;
@@ -78,17 +58,17 @@ export function OnboardingWizard() {
 
   if (error) {
     return (
-      <OnboardingShell rail={<BrandRailNote />} heading="Could not load setup">
+      <MinimalShell heading={shellT("couldNotLoad")} stepKey="error">
         <ErrorMessage message={error} />
-      </OnboardingShell>
+      </MinimalShell>
     );
   }
 
-  if (!status || (status.path === "DONE" && !resumingWizard)) {
+  if (!status || status.path === "DONE") {
     return (
-      <OnboardingShell rail={<BrandRailNote />} heading="Setting up">
-        <LoadingState label="Loading your company setup" />
-      </OnboardingShell>
+      <MinimalShell heading={shellT("settingUp")} stepKey="loading">
+        <LoadingState label={shellT("loadingSetup")} />
+      </MinimalShell>
     );
   }
 
@@ -99,87 +79,127 @@ export function OnboardingWizard() {
   if (status.path === "ACCEPT_INVITE") {
     const label = status.existing_company?.name ?? "your company";
     return (
-      <OnboardingShell
-        rail={<BrandRailNote />}
-        heading={`Join ${label}`}
-        sub="You've been invited. You'll only see the projects they picked for you."
+      <MinimalShell
+        heading={t("joinCompanyTitle", { name: label })}
+        sub={t("joinCompanySub")}
+        stepKey="accept-invite"
+        footer={<SignedInAs />}
       >
         <AcceptInviteStep company={status.existing_company} projectCount={status.pending_project_count ?? 0} />
-      </OnboardingShell>
+      </MinimalShell>
     );
   }
 
   if (status.path === "REQUEST_TO_JOIN") {
     const label = status.existing_company?.name ?? status.domain ?? "your company";
     return (
-      <OnboardingShell
-        rail={<BrandRailNote />}
-        heading={afterDelete ? `${label} is still on Quanto` : `${label} is already on Quanto`}
-        sub={
-          afterDelete
-            ? "Your previous company was deleted. Send a request to join this one. An admin approves it from their members list."
-            : "Send a request to join. An admin approves it from their members list."
-        }
+      <MinimalShell
+        heading={afterDelete ? t("stillOnQuanto", { name: label }) : t("alreadyOnQuanto", { name: label })}
+        sub={afterDelete ? t("requestToJoinSubAfterDelete") : t("requestToJoinSub")}
+        stepKey="request-to-join"
+        footer={<SignedInAs />}
       >
-        <div className="flex flex-col gap-6">
-          <JoinCompany company={status.existing_company} domain={status.domain} />
-          <SignedInAs />
-        </div>
-      </OnboardingShell>
+        <JoinCompany company={status.existing_company} domain={status.domain} />
+      </MinimalShell>
     );
   }
 
-  const current = WIZARD_STEP_OFFSET + STEP_INDEX[step];
-  let heading = afterDelete ? "Create a new company" : "Set up your company";
-  let sub = afterDelete
-    ? "Your previous company was deleted. A few details to get started again."
-    : "A few details to get started. Billing and tax info come later.";
-  let body = <CreateCompanyManual onCreated={() => setStep("project")} />;
-
-  if (step === "branch" && status.path === "CREATE_WITH_DOMAIN_LOCK") {
-    heading = afterDelete
-      ? `Set up ${status.suggested_name || "your company"} again`
-      : `Set up ${status.suggested_name || "your company"}`;
-    sub = afterDelete
-      ? "Your previous company was deleted. Create a new one to keep working on projects."
-      : "You'll be the owner. We matched your work email domain.";
-    body = <CreateCompanyLocked suggestedName={status.suggested_name} onCreated={() => setStep("project")} />;
-  } else if (step === "project") {
-    heading = "Create your first project";
-    sub = "Same details as a new project later. Only the name is required.";
-    body = (
-      <FirstProjectStep
-        onCreated={(project) => {
-          setFirstProject(project);
-          setStep("invite");
-        }}
-        onSkip={() => setStep("invite")}
-      />
+  if (step === "capabilities") {
+    return (
+      <MinimalShell
+        heading={companyName ? t("capabilitiesTitleNamed", { name: companyName }) : t("capabilitiesTitle")}
+        sub={t("capabilitiesSub")}
+        width="2xl"
+        stepKey="capabilities"
+        footer={<SignedInAs />}
+      >
+        <OnboardingCapabilities
+          onCreateProject={() => setStep("project")}
+          onGoToDashboard={() => setStep("welcome")}
+        />
+      </MinimalShell>
     );
-  } else if (step === "invite") {
-    heading = "Invite your team";
-    sub = firstProject
-      ? `Optional. People without an account get an email. Anyone who already has a Quanto account joins the next time they sign in, and they'll only see ${firstProject.name} unless you change that.`
-      : "Optional. People without an account get an email. Anyone who already has a Quanto account joins the next time they sign in.";
-    body = (
-      <InviteStep
-        projects={firstProject ? [{ id: firstProject.id, name: firstProject.name }] : resumeProjects}
-        onDone={() => router.replace(`${appRoutes.onboardingTerms}?from=setup`)}
-      />
+  }
+
+  if (step === "project") {
+    return (
+      <MinimalShell
+        heading={t("createProjectTitle")}
+        sub={t("createProjectSub")}
+        width="lg"
+        stepKey="project"
+        footer={<SignedInAs />}
+      >
+        <FirstProjectStep
+          onCreated={(project) => {
+            setFirstProject(project);
+            setStep("invite");
+          }}
+          onSkip={() => setStep("invite")}
+        />
+      </MinimalShell>
+    );
+  }
+
+  if (step === "invite") {
+    const sub = firstProject
+      ? t("inviteTeamSubWithProject", { project: firstProject.name })
+      : t("inviteTeamSub");
+    return (
+      <MinimalShell heading={t("inviteTeamTitle")} sub={sub} width="lg" stepKey="invite" footer={<SignedInAs />}>
+        <InviteStep
+          projects={firstProject ? [{ id: firstProject.id, name: firstProject.name }] : []}
+          onDone={() => setStep("welcome")}
+        />
+      </MinimalShell>
+    );
+  }
+
+  if (step === "welcome") {
+    return (
+      <MinimalShell
+        heading={t("welcomeTitle")}
+        sub={t("welcomeSub")}
+        stepKey="welcome"
+        card={false}
+        footer={<SignedInAs />}
+      >
+        <OnboardingWelcome onContinue={() => router.replace(appRoutes.projects)} />
+      </MinimalShell>
+    );
+  }
+
+  // step === "branch": company creation / join.
+  let heading = afterDelete ? t("createCompanyTitleAfterDelete") : t("createCompanyTitle");
+  let sub = afterDelete ? t("createCompanySubAfterDelete") : t("createCompanySub");
+
+  if (status.path === "CREATE_WITH_DOMAIN_LOCK") {
+    const suggested = status.suggested_name || "your company";
+    heading = afterDelete
+      ? t("createCompanyLockedTitleAfterDelete", { name: suggested })
+      : t("createCompanyLockedTitle", { name: suggested });
+    sub = afterDelete ? t("createCompanyLockedSubAfterDelete") : t("createCompanyLockedSub");
+    return (
+      <MinimalShell heading={heading} sub={sub} width="lg" stepKey="branch-locked" footer={<SignedInAs />}>
+        <CreateCompanyLocked
+          suggestedName={status.suggested_name}
+          onCreated={(company) => {
+            setCompanyName(company.name);
+            setStep("capabilities");
+          }}
+        />
+      </MinimalShell>
     );
   }
 
   return (
-    <OnboardingShell
-      rail={<OnboardingStepper current={current} />}
-      heading={heading}
-      sub={sub}
-      mobileHint={`Step ${current + 1} of ${FLOW_STEPS.length}`}
-    >
-      <div className="flex flex-col gap-6">
-        {body}
-        <SignedInAs />
-      </div>
-    </OnboardingShell>
+    <MinimalShell heading={heading} sub={sub} width="lg" stepKey="branch-manual" footer={<SignedInAs />}>
+      <CreateCompanyManual
+        onCreated={(company) => {
+          setCompanyName(company.name);
+          setStep("capabilities");
+        }}
+      />
+    </MinimalShell>
   );
 }

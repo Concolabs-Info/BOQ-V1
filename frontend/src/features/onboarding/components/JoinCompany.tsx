@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Button } from "@/shared/components/Button";
+import { useTranslations } from "next-intl";
+import { Button } from "@/components/ui/button";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import type { ExistingCompany } from "../types";
+import { onboarding3dButton } from "./onboardingButtonStyle";
 
 export function JoinCompany({
   company,
@@ -13,19 +15,22 @@ export function JoinCompany({
   company: ExistingCompany | null;
   domain: string | null;
 }) {
+  const t = useTranslations("onboarding.joinCompany");
   const router = useRouter();
   const label = company?.name ?? domain ?? "your company";
 
   return (
     <div className="flex flex-col gap-4">
-      <Button type="button" className="h-11 w-full rounded-xl" onClick={() => router.push(`${appRoutes.onboarding}/pending`)}>
-        Request to join
+      <Button
+        type="button"
+        className={`h-11 w-full ${onboarding3dButton}`}
+        onClick={() => router.push(`${appRoutes.onboarding}/pending`)}
+      >
+        {t("requestButton")}
       </Button>
-      <p className="text-sm leading-6 text-slate-500">
-        An admin at {label} invites people by email. If you already have an invite, open that email instead.
-      </p>
-      <Link href={`${appRoutes.onboarding}?founder=1`} className="text-sm font-medium text-blue-700 hover:text-blue-800">
-        Set up a new company with this account instead
+      <p className="text-sm leading-6 text-muted-foreground">{t("hint", { name: label })}</p>
+      <Link href={`${appRoutes.onboarding}?founder=1`} className="text-sm font-medium text-primary hover:underline">
+        {t("setUpInstead")}
       </Link>
     </div>
   );
