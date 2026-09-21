@@ -88,6 +88,14 @@ def test_send_invites_rejects_admin_role(monkeypatch):
     assert result.failures[0].reason == "Pick an assignable role."
 
 
+def test_send_invites_rejects_inviting_self(monkeypatch):
+    monkeypatch.setattr(invitations, "invitation_redirect_url", lambda: "http://localhost:3000/sign-up")
+    # Case-insensitive: this must be caught before any DB/Clerk call is made.
+    result = invitations.send_invites(ADMIN, MEMBERSHIP, [{"email": "Owner@Acme.com", "role": "qs"}])
+    assert result.sent == 0
+    assert result.failures[0].reason == "That's your own email. You're already on the team!"
+
+
 def test_send_invites_rejects_existing_member_email(monkeypatch):
     monkeypatch.setattr(invitations, "invitation_redirect_url", lambda: "http://localhost:3000/sign-up")
     monkeypatch.setattr(invitations, "_email_already_in_a_company", lambda email: True)
@@ -228,14 +236,6 @@ def test_send_invites_revokes_expired_pending_from_any_company(monkeypatch):
     assert "company_id = %s OR expires_at" in revoke or "company_id = %s OR expires_at <= now()" in revoke
 
 
-def test_claim_requires_current_terms(monkeypatch):
-    monkeypatch.setattr(invitations, "get_company_membership", lambda user_id: None)
-    unsigned = CurrentUser(id="user_guest", email="join@acme.com", full_name="Join")
-    with pytest.raises(invitations.InvitationError) as excinfo:
-        invitations.claim_invitation(unsigned)
-    assert excinfo.value.code == "terms"
-
-
 def test_claim_returns_already_member(monkeypatch):
     monkeypatch.setattr(invitations, "get_company_membership", lambda user_id: MEMBERSHIP)
     result = invitations.claim_invitation(ADMIN)
@@ -261,15 +261,20 @@ def test_claim_by_email_inserts_membership(monkeypatch):
     monkeypatch.setattr(invitations, "fetch_one", lambda sql, params=(): {"id": "c1", "name": "Acme"})
     conn = FakeConn()
     patch_tx(monkeypatch, conn)
-    result = invitations.claim_invitation(GUEST)
+    # No prior terms_accepted_at - claiming still succeeds; acceptance is
+    # stamped as part of the claim itself, not gated on beforehand.
+    unsigned = CurrentUser(id="user_guest", email="join@acme.com", full_name="Join")
+    result = invitations.claim_invitation(unsigned)
     assert result == invitations.ClaimResult(claimed=True, company_id="c1", company_name="Acme", role="qs")
     assert any("INSERT INTO company_member" in sql for sql, _params in conn.calls)
     assert any(
-        "INSERT INTO project_member" in sql and params == ("p1", GUEST.id) for sql, params in conn.calls
+        "INSERT INTO project_member" in sql and params == ("p1", unsigned.id) for sql, params in conn.calls
     )
     assert any("status = 'accepted'" in sql for sql, _params in conn.calls)
     assert any("status = 'revoked'" in sql and "id <>" in sql for sql, _params in conn.calls)
     assert any("DELETE FROM former_member" in sql for sql, _params in conn.calls)
+    terms_params = next(params for sql, params in conn.calls if "UPDATE app_user SET terms_accepted_at" in sql)
+    assert terms_params == (CURRENT_TERMS_VERSION, unsigned.id)
 
 
 def test_pending_invite_for_email_counts_projects(monkeypatch):

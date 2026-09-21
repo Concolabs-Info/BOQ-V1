@@ -14,7 +14,7 @@ from ...core.ids import is_valid_uuid
 from ...core.rbac import ASSIGNABLE_ROLES, DEFAULT_INVITE_ROLE, is_custom_role_key
 from ...database.connection import execute, fetch_all, fetch_one, transaction
 from .membership import CompanyMembership, get_company_membership
-from .terms import has_accepted_current
+from .terms import CURRENT_TERMS_VERSION
 
 try:
     from psycopg.errors import UniqueViolation
@@ -179,9 +179,16 @@ def send_invites(
     redirect_url = invitation_redirect_url()
     expires_at = datetime.now(timezone.utc) + timedelta(days=INVITE_TTL_DAYS)
 
+    own_email = user.email.strip().lower()
+
     for row in rows:
         email = str(row.get("email") or "").strip().lower()
         if not email:
+            continue
+        if email == own_email:
+            result.failures.append(
+                InviteFailure(email=email, reason="That's your own email. You're already on the team!")
+            )
             continue
         role = resolve_invite_role(row.get("role"), membership.company_id)
         if not role:
@@ -328,9 +335,6 @@ def claim_invitation(user: CurrentUser, *, token: str | None = None) -> ClaimRes
             company_name=existing.company_name,
             role=existing.role,
         )
-    if not has_accepted_current(user.terms_accepted_at, user.terms_version):
-        raise InvitationError("terms", "Accept the current terms to continue.")
-
     row = _pending_by_token(token) if token and token.strip() else _pending_by_email(user.email)
     if not row:
         return ClaimResult(claimed=False)
@@ -370,6 +374,13 @@ def claim_invitation(user: CurrentUser, *, token: str | None = None) -> ClaimRes
                 (user.email, row["id"]),
             )
             conn.execute("DELETE FROM former_member WHERE user_id = %s", (user.id,))
+            # Joining an existing company is the onboarding action the terms
+            # consent line sits under, so acceptance is recorded here rather
+            # than through a separate accept step.
+            conn.execute(
+                "UPDATE app_user SET terms_accepted_at = now(), terms_version = %s WHERE id = %s",
+                (CURRENT_TERMS_VERSION, user.id),
+            )
     except Exception as exc:
         text = str(exc).lower()
         if "company_member" in text or "user_id" in text:
