@@ -23,10 +23,14 @@ OptionType = Literal[
     "labour_group",
     "machinery_name",
     "machinery_source",
-    "unit_type",
+    "material_unit_type",
+    "labour_unit_type",
+    "machinery_unit_type",
 ]
 
-DEFAULT_UNIT_TYPES = ["m", "m2", "m3", "nr", "kg", "ton", "bag", "sheet", "litre"]
+DEFAULT_MATERIAL_UNIT_TYPES = ["m", "m2", "m3", "nr", "kg", "ton", "bag", "sheet", "litre"]
+DEFAULT_LABOUR_UNIT_TYPES = ["minute", "hour", "day"]
+DEFAULT_MACHINERY_UNIT_TYPES = ["hour", "day", "shift", "trip"]
 DEFAULT_OPTIONS: dict[str, list[str]] = {
     "main_item": [],
     "material_name": [],
@@ -36,7 +40,9 @@ DEFAULT_OPTIONS: dict[str, list[str]] = {
     "labour_group": [],
     "machinery_name": [],
     "machinery_source": [],
-    "unit_type": list(DEFAULT_UNIT_TYPES),
+    "material_unit_type": list(DEFAULT_MATERIAL_UNIT_TYPES),
+    "labour_unit_type": list(DEFAULT_LABOUR_UNIT_TYPES),
+    "machinery_unit_type": list(DEFAULT_MACHINERY_UNIT_TYPES),
 }
 
 
@@ -204,8 +210,19 @@ def list_rate_options(project_id: UUID):
            ORDER BY option_type,value""",
         (str(project_id),),
     )
+    hidden_rows = fetch_all(
+        """SELECT option_type,value
+           FROM rate_option_hidden
+           WHERE project_id=%s""",
+        (str(project_id),),
+    )
+    hidden = {(row["option_type"], row["value"]) for row in hidden_rows}
     values: dict[str, list[str]] = {key: list(defaults) for key, defaults in DEFAULT_OPTIONS.items()}
+    for option_type, option_values in values.items():
+        values[option_type] = [value for value in option_values if (option_type, value) not in hidden]
     for row in rows:
+        if (row["option_type"], row["value"]) in hidden:
+            continue
         current = values.setdefault(row["option_type"], [])
         if row["value"] not in current:
             current.append(row["value"])
@@ -216,6 +233,11 @@ def list_rate_options(project_id: UUID):
 def create_rate_option(project_id: UUID, body: RateOptionCreate):
     _require_project(project_id)
     with transaction() as conn:
+        conn.execute(
+            """DELETE FROM rate_option_hidden
+               WHERE project_id=%s AND option_type=%s AND value=%s""",
+            (str(project_id), body.option_type, body.value),
+        )
         row = conn.execute(
             """INSERT INTO rate_option(project_id,option_type,value)
                VALUES (%s,%s,%s)
@@ -224,6 +246,26 @@ def create_rate_option(project_id: UUID, body: RateOptionCreate):
             (str(project_id), body.option_type, body.value),
         ).fetchone()
     return dict(row)
+
+
+@router.delete("/projects/{project_id}/rate-options", status_code=204)
+def delete_rate_option(project_id: UUID, option_type: OptionType, value: str = Query(min_length=1, max_length=160)):
+    _require_project(project_id)
+    trimmed = value.strip()
+    if not trimmed:
+        raise HTTPException(422, "Option value is required")
+    with transaction() as conn:
+        conn.execute(
+            """DELETE FROM rate_option
+               WHERE project_id=%s AND option_type=%s AND value=%s""",
+            (str(project_id), option_type, trimmed),
+        )
+        conn.execute(
+            """INSERT INTO rate_option_hidden(project_id,option_type,value)
+               VALUES (%s,%s,%s)
+               ON CONFLICT(project_id,option_type,value) DO NOTHING""",
+            (str(project_id), option_type, trimmed),
+        )
 
 
 @router.get("/projects/{project_id}/rate-material-attributes")
@@ -285,6 +327,30 @@ def create_material_attribute_value(project_id: UUID, attribute_id: UUID, body: 
             (str(attribute_id), body.value),
         ).fetchone()
     return dict(row)
+
+
+@router.delete("/projects/{project_id}/rate-material-attributes/{attribute_id}", status_code=204)
+def delete_material_attribute(project_id: UUID, attribute_id: UUID):
+    _require_material_attribute(project_id, attribute_id)
+    with transaction() as conn:
+        conn.execute(
+            "DELETE FROM rate_material_attribute WHERE id=%s AND project_id=%s",
+            (str(attribute_id), str(project_id)),
+        )
+
+
+@router.delete("/projects/{project_id}/rate-material-attributes/{attribute_id}/values/{value_id}", status_code=204)
+def delete_material_attribute_value(project_id: UUID, attribute_id: UUID, value_id: UUID):
+    _require_material_attribute(project_id, attribute_id)
+    with transaction() as conn:
+        row = conn.execute(
+            """DELETE FROM rate_material_attribute_value
+               WHERE id=%s AND attribute_id=%s
+               RETURNING id""",
+            (str(value_id), str(attribute_id)),
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Material attribute value not found")
 
 
 @router.get("/projects/{project_id}/rate-files")

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createRateFile, createRateItem, createRateOption, deleteRateFile, deleteRateItem, listMaterialAttributes, listRateFiles, listRateItems, listRateOptions, updateRateFile, updateRateItem } from "./api";
+import { createRateFile, createRateItem, createRateOption, deleteMaterialAttribute, deleteMaterialAttributeValue, deleteRateFile, deleteRateItem, deleteRateOption, listMaterialAttributes, listRateFiles, listRateItems, listRateOptions, updateRateFile, updateRateItem } from "./api";
 import type { RateItemInput, RateOptionType } from "./types";
 
 export const rateFileKeys = {
@@ -56,6 +56,18 @@ export function useRateFileMutations(projectId: string, rateFileId: string | nul
     createOption: useMutation({
       mutationFn: ({ optionType, value }: { optionType: RateOptionType; value: string }) => createRateOption(projectId, optionType, value),
       onSuccess: () => client.invalidateQueries({ queryKey: rateFileKeys.options(projectId) }),
+    }),
+    deleteOption: useMutation({
+      mutationFn: ({ optionType, value }: { optionType: RateOptionType; value: string }) => deleteRateOption(projectId, optionType, value),
+      onSuccess: () => client.invalidateQueries({ queryKey: rateFileKeys.options(projectId) }),
+    }),
+    deleteMaterialAttribute: useMutation({
+      mutationFn: ({ attributeId }: { attributeId: string; materialName: string }) => deleteMaterialAttribute(projectId, attributeId),
+      onSuccess: (_result, variables) => client.invalidateQueries({ queryKey: rateFileKeys.materialAttributes(projectId, variables.materialName) }),
+    }),
+    deleteMaterialAttributeValue: useMutation({
+      mutationFn: ({ attributeId, valueId }: { attributeId: string; valueId: string; materialName: string }) => deleteMaterialAttributeValue(projectId, attributeId, valueId),
+      onSuccess: (_result, variables) => client.invalidateQueries({ queryKey: rateFileKeys.materialAttributes(projectId, variables.materialName) }),
     }),
   };
 }

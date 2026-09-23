@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.api.v1.routes.rate_files import MaterialAttributeCreate, MaterialAttributeSelection, MaterialAttributeValueCreate, RateItemCreate, RateOptionCreate
+from app.api.v1.routes.rate_files import DEFAULT_OPTIONS, MaterialAttributeCreate, MaterialAttributeSelection, MaterialAttributeValueCreate, RateItemCreate, RateOptionCreate
 
 
 def test_material_rate_item_requires_composition_fields():
@@ -126,6 +126,18 @@ def test_rate_option_trims_value():
     option = RateOptionCreate(option_type="main_item", value=" Concrete ")
 
     assert option.value == "Concrete"
+
+
+def test_unit_options_are_category_specific():
+    material_option = RateOptionCreate(option_type="material_unit_type", value=" m3 ")
+    labour_option = RateOptionCreate(option_type="labour_unit_type", value=" hour ")
+    machinery_option = RateOptionCreate(option_type="machinery_unit_type", value=" shift ")
+
+    assert material_option.value == "m3"
+    assert labour_option.value == "hour"
+    assert machinery_option.value == "shift"
+    assert "unit_type" not in DEFAULT_OPTIONS
+    assert {"material_unit_type", "labour_unit_type", "machinery_unit_type"}.issubset(DEFAULT_OPTIONS)
 
 
 def test_old_material_type_is_rejected():

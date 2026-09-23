@@ -18,10 +18,14 @@ function itemName(item: RateItem) {
 function itemDetails(item: RateItem) {
   if (item.item_type === "material") {
     const attributes = (item.material_attributes || []).map((attribute) => `${attribute.attribute}: ${attribute.value}`);
-    return [item.supplier, item.brand, ...attributes].filter(Boolean).join(" · ");
+    return [item.brand, ...attributes].filter(Boolean).join(" · ");
   }
   if (item.item_type === "labour") return item.labour_group || "";
   return item.machinery_source || "";
+}
+
+function itemSupplier(item: RateItem) {
+  return item.item_type === "material" ? item.supplier || "" : "";
 }
 
 export function RateItemsTable({
@@ -73,11 +77,12 @@ export function RateItemsTable({
         <Button disabled={addDisabled} onClick={onAdd}>+ Add</Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full min-w-[940px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[1040px] border-collapse text-left text-sm">
           <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500">
             <tr>
               <th className="px-5 py-3">Type</th>
               <th className="px-5 py-3">Name</th>
+              <th className="px-5 py-3">Supplier</th>
               <th className="px-5 py-3">Details</th>
               <th className="px-5 py-3">Unit type</th>
               <th className="px-5 py-3">Unit detail</th>
@@ -87,15 +92,21 @@ export function RateItemsTable({
           </thead>
           <tbody>
             {loading ? (
-              <tr><td className="px-5 py-8 text-center text-slate-500" colSpan={7}>Loading rate compositions...</td></tr>
+              <tr><td className="px-5 py-8 text-center text-slate-500" colSpan={8}>Loading rate compositions...</td></tr>
             ) : groups.length ? groups.flatMap(([mainItem, groupItems]) => {
               const isCollapsed = collapsed.has(mainItem);
               const total = groupItems.reduce((sum, item) => sum + Number(item.rate || 0), 0);
               return [
                 <tr key={`${mainItem}-group`} className="border-t border-slate-200 bg-slate-100/80">
-                  <td className="px-5 py-3" colSpan={5}>
-                    <button type="button" className="inline-flex items-center gap-2 font-semibold text-slate-950" onClick={() => toggleGroup(mainItem)}>
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded border border-slate-300 bg-white text-xs">{isCollapsed ? "+" : "-"}</span>
+                  <td className="px-5 py-3" colSpan={6}>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2 font-semibold text-slate-950"
+                      aria-expanded={!isCollapsed}
+                      aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${mainItem}`}
+                      onClick={() => toggleGroup(mainItem)}
+                    >
+                      <span className={isCollapsed ? "inline-flex h-6 w-6 items-center justify-center rounded border border-slate-300 bg-white text-xs text-slate-600 transition-transform" : "inline-flex h-6 w-6 rotate-90 items-center justify-center rounded border border-slate-300 bg-white text-xs text-slate-600 transition-transform"}>&gt;</span>
                       {mainItem}
                     </button>
                     <span className="ml-3 text-xs font-medium text-slate-500">{groupItems.length} item{groupItems.length === 1 ? "" : "s"}</span>
@@ -111,6 +122,7 @@ export function RateItemsTable({
                         <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">{RATE_ITEM_TYPE_LABELS[item.item_type]}</span>
                       </td>
                       <td className="px-5 py-3 font-semibold text-slate-900">{itemName(item)}</td>
+                      <td className="px-5 py-3 text-slate-600">{itemSupplier(item) || <EmptyValue>No supplier</EmptyValue>}</td>
                       <td className="px-5 py-3 text-slate-600">{itemDetails(item) || <EmptyValue>No details</EmptyValue>}</td>
                       <td className="px-5 py-3 text-slate-600">{unit || <EmptyValue>No unit</EmptyValue>}</td>
                       <td className="px-5 py-3 text-slate-600">{item.unit_detail || <EmptyValue>No unit detail</EmptyValue>}</td>
@@ -129,7 +141,7 @@ export function RateItemsTable({
                 })),
               ];
             }) : (
-              <tr><td className="px-5 py-10 text-center text-slate-500" colSpan={7}>No rate compositions found. Use Add to create one.</td></tr>
+              <tr><td className="px-5 py-10 text-center text-slate-500" colSpan={8}>No rate compositions found. Use Add to create one.</td></tr>
             )}
           </tbody>
         </table>

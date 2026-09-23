@@ -1,5 +1,3 @@
-export const DEFAULT_UNIT_TYPES = ["m", "m2", "m3", "nr", "kg", "ton", "bag", "sheet", "litre"] as const;
-
 export type RateItemType = "material" | "labour" | "machinery";
 
 export type RateOptionType =
@@ -11,7 +9,15 @@ export type RateOptionType =
   | "labour_group"
   | "machinery_name"
   | "machinery_source"
-  | "unit_type";
+  | "material_unit_type"
+  | "labour_unit_type"
+  | "machinery_unit_type";
+
+export const DEFAULT_UNIT_TYPES_BY_ITEM_TYPE: Record<RateItemType, string[]> = {
+  material: ["m", "m2", "m3", "nr", "kg", "ton", "bag", "sheet", "litre"],
+  labour: ["minute", "hour", "day"],
+  machinery: ["hour", "day", "shift", "trip"],
+};
 
 export type RateFile = {
   id: string;
@@ -92,6 +98,11 @@ export const UNIT_TYPE_LABELS: Record<string, string> = {
   bag: "bag",
   sheet: "sheet",
   litre: "litre",
+  minute: "minute",
+  hour: "hour",
+  day: "day",
+  shift: "shift",
+  trip: "trip",
 };
 
 export const RATE_ITEM_TYPE_LABELS: Record<RateItemType, string> = {
@@ -109,5 +120,7 @@ export const RATE_OPTION_LABELS: Record<RateOptionType, string> = {
   labour_group: "group",
   machinery_name: "name",
   machinery_source: "source",
-  unit_type: "unit type",
+  material_unit_type: "material unit type",
+  labour_unit_type: "labour unit type",
+  machinery_unit_type: "machinery unit type",
 };

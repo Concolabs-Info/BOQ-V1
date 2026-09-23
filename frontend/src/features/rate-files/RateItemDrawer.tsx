@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/shared/components/Button";
 import { ModalDialog } from "@/shared/components/ModalDialog";
@@ -8,9 +8,23 @@ import { BoqDrawer } from "@/features/boq/components/BoqDrawer";
 import { createMaterialAttribute, createMaterialAttributeValue } from "./api";
 import { rateFileKeys, useMaterialAttributes } from "./hooks";
 import type { RateItem, RateItemInput, RateItemType, RateOptionType, RateOptions } from "./types";
-import { DEFAULT_UNIT_TYPES, RATE_ITEM_TYPE_LABELS, RATE_OPTION_LABELS, UNIT_TYPE_LABELS } from "./types";
+import { DEFAULT_UNIT_TYPES_BY_ITEM_TYPE, RATE_ITEM_TYPE_LABELS, RATE_OPTION_LABELS, UNIT_TYPE_LABELS } from "./types";
 
-const ADD_PREFIX = "__add__";
+const UNIT_OPTION_TYPE_BY_ITEM_TYPE: Record<RateItemType, RateOptionType> = {
+  material: "material_unit_type",
+  labour: "labour_unit_type",
+  machinery: "machinery_unit_type",
+};
+
+const DEFAULT_UNIT_TYPE_BY_ITEM_TYPE: Record<RateItemType, string> = {
+  material: "m2",
+  labour: "hour",
+  machinery: "hour",
+};
+
+function defaultUnitType(itemType: RateItemType) {
+  return DEFAULT_UNIT_TYPE_BY_ITEM_TYPE[itemType] || DEFAULT_UNIT_TYPES_BY_ITEM_TYPE[itemType][0] || "";
+}
 
 const defaultForm = (itemType: RateItemType): RateItemInput => ({
   item_type: itemType,
@@ -23,8 +37,8 @@ const defaultForm = (itemType: RateItemType): RateItemInput => ({
   labour_group: null,
   machinery_name: null,
   machinery_source: null,
-  unit_type: "m2",
-  unit_detail: null,
+  unit_type: defaultUnitType(itemType),
+  unit_detail: defaultUnitDetail(itemType, defaultUnitType(itemType)),
   rate: 0,
 });
 
@@ -32,10 +46,175 @@ function trimValue(value: string | null | undefined) {
   return String(value || "").trim() || null;
 }
 
-function defaultUnitDetail(unitType: string | null | undefined) {
+function defaultUnitDetail(_itemType: RateItemType, unitType: string | null | undefined) {
   const unit = trimValue(unitType);
   return unit ? `1 ${UNIT_TYPE_LABELS[unit] || unit}` : null;
 }
+
+function unitDetailPlaceholder(itemType: RateItemType, unitType: string | null | undefined) {
+  const unit = trimValue(unitType);
+  if (itemType === "material") {
+    if (unit === "bag") return "50kg bag";
+    if (unit === "kg") return "1 kg";
+    if (unit === "ton") return "1 ton";
+    return unit ? `1 ${UNIT_TYPE_LABELS[unit] || unit}` : "1 m3, 1 bag, 50kg bag";
+  }
+  if (itemType === "labour") {
+    if (unit === "minute") return "30 minutes";
+    if (unit === "day") return "8-hour day";
+    return unit ? `1 ${UNIT_TYPE_LABELS[unit] || unit}` : "1 hour, 30 minutes, 8-hour day";
+  }
+  if (unit === "trip") return "1 trip";
+  if (unit === "shift") return "1 shift";
+  return unit ? `1 ${UNIT_TYPE_LABELS[unit] || unit}` : "1 hour, 1 day, 1 trip";
+}
+
+function unitTypePlaceholder(itemType: RateItemType) {
+  if (itemType === "material") return "m3";
+  if (itemType === "labour") return "hour";
+  return "shift";
+}
+
+function deleteTargetLabel(target: DeleteTarget | null) {
+  if (!target) return "dropdown value";
+  return target.value || "dropdown value";
+}
+
+type DropdownOption = {
+  value: string;
+  label?: string;
+  deleteLabel?: string;
+};
+
+function DeletableDropdown({
+  label,
+  value,
+  options,
+  emptyLabel,
+  addLabel,
+  disabled = false,
+  onChange,
+  onAdd,
+  onDelete,
+}: {
+  label?: string;
+  value: string;
+  options: DropdownOption[];
+  emptyLabel: string;
+  addLabel: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+  onAdd: () => void;
+  onDelete: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = options.find((option) => option.value === value);
+
+  useEffect(() => {
+    if (!open) return;
+    function close(event: MouseEvent) {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      {label ? <span className="text-sm font-semibold text-slate-700">{label}</span> : null}
+      <button
+        type="button"
+        className="input mt-1 flex w-full items-center justify-between gap-2 bg-white text-left disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className={selected || value ? "truncate text-slate-900" : "truncate text-slate-400"}>{selected?.label || value || emptyLabel}</span>
+        <span className="shrink-0 text-xs text-slate-500">{open ? "^" : "v"}</span>
+      </button>
+      {open ? (
+        <div className="absolute left-0 right-0 z-30 mt-1 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg" role="listbox">
+          <button
+            type="button"
+            className="block w-full px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-50"
+            onClick={() => {
+              onChange("");
+              setOpen(false);
+            }}
+          >
+            {emptyLabel}
+          </button>
+          {options.map((option) => (
+            <div
+              key={option.value}
+              role="option"
+              tabIndex={0}
+              aria-selected={option.value === value}
+              className={option.value === value ? "flex w-full cursor-pointer items-center gap-2 bg-blue-50 px-3 py-2 text-left text-sm font-semibold text-blue-700" : "flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onChange(option.value);
+                  setOpen(false);
+                }
+              }}
+            >
+              <span className="min-w-0 flex-1 truncate">{option.label || option.value}</span>
+              <button
+                type="button"
+                title={option.deleteLabel || `Delete ${option.label || option.value}`}
+                aria-label={option.deleteLabel || `Delete ${option.label || option.value}`}
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-sm font-bold text-red-500 hover:bg-red-50 hover:text-red-700"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOpen(false);
+                  onDelete(option.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setOpen(false);
+                    onDelete(option.value);
+                  }
+                }}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M6 6l1 15h10l1-15" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="block w-full border-t border-slate-100 px-3 py-2 text-left text-sm font-semibold text-blue-700 hover:bg-blue-50"
+            onClick={() => {
+              setOpen(false);
+              onAdd();
+            }}
+          >
+            {addLabel}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type DeleteTarget =
+  | { kind: "option"; optionType: RateOptionType; field: keyof RateItemInput; value: string }
+  | { kind: "attribute"; rowIndex: number; attributeId: string; value: string }
+  | { kind: "attribute_value"; rowIndex: number; attributeId: string; valueId: string; value: string };
 
 export function RateItemDrawer({
   open,
@@ -47,6 +226,9 @@ export function RateItemDrawer({
   projectId,
   onClose,
   onAddOption,
+  onDeleteOption,
+  onDeleteMaterialAttribute,
+  onDeleteMaterialAttributeValue,
   onSave,
 }: {
   open: boolean;
@@ -58,6 +240,9 @@ export function RateItemDrawer({
   projectId: string;
   onClose: () => void;
   onAddOption: (optionType: RateOptionType, value: string) => Promise<void>;
+  onDeleteOption: (optionType: RateOptionType, value: string) => Promise<void>;
+  onDeleteMaterialAttribute: (attributeId: string, materialName: string) => Promise<void>;
+  onDeleteMaterialAttributeValue: (attributeId: string, valueId: string, materialName: string) => Promise<void>;
   onSave: (payload: RateItemInput) => Promise<void>;
 }) {
   const queryClient = useQueryClient();
@@ -71,8 +256,11 @@ export function RateItemDrawer({
   const [attributeModalRow, setAttributeModalRow] = useState<number | null>(null);
   const [attributeValue, setAttributeValue] = useState("");
   const [attributeError, setAttributeError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const materialName = trimValue(form.material_name);
+  const unitOptionType = UNIT_OPTION_TYPE_BY_ITEM_TYPE[form.item_type];
   const materialAttributesQuery = useMaterialAttributes(projectId, materialName);
   const materialAttributes = materialAttributesQuery.data || [];
 
@@ -86,6 +274,8 @@ export function RateItemDrawer({
     setAttributeModalRow(null);
     setAttributeValue("");
     setAttributeError(null);
+    setDeleteTarget(null);
+    setDeleteError(null);
     setForm(item ? {
       item_type: item.item_type,
       main_item: item.main_item,
@@ -112,7 +302,9 @@ export function RateItemDrawer({
     labour_group: options?.labour_group || [],
     machinery_name: options?.machinery_name || [],
     machinery_source: options?.machinery_source || [],
-    unit_type: options?.unit_type?.length ? options.unit_type : [...DEFAULT_UNIT_TYPES],
+    material_unit_type: options?.material_unit_type?.length ? options.material_unit_type : [...DEFAULT_UNIT_TYPES_BY_ITEM_TYPE.material],
+    labour_unit_type: options?.labour_unit_type?.length ? options.labour_unit_type : [...DEFAULT_UNIT_TYPES_BY_ITEM_TYPE.labour],
+    machinery_unit_type: options?.machinery_unit_type?.length ? options.machinery_unit_type : [...DEFAULT_UNIT_TYPES_BY_ITEM_TYPE.machinery],
   }), [options]);
 
   function openOptionModal(optionType: RateOptionType) {
@@ -126,7 +318,7 @@ export function RateItemDrawer({
   }
 
   function setUnitType(value: string | null) {
-    setForm((current) => ({ ...current, unit_type: value || "", unit_detail: defaultUnitDetail(value) }));
+    setForm((current) => ({ ...current, unit_type: value || "", unit_detail: defaultUnitDetail(current.item_type, value) }));
   }
 
   function setMaterialName(value: string | null) {
@@ -138,7 +330,7 @@ export function RateItemDrawer({
       ...current,
       material_attributes: current.material_attributes.map((row, rowIndex) => rowIndex === index ? {
         attribute: patch.attribute ?? row.attribute,
-        value: patch.attribute && patch.attribute !== row.attribute ? "" : patch.value ?? row.value,
+        value: Object.prototype.hasOwnProperty.call(patch, "attribute") && patch.attribute !== row.attribute ? "" : patch.value ?? row.value,
       } : row),
     }));
   }
@@ -167,6 +359,7 @@ export function RateItemDrawer({
       setOptionError(null);
       await onAddOption(optionModalType, trimmed);
       if (optionModalType === "material_name") setMaterialName(trimmed);
+      else if (Object.values(UNIT_OPTION_TYPE_BY_ITEM_TYPE).includes(optionModalType)) setUnitType(trimmed);
       else updateField(optionModalType as keyof RateItemInput, trimmed);
       setOptionModalType(null);
       setOptionValue("");
@@ -221,6 +414,39 @@ export function RateItemDrawer({
     setAttributeError(null);
   }
 
+  async function confirmDeleteDropdownValue() {
+    if (!deleteTarget) return;
+    try {
+      setDeleteError(null);
+      if (deleteTarget.kind === "option") {
+        await onDeleteOption(deleteTarget.optionType, deleteTarget.value);
+        setForm((current) => {
+          if (String(current[deleteTarget.field] || "") !== deleteTarget.value) return current;
+          if (deleteTarget.field === "material_name") return { ...current, material_name: null, material_attributes: [] };
+          if (deleteTarget.field === "unit_type") return { ...current, unit_type: "", unit_detail: null };
+          return { ...current, [deleteTarget.field]: null };
+        });
+      } else if (deleteTarget.kind === "attribute") {
+        if (!materialName) throw new Error("Select a material name first.");
+        await onDeleteMaterialAttribute(deleteTarget.attributeId, materialName);
+        setForm((current) => ({
+          ...current,
+          material_attributes: current.material_attributes.map((row) => row.attribute === deleteTarget.value ? { attribute: "", value: "" } : row),
+        }));
+      } else {
+        if (!materialName) throw new Error("Select a material name first.");
+        await onDeleteMaterialAttributeValue(deleteTarget.attributeId, deleteTarget.valueId, materialName);
+        setForm((current) => ({
+          ...current,
+          material_attributes: current.material_attributes.map((row, rowIndex) => rowIndex === deleteTarget.rowIndex && row.value === deleteTarget.value ? { ...row, value: "" } : row),
+        }));
+      }
+      setDeleteTarget(null);
+    } catch (caught) {
+      setDeleteError(caught instanceof Error ? caught.message : "This value could not be deleted.");
+    }
+  }
+
   async function submit() {
     const mainItem = trimValue(form.main_item);
     const unitType = trimValue(form.unit_type);
@@ -269,28 +495,25 @@ export function RateItemDrawer({
   }
 
   function SelectField({ label, field, optionType }: { label: string; field: keyof RateItemInput; optionType: RateOptionType }) {
-    const addValue = `${ADD_PREFIX}${optionType}`;
     return (
-      <label className="block">
-        <span className="text-sm font-semibold text-slate-700">{label}</span>
-        <select
-          className="input mt-1"
-          value={String(form[field] || "")}
-          onChange={(event) => {
-            if (event.target.value === addValue) {
-              openOptionModal(optionType);
-              return;
-            }
-            if (field === "material_name") setMaterialName(event.target.value || null);
-            else if (field === "unit_type") setUnitType(event.target.value || null);
-            else updateField(field, event.target.value || null);
+      <DeletableDropdown
+        label={label}
+        value={String(form[field] || "")}
+        emptyLabel={`No ${RATE_OPTION_LABELS[optionType]}`}
+        addLabel={`+ Add another ${RATE_OPTION_LABELS[optionType]}`}
+        options={optionValues[optionType].map((value) => ({
+          value,
+          label: field === "unit_type" ? UNIT_TYPE_LABELS[value] || value : value,
+          deleteLabel: `Delete ${field === "unit_type" ? UNIT_TYPE_LABELS[value] || value : value}`,
+        }))}
+        onAdd={() => openOptionModal(optionType)}
+        onDelete={(value) => setDeleteTarget({ kind: "option", optionType, field, value })}
+        onChange={(value) => {
+            if (field === "material_name") setMaterialName(value || null);
+            else if (field === "unit_type") setUnitType(value || null);
+            else updateField(field, value || null);
           }}
-        >
-          <option value="">No {RATE_OPTION_LABELS[optionType]}</option>
-          {optionValues[optionType].map((value) => <option key={value} value={value}>{optionType === "unit_type" ? UNIT_TYPE_LABELS[value] || value : value}</option>)}
-          <option value={addValue}>+ Add another {RATE_OPTION_LABELS[optionType]}</option>
-        </select>
-      </label>
+      />
     );
   }
 
@@ -321,47 +544,43 @@ export function RateItemDrawer({
                 <div className="mt-4 space-y-3">
                   {form.material_attributes.map((attributeRow, index) => {
                     const selected = selectedAttribute(index);
-                    const addAttributeValue = `${ADD_PREFIX}material_attribute`;
-                    const addValueValue = `${ADD_PREFIX}material_attribute_value`;
                     return (
                       <div key={index} className="grid gap-2 rounded-md border border-slate-100 bg-slate-50 p-3 sm:grid-cols-[1fr_1fr_auto]">
-                        <select
-                          className="input bg-white"
+                        <DeletableDropdown
                           value={attributeRow.attribute}
-                          onChange={(event) => {
-                            if (event.target.value === addAttributeValue) {
-                              setAttributeModal("attribute");
-                              setAttributeModalRow(index);
-                              setAttributeValue("");
-                              setAttributeError(null);
-                              return;
-                            }
-                            updateMaterialAttribute(index, { attribute: event.target.value });
+                          emptyLabel="Attribute name"
+                          addLabel="+ Add new attribute"
+                          options={materialAttributes.map((attribute) => ({ value: attribute.name, deleteLabel: `Delete ${attribute.name}` }))}
+                          onAdd={() => {
+                            setAttributeModal("attribute");
+                            setAttributeModalRow(index);
+                            setAttributeValue("");
+                            setAttributeError(null);
                           }}
-                        >
-                          <option value="">Attribute name</option>
-                          {materialAttributes.map((attribute) => <option key={attribute.id} value={attribute.name}>{attribute.name}</option>)}
-                          <option value={addAttributeValue}>+ Add new attribute</option>
-                        </select>
-                        <select
-                          className="input bg-white"
+                          onDelete={(value) => {
+                            const attribute = materialAttributes.find((item) => item.name === value);
+                            if (attribute) setDeleteTarget({ kind: "attribute", rowIndex: index, attributeId: attribute.id, value });
+                          }}
+                          onChange={(value) => updateMaterialAttribute(index, { attribute: value })}
+                        />
+                        <DeletableDropdown
                           disabled={!selected}
                           value={attributeRow.value}
-                          onChange={(event) => {
-                            if (event.target.value === addValueValue) {
-                              setAttributeModal("value");
-                              setAttributeModalRow(index);
-                              setAttributeValue("");
-                              setAttributeError(null);
-                              return;
-                            }
-                            updateMaterialAttribute(index, { value: event.target.value });
+                          emptyLabel="Attribute value"
+                          addLabel="+ Add new value"
+                          options={(selected?.values || []).map((value) => ({ value: value.value, deleteLabel: `Delete ${value.value}` }))}
+                          onAdd={() => {
+                            setAttributeModal("value");
+                            setAttributeModalRow(index);
+                            setAttributeValue("");
+                            setAttributeError(null);
                           }}
-                        >
-                          <option value="">Attribute value</option>
-                          {(selected?.values || []).map((value) => <option key={value.id} value={value.value}>{value.value}</option>)}
-                          {selected ? <option value={addValueValue}>+ Add new value</option> : null}
-                        </select>
+                          onDelete={(value) => {
+                            const attributeValue = selected?.values.find((item) => item.value === value);
+                            if (selected && attributeValue) setDeleteTarget({ kind: "attribute_value", rowIndex: index, attributeId: selected.id, valueId: attributeValue.id, value });
+                          }}
+                          onChange={(value) => updateMaterialAttribute(index, { value })}
+                        />
                         <Button variant="ghost" className="h-10 px-2 text-xs" onClick={() => removeMaterialAttributeRow(index)}>Remove</Button>
                       </div>
                     );
@@ -386,10 +605,10 @@ export function RateItemDrawer({
             <SelectField label="Source" field="machinery_source" optionType="machinery_source" />
           </>
         ) : null}
-        <SelectField label="Unit type" field="unit_type" optionType="unit_type" />
+        <SelectField label="Unit type" field="unit_type" optionType={unitOptionType} />
         <label className="block">
           <span className="text-sm font-semibold text-slate-700">Unit</span>
-          <input className="input mt-1" placeholder="50kg bag, 8-hour day, trip" value={form.unit_detail || ""} onChange={(event) => updateField("unit_detail", event.target.value)} />
+          <input className="input mt-1" placeholder={unitDetailPlaceholder(form.item_type, form.unit_type)} value={form.unit_detail || ""} onChange={(event) => updateField("unit_detail", event.target.value)} />
         </label>
         <label className="block">
           <span className="text-sm font-semibold text-slate-700">Rate</span>
@@ -419,7 +638,7 @@ export function RateItemDrawer({
           <input
             className="input mt-2 w-full"
             autoFocus
-            placeholder={optionModalType === "unit_type" ? "day" : "Concrete"}
+            placeholder={optionModalType && Object.values(UNIT_OPTION_TYPE_BY_ITEM_TYPE).includes(optionModalType) ? unitTypePlaceholder(form.item_type) : "Concrete"}
             value={optionValue}
             onChange={(event) => setOptionValue(event.target.value)}
             onKeyDown={(event) => {
@@ -427,6 +646,25 @@ export function RateItemDrawer({
             }}
           />
         </label>
+      </ModalDialog>
+      <ModalDialog
+        open={Boolean(deleteTarget)}
+        title="Delete dropdown value"
+        description="This removes the value from the reusable dropdown list. Existing saved rate rows will keep their current text."
+        ariaLabel="Delete dropdown value"
+        onClose={() => { setDeleteTarget(null); setDeleteError(null); }}
+        footer={(
+          <>
+            <Button variant="secondary" disabled={saving} onClick={() => { setDeleteTarget(null); setDeleteError(null); }}>Cancel</Button>
+            <Button variant="danger" disabled={saving} onClick={() => void confirmDeleteDropdownValue()}>{saving ? "Deleting..." : "Delete value"}</Button>
+          </>
+        )}
+      >
+        {deleteError ? <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{deleteError}</p> : null}
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-semibold text-slate-950">{deleteTargetLabel(deleteTarget)}</p>
+          <p className="mt-1 text-sm text-slate-500">It will no longer appear as a reusable option for this project.</p>
+        </div>
       </ModalDialog>
       <ModalDialog
         open={Boolean(attributeModal)}

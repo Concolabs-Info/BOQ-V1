@@ -33,7 +33,7 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
   const activeRateFileId = selectedRateFile?.id || null;
   const itemsQuery = useRateItems(projectId, activeRateFileId, search);
   const mutations = useRateFileMutations(projectId, activeRateFileId, search);
-  const saving = mutations.createFile.isPending || mutations.updateFile.isPending || mutations.deleteFile.isPending || mutations.createItem.isPending || mutations.updateItem.isPending || mutations.deleteItem.isPending || mutations.createOption.isPending;
+  const saving = mutations.createFile.isPending || mutations.updateFile.isPending || mutations.deleteFile.isPending || mutations.createItem.isPending || mutations.updateItem.isPending || mutations.deleteItem.isPending || mutations.createOption.isPending || mutations.deleteOption.isPending || mutations.deleteMaterialAttribute.isPending || mutations.deleteMaterialAttributeValue.isPending;
   const items = itemsQuery.data || [];
   const selectedItem = useMemo(() => items.find((item) => item.id === selectedItemId) || null, [items, selectedItemId]);
 
@@ -188,6 +188,36 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
             await mutations.createOption.mutateAsync({ optionType, value });
           } catch (caught) {
             const message = caught instanceof Error ? caught.message : "This option could not be saved.";
+            setError(message);
+            throw new Error(message);
+          }
+        }}
+        onDeleteOption={async (optionType, value) => {
+          try {
+            setError(null);
+            await mutations.deleteOption.mutateAsync({ optionType, value });
+          } catch (caught) {
+            const message = caught instanceof Error ? caught.message : "This option could not be deleted.";
+            setError(message);
+            throw new Error(message);
+          }
+        }}
+        onDeleteMaterialAttribute={async (attributeId, materialName) => {
+          try {
+            setError(null);
+            await mutations.deleteMaterialAttribute.mutateAsync({ attributeId, materialName });
+          } catch (caught) {
+            const message = caught instanceof Error ? caught.message : "This material attribute could not be deleted.";
+            setError(message);
+            throw new Error(message);
+          }
+        }}
+        onDeleteMaterialAttributeValue={async (attributeId, valueId, materialName) => {
+          try {
+            setError(null);
+            await mutations.deleteMaterialAttributeValue.mutateAsync({ attributeId, valueId, materialName });
+          } catch (caught) {
+            const message = caught instanceof Error ? caught.message : "This material attribute value could not be deleted.";
             setError(message);
             throw new Error(message);
           }

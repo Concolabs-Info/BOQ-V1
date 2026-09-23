@@ -69,6 +69,11 @@ export async function createRateOption(projectId: string, optionType: RateOption
   });
 }
 
+export async function deleteRateOption(projectId: string, optionType: RateOptionType, value: string): Promise<void> {
+  const params = new URLSearchParams({ option_type: optionType, value });
+  await requestJson<void>(`/api/v1/projects/${projectId}/rate-options?${params}`, { method: "DELETE" });
+}
+
 export async function listMaterialAttributes(projectId: string, materialName: string): Promise<MaterialAttribute[]> {
   const params = new URLSearchParams({ material_name: materialName });
   const result = await requestJson<{ attributes: MaterialAttribute[] }>(`/api/v1/projects/${projectId}/rate-material-attributes?${params}`);
@@ -87,4 +92,12 @@ export async function createMaterialAttributeValue(projectId: string, attributeI
     method: "POST",
     body: JSON.stringify({ value }),
   });
+}
+
+export async function deleteMaterialAttribute(projectId: string, attributeId: string): Promise<void> {
+  await requestJson<void>(`/api/v1/projects/${projectId}/rate-material-attributes/${attributeId}`, { method: "DELETE" });
+}
+
+export async function deleteMaterialAttributeValue(projectId: string, attributeId: string, valueId: string): Promise<void> {
+  await requestJson<void>(`/api/v1/projects/${projectId}/rate-material-attributes/${attributeId}/values/${valueId}`, { method: "DELETE" });
 }
