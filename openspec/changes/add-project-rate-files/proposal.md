@@ -1,5 +1,7 @@
 # Add Project Rate Files
 
+> Superseded note: `add-rate-file-compositions` expands this material-only v1 into main-item rate compositions with Material, Labour and Machinery rows.
+
 ## Why
 Projects need their own material rate files so users can maintain priced material catalogs without changing global data or existing BOQ rows.
 

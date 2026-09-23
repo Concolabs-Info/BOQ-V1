@@ -1,7 +1,7 @@
 "use client";
 
 import { requestJson } from "@/shared/services/apiClient";
-import type { RateFile, RateItem, RateItemInput, RateOptionType, RateOptions } from "./types";
+import type { MaterialAttribute, MaterialAttributeValue, RateFile, RateItem, RateItemInput, RateOptionType, RateOptions } from "./types";
 
 export async function listRateFiles(projectId: string): Promise<RateFile[]> {
   const result = await requestJson<{ rate_files: RateFile[] }>(`/api/v1/projects/${projectId}/rate-files`);
@@ -26,15 +26,16 @@ export async function deleteRateFile(projectId: string, rateFileId: string): Pro
   await requestJson<void>(`/api/v1/projects/${projectId}/rate-files/${rateFileId}`, { method: "DELETE" });
 }
 
-export async function listRateItems(projectId: string, rateFileId: string, search = ""): Promise<RateItem[]> {
+export async function listRateItems(projectId: string, rateFileId: string, search = "", itemType?: RateItem["item_type"]): Promise<RateItem[]> {
   const params = new URLSearchParams();
   if (search.trim()) params.set("search", search.trim());
+  if (itemType) params.set("item_type", itemType);
   const query = params.toString();
   const result = await requestJson<{ items: RateItem[] }>(`/api/v1/projects/${projectId}/rate-files/${rateFileId}/items${query ? `?${query}` : ""}`);
   return result.items.map((item) => ({
     ...item,
-    unit_cost: Number(item.unit_cost),
-    markup_percent: Number(item.markup_percent),
+    material_attributes: item.material_attributes || [],
+    rate: Number(item.rate),
   }));
 }
 
@@ -65,5 +66,25 @@ export async function createRateOption(projectId: string, optionType: RateOption
   await requestJson(`/api/v1/projects/${projectId}/rate-options`, {
     method: "POST",
     body: JSON.stringify({ option_type: optionType, value }),
+  });
+}
+
+export async function listMaterialAttributes(projectId: string, materialName: string): Promise<MaterialAttribute[]> {
+  const params = new URLSearchParams({ material_name: materialName });
+  const result = await requestJson<{ attributes: MaterialAttribute[] }>(`/api/v1/projects/${projectId}/rate-material-attributes?${params}`);
+  return result.attributes;
+}
+
+export async function createMaterialAttribute(projectId: string, materialName: string, name: string): Promise<MaterialAttribute> {
+  return requestJson<MaterialAttribute>(`/api/v1/projects/${projectId}/rate-material-attributes`, {
+    method: "POST",
+    body: JSON.stringify({ material_name: materialName, name }),
+  });
+}
+
+export async function createMaterialAttributeValue(projectId: string, attributeId: string, value: string): Promise<MaterialAttributeValue> {
+  return requestJson<MaterialAttributeValue>(`/api/v1/projects/${projectId}/rate-material-attributes/${attributeId}/values`, {
+    method: "POST",
+    body: JSON.stringify({ value }),
   });
 }

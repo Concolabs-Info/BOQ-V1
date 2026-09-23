@@ -9,6 +9,7 @@ export function RateFileSwitcher({
   rateFiles,
   selectedRateFileId,
   saving,
+  width,
   onSelect,
   onCreate,
   onRename,
@@ -17,6 +18,7 @@ export function RateFileSwitcher({
   rateFiles: RateFile[];
   selectedRateFileId: string | null;
   saving: boolean;
+  width: number;
   onSelect: (id: string) => void;
   onCreate: (name: string) => Promise<void> | void;
   onRename: (id: string, name: string) => void;
@@ -59,7 +61,7 @@ export function RateFileSwitcher({
   }
 
   return (
-    <aside className="flex min-h-0 w-[340px] shrink-0 flex-col border-r border-slate-200 bg-white">
+    <aside className="flex min-h-0 shrink-0 flex-col bg-white" style={{ width }}>
       <div className="border-b border-slate-200 p-4">
         <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Project rate files</p>
         <Button className="mt-3 h-10 w-full" disabled={saving} onClick={() => { setNewName(""); setCreateError(null); setCreateOpen(true); }}>+ Add rate file</Button>
@@ -81,7 +83,7 @@ export function RateFileSwitcher({
                 <>
                   <button type="button" className="block w-full text-left" onClick={() => onSelect(file.id)}>
                     <span className="block truncate text-sm font-semibold text-slate-950">{file.name}</span>
-                    <span className="mt-1 block text-xs text-slate-500">{file.item_count || 0} material items</span>
+                    <span className="mt-1 block text-xs text-slate-500">{file.item_count || 0} composition items</span>
                   </button>
                   <div className="mt-3 flex gap-2">
                     <button type="button" className="text-xs font-semibold text-slate-500 hover:text-blue-700" onClick={() => startEdit(file)}>Rename</button>
@@ -93,7 +95,7 @@ export function RateFileSwitcher({
           );
         }) : (
           <div className="rounded-lg border border-dashed border-slate-300 p-5 text-sm text-slate-500">
-            No rate files yet. Create your first project rate file to start adding material rates.
+            No rate files yet. Create your first project rate file to start adding rate compositions.
           </div>
         )}
       </div>

@@ -1,13 +1,14 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createRateFile, createRateItem, createRateOption, deleteRateFile, deleteRateItem, listRateFiles, listRateItems, listRateOptions, updateRateFile, updateRateItem } from "./api";
+import { createRateFile, createRateItem, createRateOption, deleteRateFile, deleteRateItem, listMaterialAttributes, listRateFiles, listRateItems, listRateOptions, updateRateFile, updateRateItem } from "./api";
 import type { RateItemInput, RateOptionType } from "./types";
 
 export const rateFileKeys = {
   all: (projectId: string) => ["rate-files", projectId] as const,
   items: (projectId: string, rateFileId: string | null, search: string) => ["rate-files", projectId, rateFileId, "items", search] as const,
   options: (projectId: string) => ["rate-files", projectId, "options"] as const,
+  materialAttributes: (projectId: string, materialName: string | null) => ["rate-files", projectId, "material-attributes", materialName] as const,
 };
 
 export function useRateFiles(projectId: string) {
@@ -29,6 +30,14 @@ export function useRateOptions(projectId: string) {
   return useQuery({
     queryKey: rateFileKeys.options(projectId),
     queryFn: () => listRateOptions(projectId),
+  });
+}
+
+export function useMaterialAttributes(projectId: string, materialName: string | null) {
+  return useQuery({
+    queryKey: rateFileKeys.materialAttributes(projectId, materialName),
+    queryFn: () => materialName ? listMaterialAttributes(projectId, materialName) : Promise.resolve([]),
+    enabled: Boolean(materialName),
   });
 }
 

@@ -82,7 +82,7 @@ export function BoqDashboard({ projectId, initialPanel = null }: { projectId: st
   const mappingsQuery = useQuery({ queryKey: ["boq-rate-mappings", projectId], queryFn: () => getBoqRateMappings(projectId) });
   const rateItemsQuery = useQuery({
     queryKey: ["rate-files", projectId, selectedRateFileId, "items", "boq"],
-    queryFn: () => selectedRateFileId ? listRateItems(projectId, selectedRateFileId) : Promise.resolve([]),
+    queryFn: () => selectedRateFileId ? listRateItems(projectId, selectedRateFileId, "", "material") : Promise.resolve([]),
     enabled: Boolean(selectedRateFileId),
   });
   const selectionMutation = useMutation({
@@ -429,7 +429,7 @@ function BoqRatePickerDialog({
   const needle = search.trim().toLowerCase();
   const filteredItems = items.filter((item) => {
     if (!needle) return true;
-    return [item.material_name, item.specification, item.size, item.unit_type]
+    return [item.main_item, item.material_name, item.supplier, item.brand, item.unit_type, item.unit_detail, ...(item.material_attributes || []).flatMap((attribute) => [attribute.attribute, attribute.value])]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(needle));
   });
@@ -449,7 +449,7 @@ function BoqRatePickerDialog({
         <span className="ml-2 text-blue-800">{rateFileName || "No rate file selected"}</span>
       </div>
       <div className="mb-4">
-        <input className="input w-full" placeholder="Search material, specification, size, unit" value={search} onChange={(event) => onSearch(event.target.value)} />
+        <input className="input w-full" placeholder="Search material, main item, supplier, unit" value={search} onChange={(event) => onSearch(event.target.value)} />
       </div>
       {!rateFileName ? (
         <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">Select a rate file above the BOQ table first.</div>
@@ -458,9 +458,9 @@ function BoqRatePickerDialog({
           <table className="w-full border-collapse text-left text-sm">
             <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
+                <th className="px-5 py-3">Main item</th>
                 <th className="px-5 py-3">Material</th>
-                <th className="px-5 py-3">Specification</th>
-                <th className="px-5 py-3">Size(mm)</th>
+                <th className="px-5 py-3">Details</th>
                 <th className="px-5 py-3">Unit</th>
                 <th className="px-5 py-3 text-right">Rate</th>
                 <th className="px-5 py-3 text-right">Action</th>
@@ -471,9 +471,11 @@ function BoqRatePickerDialog({
                 const rate = sellRate(item);
                 return (
                   <tr key={item.id} className="border-t border-slate-200">
-                    <td className="px-5 py-3 font-semibold text-slate-900">{item.material_name}</td>
-                    <td className="px-5 py-3 text-slate-600">{item.specification || <EmptyValue>No specification</EmptyValue>}</td>
-                    <td className="px-5 py-3 text-slate-600">{item.size || <EmptyValue>No size</EmptyValue>}</td>
+                    <td className="px-5 py-3 font-semibold text-slate-900">{item.main_item}</td>
+                    <td className="px-5 py-3 text-slate-600">{item.material_name || <EmptyValue>No material</EmptyValue>}</td>
+                    <td className="px-5 py-3 text-slate-600">
+                      {[item.supplier, item.brand, ...(item.material_attributes || []).map((attribute) => `${attribute.attribute}: ${attribute.value}`), item.unit_detail].filter(Boolean).join(" · ") || <EmptyValue>No details</EmptyValue>}
+                    </td>
                     <td className="px-5 py-3 text-slate-600">{item.unit_type || <EmptyValue>No unit</EmptyValue>}</td>
                     <td className="px-5 py-3 text-right font-semibold text-slate-950">{currency} {rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td className="px-5 py-3 text-right">

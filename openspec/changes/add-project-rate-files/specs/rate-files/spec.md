@@ -1,5 +1,7 @@
 # Rate Files Specification
 
+> Superseded note: `add-rate-file-compositions` expands this v1 material-only specification into grouped Material, Labour and Machinery rate compositions.
+
 ## ADDED Requirements
 
 ### Requirement: Project-scoped rate files

@@ -100,7 +100,7 @@ function hasExactSizeMatch(rowText: string, value: string | null | undefined) {
 }
 
 export function sellRate(item: RateItem) {
-  return Number((item.unit_cost * (1 + item.markup_percent / 100)).toFixed(2));
+  return Number(item.rate.toFixed(2));
 }
 
 export function rowSignature(row: BoqRow) {
@@ -110,6 +110,7 @@ export function rowSignature(row: BoqRow) {
 }
 
 export function exactRateItemMatch(row: BoqRow, item: RateItem): RateMatchCandidate | null {
+  if (item.item_type !== "material") return null;
   const rowUnit = normalizeUnit(row.unit);
   const itemUnit = normalizeUnit(item.unit_type);
   if (!rowUnit || !itemUnit || rowUnit !== itemUnit) return null;
@@ -120,8 +121,7 @@ export function exactRateItemMatch(row: BoqRow, item: RateItem): RateMatchCandid
   if (!hasMaterialNameMatch(rowText, item.material_name)) return null;
   reasons.push("Material name match");
 
-  if (!item.size || !hasExactSizeMatch(rowText, item.size)) return null;
-  reasons.push("Size exact match");
+  if (item.unit_detail && hasExactSizeMatch(rowText, item.unit_detail)) reasons.push("Unit detail match");
 
   return { item, score: 100, reasons, sellRate: sellRate(item) };
 }
