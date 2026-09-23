@@ -294,7 +294,7 @@ export function buildBoqRows():BoqRow[]{
   const st=useDemoStore.getState();
   const structure=useStructuralStore.getState();
   const rows:BoqRow[]=[];
-  const defaultRate=(entityType:string,code:string,unit:string):number|null=>st.boqSetup.rate_mode==="manual"?null:getBoqDefaultRate(entityType,code,unit);
+  const defaultRate=(_entityType:string,_code:string,_unit:string):number|null=>null;
   const add=(id:string,section:string,code:string,description:string,quantity:number,unit:string,entityType:string,floorIds:string[],sourceIds:string[])=>rows.push(row(id,section,code,description,quantity,unit,defaultRate(entityType,code,unit),entityType,floorIds,sourceIds));
 
   structure.columnFamilies.forEach(f=>{const records=structure.columns.filter(x=>x.familyId===f.id&&x.status==="confirmed");if(!records.length)return;if(structure.columnDataSource==="production"&&!isConcreteColumnFamily(f))return;const quantity=records.reduce((sum,item)=>sum+structuralColumnConcreteM3(item,f)*floorFactor(item.floorId),0);const dimensions=f.shape==="Circular"?`${f.diameterMm||f.widthMm} mm diameter`:`${f.widthMm} × ${f.depthMm} mm`;add(`BOQ-COLUMN-${f.id}`,f.nrmWorkSection||"Concrete structure — Columns",f.mark,`${f.description}; ${dimensions}`,quantity,"m³","column",[...new Set(records.map(x=>x.floorId))],records.map(x=>x.id))});

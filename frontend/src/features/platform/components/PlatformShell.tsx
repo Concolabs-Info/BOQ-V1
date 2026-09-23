@@ -25,6 +25,7 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
     { title: "Projects", href: appRoutes.projects },
     ...(projectId ? [{ title: "Project workspace", href: appRoutes.pre(projectId, "upload") }] : []),
   ];
+  const settingsNav = projectId ? [{ title: "Rate Files", href: appRoutes.workspaceRateFiles(projectId) }] : [];
 
   const navigation = <>
     <div className="flex items-center gap-3 px-1">
@@ -35,11 +36,21 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
       <p className="px-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Workspace</p>
       <div className="mt-3 space-y-1">
         {nav.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "/") || (item.title === "Project workspace" && projectId !== null && pathname.includes(`/workspace/${projectId}/`) && !pathname.endsWith("/review") && !pathname.includes("/boq"));
+          const active = pathname === item.href || pathname.startsWith(item.href + "/") || (item.title === "Project workspace" && projectId !== null && pathname.includes(`/workspace/${projectId}/`) && !pathname.endsWith("/review") && !pathname.includes("/boq") && !pathname.includes("/settings/"));
           return <Link key={item.title} href={item.href} onClick={() => setMobileOpen(false)} className={active ? "flex items-center rounded-xl border-l-2 border-blue-600 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700" : "flex items-center rounded-xl border-l-2 border-transparent px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"}>{item.title}</Link>;
         })}
       </div>
     </nav>
+    {settingsNav.length ? (
+      <nav className="mt-8">
+        <div className="space-y-1">
+          {settingsNav.map((item) => {
+            const active = pathname === item.href || pathname.startsWith(item.href + "/");
+            return <Link key={item.title} href={item.href} onClick={() => setMobileOpen(false)} className={active ? "flex items-center rounded-xl border-l-2 border-blue-600 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700" : "flex items-center rounded-xl border-l-2 border-transparent px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"}>{item.title}</Link>;
+          })}
+        </div>
+      </nav>
+    ) : null}
     <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Production</p>
       <p className="mt-2 text-sm font-semibold text-slate-900">Live project data</p>
@@ -68,6 +79,16 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
   </main>;
 }
 
-function HexLogoIcon(props: SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 40 40" fill="none" aria-hidden="true" {...props}><rect x="1" y="1" width="38" height="38" rx="12" fill="#0f172a"/><path d="M12 13h16v4H17v4h9v4h-9v4h11" stroke="white" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
+function HexLogoIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 40 40" fill="none" aria-hidden="true" {...props}>
+      <rect x="1" y="1" width="38" height="38" rx="12" fill="#0f172a" />
+      <path d="M13.5 8.5h13l4 4V30a2.5 2.5 0 0 1-2.5 2.5H13.5A2.5 2.5 0 0 1 11 30V11a2.5 2.5 0 0 1 2.5-2.5Z" fill="#1e293b" stroke="#e0f2fe" strokeWidth="2.2" />
+      <path d="M26.2 9v4.2h4" stroke="#e0f2fe" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M15.8 16.4h7.5M15.8 20.5h6" stroke="#64748b" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M14.8 25.2l4.2 4.1 8.6-9.8" stroke="#38bdf8" strokeWidth="3.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 function MenuIcon(props: SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}><path d="M4 7h16M4 12h16M4 17h16"/></svg>; }
 function SidebarIcon(props: SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M9 4v16"/></svg>; }
