@@ -63,6 +63,7 @@ export type RateItem = {
   labour_group: string | null;
   machinery_name: string | null;
   machinery_source: string | null;
+  machinery_location: string | null;
   unit_type: string;
   unit_detail: string | null;
   rate: number;
@@ -81,6 +82,7 @@ export type RateItemInput = {
   labour_group: string | null;
   machinery_name: string | null;
   machinery_source: string | null;
+  machinery_location: string | null;
   unit_type: string;
   unit_detail: string | null;
   rate: number;

@@ -78,6 +78,7 @@ class RateItemCreate(ApiModel):
     labour_group: str | None = Field(default=None, max_length=240)
     machinery_name: str | None = Field(default=None, max_length=240)
     machinery_source: str | None = Field(default=None, max_length=240)
+    machinery_location: str | None = Field(default=None, max_length=240)
     unit_type: str = Field(min_length=1, max_length=80)
     unit_detail: str | None = Field(default=None, max_length=160)
     rate: float = Field(ge=0)
@@ -98,6 +99,7 @@ class RateItemCreate(ApiModel):
             "labour_group",
             "machinery_name",
             "machinery_source",
+            "machinery_location",
             "unit_detail",
         ):
             value = getattr(self, field_name)
@@ -125,6 +127,7 @@ class RateItemPatch(ApiModel):
     labour_group: str | None = Field(default=None, max_length=240)
     machinery_name: str | None = Field(default=None, max_length=240)
     machinery_source: str | None = Field(default=None, max_length=240)
+    machinery_location: str | None = Field(default=None, max_length=240)
     unit_type: str | None = Field(default=None, min_length=1, max_length=80)
     unit_detail: str | None = Field(default=None, max_length=160)
     rate: float | None = Field(default=None, ge=0)
@@ -164,7 +167,7 @@ class MaterialAttributeValueCreate(ApiModel):
     def trim_value(self):
         self.value = self.value.strip()
         if not self.value:
-            raise ValueError("Attribute value is required")
+            raise ValueError("Attribute content is required")
         return self
 
 
@@ -178,6 +181,21 @@ def _require_rate_file(project_id: UUID, rate_file_id: UUID) -> dict:
     if not row:
         raise HTTPException(404, "Rate file not found")
     return row
+
+
+def _duplicate_rate_file_name(original_name: str, existing_names: set[str]) -> str:
+    base = original_name.strip() or "Rate file"
+    suffix = " copy"
+    candidate = f"{base[:160 - len(suffix)].rstrip()}{suffix}"
+    if candidate not in existing_names:
+        return candidate
+    index = 2
+    while True:
+        suffix = f" copy {index}"
+        candidate = f"{base[:160 - len(suffix)].rstrip()}{suffix}"
+        if candidate not in existing_names:
+            return candidate
+        index += 1
 
 
 def _require_rate_item(project_id: UUID, rate_file_id: UUID, item_id: UUID) -> dict:
@@ -384,6 +402,34 @@ def create_rate_file(project_id: UUID, body: RateFileCreate):
     return dict(row)
 
 
+@router.post("/projects/{project_id}/rate-files/{rate_file_id}/duplicate", status_code=201)
+def duplicate_rate_file(project_id: UUID, rate_file_id: UUID):
+    original = _require_rate_file(project_id, rate_file_id)
+    names = fetch_all("SELECT name FROM rate_file WHERE project_id=%s", (str(project_id),))
+    duplicate_name = _duplicate_rate_file_name(original["name"], {row["name"] for row in names})
+    with transaction() as conn:
+        created = conn.execute(
+            """INSERT INTO rate_file(project_id,name)
+               VALUES (%s,%s)
+               RETURNING *""",
+            (str(project_id), duplicate_name),
+        ).fetchone()
+        conn.execute(
+            """INSERT INTO rate_item(
+                 rate_file_id,project_id,item_type,main_item,material_name,supplier,brand,material_attributes,
+                 labour_name,labour_group,machinery_name,machinery_source,machinery_location,unit_type,unit_detail,rate
+               )
+               SELECT %s,project_id,item_type,main_item,material_name,supplier,brand,material_attributes,
+                      labour_name,labour_group,machinery_name,machinery_source,machinery_location,unit_type,unit_detail,rate
+               FROM rate_item
+               WHERE rate_file_id=%s AND project_id=%s""",
+            (str(created["id"]), str(rate_file_id), str(project_id)),
+        )
+    result = dict(created)
+    result["item_count"] = int(fetch_one("SELECT count(*) AS n FROM rate_item WHERE rate_file_id=%s", (str(created["id"]),))["n"])
+    return result
+
+
 @router.patch("/projects/{project_id}/rate-files/{rate_file_id}")
 def update_rate_file(project_id: UUID, rate_file_id: UUID, body: RateFilePatch):
     _require_rate_file(project_id, rate_file_id)
@@ -437,10 +483,11 @@ def list_rate_items(
                 OR COALESCE(brand,'') ILIKE %s OR material_attributes::text ILIKE %s
                 OR COALESCE(labour_name,'') ILIKE %s OR COALESCE(labour_group,'') ILIKE %s
                 OR COALESCE(machinery_name,'') ILIKE %s OR COALESCE(machinery_source,'') ILIKE %s
+                OR COALESCE(machinery_location,'') ILIKE %s
                 OR COALESCE(unit_type,'') ILIKE %s OR COALESCE(unit_detail,'') ILIKE %s)"""
         )
         needle = f"%{search.strip()}%"
-        params.extend([needle] * 11)
+        params.extend([needle] * 12)
     rows = fetch_all(
         f"""SELECT * FROM rate_item
             WHERE {" AND ".join(clauses)}
@@ -457,9 +504,9 @@ def create_rate_item(project_id: UUID, rate_file_id: UUID, body: RateItemCreate)
         row = conn.execute(
             """INSERT INTO rate_item(
                  rate_file_id,project_id,item_type,main_item,material_name,supplier,brand,material_attributes,
-                 labour_name,labour_group,machinery_name,machinery_source,unit_type,unit_detail,rate
+                 labour_name,labour_group,machinery_name,machinery_source,machinery_location,unit_type,unit_detail,rate
                )
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                RETURNING *""",
             (
                 str(rate_file_id),
@@ -474,6 +521,7 @@ def create_rate_item(project_id: UUID, rate_file_id: UUID, body: RateItemCreate)
                 body.labour_group,
                 body.machinery_name,
                 body.machinery_source,
+                body.machinery_location,
                 body.unit_type,
                 body.unit_detail,
                 body.rate,
@@ -499,6 +547,7 @@ def update_rate_item(project_id: UUID, rate_file_id: UUID, item_id: UUID, body: 
         "labour_group",
         "machinery_name",
         "machinery_source",
+        "machinery_location",
         "unit_type",
         "unit_detail",
     ):
@@ -521,7 +570,7 @@ def update_rate_item(project_id: UUID, rate_file_id: UUID, item_id: UUID, body: 
         row = conn.execute(
             """UPDATE rate_item
                SET item_type=%s,main_item=%s,material_name=%s,supplier=%s,brand=%s,material_attributes=%s,
-                   labour_name=%s,labour_group=%s,machinery_name=%s,machinery_source=%s,
+                   labour_name=%s,labour_group=%s,machinery_name=%s,machinery_source=%s,machinery_location=%s,
                    unit_type=%s,unit_detail=%s,rate=%s,updated_at=now()
                WHERE id=%s AND rate_file_id=%s AND project_id=%s
                RETURNING *""",
@@ -539,6 +588,7 @@ def update_rate_item(project_id: UUID, rate_file_id: UUID, item_id: UUID, body: 
                 merged.get("labour_group"),
                 merged.get("machinery_name"),
                 merged.get("machinery_source"),
+                merged.get("machinery_location"),
                 merged["unit_type"],
                 merged.get("unit_detail"),
                 merged["rate"],

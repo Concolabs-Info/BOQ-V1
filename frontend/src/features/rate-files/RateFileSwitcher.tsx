@@ -13,6 +13,7 @@ export function RateFileSwitcher({
   onSelect,
   onCreate,
   onRename,
+  onDuplicate,
   onDelete,
 }: {
   rateFiles: RateFile[];
@@ -22,6 +23,7 @@ export function RateFileSwitcher({
   onSelect: (id: string) => void;
   onCreate: (name: string) => Promise<void> | void;
   onRename: (id: string, name: string) => void;
+  onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
@@ -64,7 +66,7 @@ export function RateFileSwitcher({
     <aside className="flex min-h-0 shrink-0 flex-col bg-white" style={{ width }}>
       <div className="border-b border-slate-200 p-4">
         <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Project rate files</p>
-        <Button className="mt-3 h-10 w-full" disabled={saving} onClick={() => { setNewName(""); setCreateError(null); setCreateOpen(true); }}>+ Add rate file</Button>
+        <Button className="mt-3 h-10 w-full" disabled={saving} onClick={() => { setNewName(""); setCreateError(null); setCreateOpen(true); }}>+ Add rate</Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {rateFiles.length ? rateFiles.map((file) => {
@@ -87,6 +89,7 @@ export function RateFileSwitcher({
                   </button>
                   <div className="mt-3 flex gap-2">
                     <button type="button" className="text-xs font-semibold text-slate-500 hover:text-blue-700" onClick={() => startEdit(file)}>Rename</button>
+                    <button type="button" className="text-xs font-semibold text-slate-500 hover:text-blue-700" onClick={() => onDuplicate(file.id)}>Duplicate</button>
                     <button type="button" className="text-xs font-semibold text-red-500 hover:text-red-700" onClick={() => onDelete(file.id)}>Delete</button>
                   </div>
                 </>
@@ -101,14 +104,14 @@ export function RateFileSwitcher({
       </div>
       <ModalDialog
         open={createOpen}
-        title="Add rate file"
+        title="Add rate"
         description="Create a project pricing library for this BOQ workspace."
-        ariaLabel="Add rate file"
+        ariaLabel="Add rate"
         onClose={() => setCreateOpen(false)}
         footer={(
           <>
             <Button variant="secondary" disabled={saving} onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button disabled={saving || !newName.trim()} onClick={() => void create()}>{saving ? "Saving..." : "Add rate file"}</Button>
+            <Button disabled={saving || !newName.trim()} onClick={() => void create()}>{saving ? "Saving..." : "Add rate"}</Button>
           </>
         )}
       >

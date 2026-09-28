@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createRateFile, createRateItem, createRateOption, deleteMaterialAttribute, deleteMaterialAttributeValue, deleteRateFile, deleteRateItem, deleteRateOption, listMaterialAttributes, listRateFiles, listRateItems, listRateOptions, updateRateFile, updateRateItem } from "./api";
+import { createRateFile, createRateItem, createRateOption, deleteMaterialAttribute, deleteMaterialAttributeValue, deleteRateFile, deleteRateItem, deleteRateOption, duplicateRateFile, listMaterialAttributes, listRateFiles, listRateItems, listRateOptions, updateRateFile, updateRateItem } from "./api";
 import type { RateItemInput, RateOptionType } from "./types";
 
 export const rateFileKeys = {
@@ -49,6 +49,7 @@ export function useRateFileMutations(projectId: string, rateFileId: string | nul
   return {
     createFile: useMutation({ mutationFn: (name: string) => createRateFile(projectId, name), onSuccess: invalidateFiles }),
     updateFile: useMutation({ mutationFn: ({ id, name }: { id: string; name: string }) => updateRateFile(projectId, id, name), onSuccess: invalidateFiles }),
+    duplicateFile: useMutation({ mutationFn: (id: string) => duplicateRateFile(projectId, id), onSuccess: invalidateFiles }),
     deleteFile: useMutation({ mutationFn: (id: string) => deleteRateFile(projectId, id), onSuccess: invalidateFiles }),
     createItem: useMutation({ mutationFn: (payload: RateItemInput) => rateFileId ? createRateItem(projectId, rateFileId, payload) : Promise.reject(new Error("Select a rate file first.")), onSuccess: async () => { await invalidateFiles(); await invalidateItems(); } }),
     updateItem: useMutation({ mutationFn: ({ id, payload }: { id: string; payload: RateItemInput }) => rateFileId ? updateRateItem(projectId, rateFileId, id, payload) : Promise.reject(new Error("Select a rate file first.")), onSuccess: invalidateItems }),

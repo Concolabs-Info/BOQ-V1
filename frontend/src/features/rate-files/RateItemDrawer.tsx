@@ -37,6 +37,7 @@ const defaultForm = (itemType: RateItemType): RateItemInput => ({
   labour_group: null,
   machinery_name: null,
   machinery_source: null,
+  machinery_location: null,
   unit_type: defaultUnitType(itemType),
   unit_detail: defaultUnitDetail(itemType, defaultUnitType(itemType)),
   rate: 0,
@@ -287,6 +288,7 @@ export function RateItemDrawer({
       labour_group: item.labour_group,
       machinery_name: item.machinery_name,
       machinery_source: item.machinery_source,
+      machinery_location: item.machinery_location,
       unit_type: item.unit_type,
       unit_detail: item.unit_detail,
       rate: item.rate,
@@ -323,6 +325,10 @@ export function RateItemDrawer({
 
   function setMaterialName(value: string | null) {
     setForm((current) => ({ ...current, material_name: value, material_attributes: [] }));
+  }
+
+  function setMachinerySource(value: string | null) {
+    setForm((current) => ({ ...current, machinery_source: value, machinery_location: value ? current.machinery_location : null }));
   }
 
   function updateMaterialAttribute(index: number, patch: { attribute?: string; value?: string }) {
@@ -371,7 +377,7 @@ export function RateItemDrawer({
   async function saveMaterialAttributeCatalogValue() {
     const trimmed = attributeValue.trim();
     if (!trimmed) {
-      setAttributeError(attributeModal === "attribute" ? "Attribute name is required." : "Attribute value is required.");
+      setAttributeError(attributeModal === "attribute" ? "Attribute name is required." : "Attribute content is required.");
       return;
     }
     if (attributeModalRow == null) return;
@@ -488,6 +494,7 @@ export function RateItemDrawer({
       labour_group: trimValue(form.labour_group),
       machinery_name: trimValue(form.machinery_name),
       machinery_source: trimValue(form.machinery_source),
+      machinery_location: form.item_type === "machinery" && trimValue(form.machinery_source) ? trimValue(form.machinery_location) : null,
       unit_type: unitType,
       unit_detail: trimValue(form.unit_detail),
       rate: Number(form.rate),
@@ -510,6 +517,7 @@ export function RateItemDrawer({
         onDelete={(value) => setDeleteTarget({ kind: "option", optionType, field, value })}
         onChange={(value) => {
             if (field === "material_name") setMaterialName(value || null);
+            else if (field === "machinery_source") setMachinerySource(value || null);
             else if (field === "unit_type") setUnitType(value || null);
             else updateField(field, value || null);
           }}
@@ -566,7 +574,7 @@ export function RateItemDrawer({
                         <DeletableDropdown
                           disabled={!selected}
                           value={attributeRow.value}
-                          emptyLabel="Attribute value"
+                          emptyLabel="Attribute content"
                           addLabel="+ Add new value"
                           options={(selected?.values || []).map((value) => ({ value: value.value, deleteLabel: `Delete ${value.value}` }))}
                           onAdd={() => {
@@ -603,6 +611,12 @@ export function RateItemDrawer({
           <>
             <SelectField label="Name" field="machinery_name" optionType="machinery_name" />
             <SelectField label="Source" field="machinery_source" optionType="machinery_source" />
+            {trimValue(form.machinery_source) ? (
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Location</span>
+                <input className="input mt-1" placeholder="Project site, supplier yard, Colombo" value={form.machinery_location || ""} onChange={(event) => updateField("machinery_location", event.target.value)} />
+              </label>
+            ) : null}
           </>
         ) : null}
         <SelectField label="Unit type" field="unit_type" optionType={unitOptionType} />
@@ -668,9 +682,9 @@ export function RateItemDrawer({
       </ModalDialog>
       <ModalDialog
         open={Boolean(attributeModal)}
-        title={attributeModal === "attribute" ? "Add material attribute" : "Add attribute value"}
-        description={attributeModal === "attribute" ? `Create an attribute for ${materialName || "this material"}.` : `Create a value for ${attributeModalRow != null ? selectedAttribute(attributeModalRow)?.name || "this attribute" : "this attribute"}.`}
-        ariaLabel={attributeModal === "attribute" ? "Add material attribute" : "Add attribute value"}
+        title={attributeModal === "attribute" ? "Add material attribute" : "Add attribute content"}
+        description={attributeModal === "attribute" ? `Create an attribute for ${materialName || "this material"}.` : `Create content for ${attributeModalRow != null ? selectedAttribute(attributeModalRow)?.name || "this attribute" : "this attribute"}.`}
+        ariaLabel={attributeModal === "attribute" ? "Add material attribute" : "Add attribute content"}
         onClose={closeAttributeModal}
         footer={(
           <>
@@ -681,7 +695,7 @@ export function RateItemDrawer({
       >
         {attributeError ? <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{attributeError}</p> : null}
         <label className="block">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{attributeModal === "attribute" ? "Attribute name" : "Attribute value"}</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{attributeModal === "attribute" ? "Attribute name" : "Attribute content"}</span>
           <input
             className="input mt-2 w-full"
             autoFocus

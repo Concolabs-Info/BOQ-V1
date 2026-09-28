@@ -21,7 +21,7 @@ function itemDetails(item: RateItem) {
     return [item.brand, ...attributes].filter(Boolean).join(" · ");
   }
   if (item.item_type === "labour") return item.labour_group || "";
-  return item.machinery_source || "";
+  return [item.machinery_source, item.machinery_location].filter(Boolean).join(" · ");
 }
 
 function itemSupplier(item: RateItem) {

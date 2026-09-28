@@ -22,6 +22,12 @@ export async function updateRateFile(projectId: string, rateFileId: string, name
   });
 }
 
+export async function duplicateRateFile(projectId: string, rateFileId: string): Promise<RateFile> {
+  return requestJson<RateFile>(`/api/v1/projects/${projectId}/rate-files/${rateFileId}/duplicate`, {
+    method: "POST",
+  });
+}
+
 export async function deleteRateFile(projectId: string, rateFileId: string): Promise<void> {
   await requestJson<void>(`/api/v1/projects/${projectId}/rate-files/${rateFileId}`, { method: "DELETE" });
 }

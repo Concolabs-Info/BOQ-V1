@@ -79,6 +79,7 @@ def test_required_pre_routes_exist():
         "/api/v1/projects/{project_id}/rate-material-attributes/{attribute_id}/values",
         "/api/v1/projects/{project_id}/rate-material-attributes/{attribute_id}/values/{value_id}",
         "/api/v1/projects/{project_id}/rate-files/{rate_file_id}",
+        "/api/v1/projects/{project_id}/rate-files/{rate_file_id}/duplicate",
         "/api/v1/projects/{project_id}/rate-files/{rate_file_id}/items",
         "/api/v1/projects/{project_id}/rate-files/{rate_file_id}/items/{item_id}",
         "/api/v1/projects/{project_id}/boq/rate-mappings",

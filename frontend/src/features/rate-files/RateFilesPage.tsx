@@ -33,7 +33,7 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
   const activeRateFileId = selectedRateFile?.id || null;
   const itemsQuery = useRateItems(projectId, activeRateFileId, search);
   const mutations = useRateFileMutations(projectId, activeRateFileId, search);
-  const saving = mutations.createFile.isPending || mutations.updateFile.isPending || mutations.deleteFile.isPending || mutations.createItem.isPending || mutations.updateItem.isPending || mutations.deleteItem.isPending || mutations.createOption.isPending || mutations.deleteOption.isPending || mutations.deleteMaterialAttribute.isPending || mutations.deleteMaterialAttributeValue.isPending;
+  const saving = mutations.createFile.isPending || mutations.updateFile.isPending || mutations.duplicateFile.isPending || mutations.deleteFile.isPending || mutations.createItem.isPending || mutations.updateItem.isPending || mutations.deleteItem.isPending || mutations.createOption.isPending || mutations.deleteOption.isPending || mutations.deleteMaterialAttribute.isPending || mutations.deleteMaterialAttributeValue.isPending;
   const items = itemsQuery.data || [];
   const selectedItem = useMemo(() => items.find((item) => item.id === selectedItemId) || null, [items, selectedItemId]);
 
@@ -133,6 +133,10 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
               }
             }}
             onRename={(id, name) => void run(() => mutations.updateFile.mutateAsync({ id, name }))}
+            onDuplicate={(id) => void run(async () => {
+              const created = await mutations.duplicateFile.mutateAsync(id);
+              setQuery({ rateFileId: created.id, itemId: null });
+            })}
             onDelete={(id) => void run(async () => {
               if (!window.confirm("Delete this rate file and all of its rate compositions?")) return;
               await mutations.deleteFile.mutateAsync(id);
