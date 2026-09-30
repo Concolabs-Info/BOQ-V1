@@ -18,3 +18,11 @@
 - [x] Require material-name matching as part of BOQ automatic rate matching.
 - [x] Group multiple BOQ row override prompts into one save/discard prompt.
 - [x] Replace dash-only table placeholders with clear empty-state labels.
+- [x] Add Norm sidebar route, API, grouped lists, drawers and custom unit dropdown values.
+- [x] Add structure-only Rate Breakdown sidebar route, API and page.
+- [x] Update Rate Files composition table to group by Material/Labour/Machinery and remove main item from the drawer.
+- [x] Fix Norm and Rate Breakdown dynamic routes to unwrap async project params before API calls.
+- [x] Add Percentage rows to Rate Files with name, percentage and manual rate.
+- [x] Add Percentage rows to Norm with name and quantity only.
+- [x] Rename Work Breakdown to Rate Breakdown using a new empty storage table and API route.
+- [x] Convert Norm saved rows to a grouped table with type checkbox and quantity range filters.

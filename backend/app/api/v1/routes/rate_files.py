@@ -13,9 +13,8 @@ from ..schemas import ApiModel
 
 router = APIRouter(tags=["rate-files"])
 
-ItemType = Literal["material", "labour", "machinery"]
+ItemType = Literal["material", "labour", "machinery", "percentage"]
 OptionType = Literal[
-    "main_item",
     "material_name",
     "supplier",
     "brand",
@@ -32,7 +31,6 @@ DEFAULT_MATERIAL_UNIT_TYPES = ["m", "m2", "m3", "nr", "kg", "ton", "bag", "sheet
 DEFAULT_LABOUR_UNIT_TYPES = ["minute", "hour", "day"]
 DEFAULT_MACHINERY_UNIT_TYPES = ["hour", "day", "shift", "trip"]
 DEFAULT_OPTIONS: dict[str, list[str]] = {
-    "main_item": [],
     "material_name": [],
     "supplier": [],
     "brand": [],
@@ -69,7 +67,7 @@ class MaterialAttributeSelection(ApiModel):
 
 class RateItemCreate(ApiModel):
     item_type: ItemType
-    main_item: str = Field(min_length=1, max_length=240)
+    main_item: str | None = Field(default=None, max_length=240)
     material_name: str | None = Field(default=None, max_length=240)
     supplier: str | None = Field(default=None, max_length=240)
     brand: str | None = Field(default=None, max_length=240)
@@ -79,17 +77,17 @@ class RateItemCreate(ApiModel):
     machinery_name: str | None = Field(default=None, max_length=240)
     machinery_source: str | None = Field(default=None, max_length=240)
     machinery_location: str | None = Field(default=None, max_length=240)
-    unit_type: str = Field(min_length=1, max_length=80)
+    percentage_name: str | None = Field(default=None, max_length=240)
+    percentage: float | None = Field(default=None, ge=0)
+    unit_type: str | None = Field(default=None, max_length=80)
     unit_detail: str | None = Field(default=None, max_length=160)
     rate: float = Field(ge=0)
 
     @model_validator(mode="after")
     def normalize_and_validate(self):
-        self.main_item = self.main_item.strip()
-        self.unit_type = self.unit_type.strip()
-        if not self.main_item:
-            raise ValueError("Main item is required")
-        if not self.unit_type:
+        self.main_item = self.main_item.strip() or None if self.main_item is not None else None
+        self.unit_type = self.unit_type.strip() or None if self.unit_type is not None else None
+        if self.item_type != "percentage" and not self.unit_type:
             raise ValueError("Unit type is required")
         for field_name in (
             "material_name",
@@ -100,6 +98,7 @@ class RateItemCreate(ApiModel):
             "machinery_name",
             "machinery_source",
             "machinery_location",
+            "percentage_name",
             "unit_detail",
         ):
             value = getattr(self, field_name)
@@ -113,12 +112,16 @@ class RateItemCreate(ApiModel):
             raise ValueError("Labour name is required")
         if self.item_type == "machinery" and not self.machinery_name:
             raise ValueError("Machinery name is required")
+        if self.item_type == "percentage" and not self.percentage_name:
+            raise ValueError("Percentage name is required")
+        if self.item_type == "percentage" and self.percentage is None:
+            raise ValueError("Percentage is required")
         return self
 
 
 class RateItemPatch(ApiModel):
     item_type: ItemType | None = None
-    main_item: str | None = Field(default=None, min_length=1, max_length=240)
+    main_item: str | None = Field(default=None, max_length=240)
     material_name: str | None = Field(default=None, max_length=240)
     supplier: str | None = Field(default=None, max_length=240)
     brand: str | None = Field(default=None, max_length=240)
@@ -128,7 +131,9 @@ class RateItemPatch(ApiModel):
     machinery_name: str | None = Field(default=None, max_length=240)
     machinery_source: str | None = Field(default=None, max_length=240)
     machinery_location: str | None = Field(default=None, max_length=240)
-    unit_type: str | None = Field(default=None, min_length=1, max_length=80)
+    percentage_name: str | None = Field(default=None, max_length=240)
+    percentage: float | None = Field(default=None, ge=0)
+    unit_type: str | None = Field(default=None, max_length=80)
     unit_detail: str | None = Field(default=None, max_length=160)
     rate: float | None = Field(default=None, ge=0)
 
@@ -417,10 +422,10 @@ def duplicate_rate_file(project_id: UUID, rate_file_id: UUID):
         conn.execute(
             """INSERT INTO rate_item(
                  rate_file_id,project_id,item_type,main_item,material_name,supplier,brand,material_attributes,
-                 labour_name,labour_group,machinery_name,machinery_source,machinery_location,unit_type,unit_detail,rate
+                 labour_name,labour_group,machinery_name,machinery_source,machinery_location,percentage_name,percentage,unit_type,unit_detail,rate
                )
                SELECT %s,project_id,item_type,main_item,material_name,supplier,brand,material_attributes,
-                      labour_name,labour_group,machinery_name,machinery_source,machinery_location,unit_type,unit_detail,rate
+                      labour_name,labour_group,machinery_name,machinery_source,machinery_location,percentage_name,percentage,unit_type,unit_detail,rate
                FROM rate_item
                WHERE rate_file_id=%s AND project_id=%s""",
             (str(created["id"]), str(rate_file_id), str(project_id)),
@@ -479,19 +484,20 @@ def list_rate_items(
         params.append(item_type)
     if search and search.strip():
         clauses.append(
-            """(main_item ILIKE %s OR COALESCE(material_name,'') ILIKE %s OR COALESCE(supplier,'') ILIKE %s
+            """(COALESCE(main_item,'') ILIKE %s OR COALESCE(material_name,'') ILIKE %s OR COALESCE(supplier,'') ILIKE %s
                 OR COALESCE(brand,'') ILIKE %s OR material_attributes::text ILIKE %s
                 OR COALESCE(labour_name,'') ILIKE %s OR COALESCE(labour_group,'') ILIKE %s
                 OR COALESCE(machinery_name,'') ILIKE %s OR COALESCE(machinery_source,'') ILIKE %s
                 OR COALESCE(machinery_location,'') ILIKE %s
+                OR COALESCE(percentage_name,'') ILIKE %s OR COALESCE(percentage::text,'') ILIKE %s
                 OR COALESCE(unit_type,'') ILIKE %s OR COALESCE(unit_detail,'') ILIKE %s)"""
         )
         needle = f"%{search.strip()}%"
-        params.extend([needle] * 12)
+        params.extend([needle] * 14)
     rows = fetch_all(
         f"""SELECT * FROM rate_item
             WHERE {" AND ".join(clauses)}
-            ORDER BY main_item,item_type,material_name,labour_name,machinery_name""",
+            ORDER BY item_type,material_name,labour_name,machinery_name,percentage_name,updated_at DESC""",
         tuple(params),
     )
     return {"items": rows}
@@ -504,9 +510,9 @@ def create_rate_item(project_id: UUID, rate_file_id: UUID, body: RateItemCreate)
         row = conn.execute(
             """INSERT INTO rate_item(
                  rate_file_id,project_id,item_type,main_item,material_name,supplier,brand,material_attributes,
-                 labour_name,labour_group,machinery_name,machinery_source,machinery_location,unit_type,unit_detail,rate
+                 labour_name,labour_group,machinery_name,machinery_source,machinery_location,percentage_name,percentage,unit_type,unit_detail,rate
                )
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                RETURNING *""",
             (
                 str(rate_file_id),
@@ -522,6 +528,8 @@ def create_rate_item(project_id: UUID, rate_file_id: UUID, body: RateItemCreate)
                 body.machinery_name,
                 body.machinery_source,
                 body.machinery_location,
+                body.percentage_name,
+                body.percentage,
                 body.unit_type,
                 body.unit_detail,
                 body.rate,
@@ -548,14 +556,13 @@ def update_rate_item(project_id: UUID, rate_file_id: UUID, item_id: UUID, body: 
         "machinery_name",
         "machinery_source",
         "machinery_location",
+        "percentage_name",
         "unit_type",
         "unit_detail",
     ):
         if field_name in merged and merged[field_name] is not None:
             merged[field_name] = str(merged[field_name]).strip() or None
-    if not merged.get("main_item"):
-        raise HTTPException(422, "Main item is required")
-    if not merged.get("unit_type"):
+    if merged["item_type"] != "percentage" and not merged.get("unit_type"):
         raise HTTPException(422, "Unit type is required")
     if merged["item_type"] == "material" and not merged.get("material_name"):
         raise HTTPException(422, "Material name is required")
@@ -566,12 +573,16 @@ def update_rate_item(project_id: UUID, rate_file_id: UUID, item_id: UUID, body: 
         raise HTTPException(422, "Labour name is required")
     if merged["item_type"] == "machinery" and not merged.get("machinery_name"):
         raise HTTPException(422, "Machinery name is required")
+    if merged["item_type"] == "percentage" and not merged.get("percentage_name"):
+        raise HTTPException(422, "Percentage name is required")
+    if merged["item_type"] == "percentage" and merged.get("percentage") is None:
+        raise HTTPException(422, "Percentage is required")
     with transaction() as conn:
         row = conn.execute(
             """UPDATE rate_item
                SET item_type=%s,main_item=%s,material_name=%s,supplier=%s,brand=%s,material_attributes=%s,
                    labour_name=%s,labour_group=%s,machinery_name=%s,machinery_source=%s,machinery_location=%s,
-                   unit_type=%s,unit_detail=%s,rate=%s,updated_at=now()
+                   percentage_name=%s,percentage=%s,unit_type=%s,unit_detail=%s,rate=%s,updated_at=now()
                WHERE id=%s AND rate_file_id=%s AND project_id=%s
                RETURNING *""",
             (
@@ -589,7 +600,9 @@ def update_rate_item(project_id: UUID, rate_file_id: UUID, item_id: UUID, body: 
                 merged.get("machinery_name"),
                 merged.get("machinery_source"),
                 merged.get("machinery_location"),
-                merged["unit_type"],
+                merged.get("percentage_name"),
+                merged.get("percentage"),
+                merged.get("unit_type"),
                 merged.get("unit_detail"),
                 merged["rate"],
                 str(item_id),

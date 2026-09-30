@@ -9,7 +9,6 @@ from app.api.v1.routes.rate_files import DEFAULT_OPTIONS, MaterialAttributeCreat
 def test_material_rate_item_requires_composition_fields():
     item = RateItemCreate(
         item_type="material",
-        main_item=" Concrete ",
         material_name=" Cement ",
         supplier=" Local supplier ",
         brand="Tokyo",
@@ -22,7 +21,7 @@ def test_material_rate_item_requires_composition_fields():
         rate=2500,
     )
 
-    assert item.main_item == "Concrete"
+    assert item.main_item is None
     assert item.material_name == "Cement"
     assert item.supplier == "Local supplier"
     assert item.material_attributes[0].attribute == "Grade"
@@ -33,7 +32,6 @@ def test_material_rate_item_requires_composition_fields():
 def test_material_rate_item_allows_no_attributes():
     item = RateItemCreate(
         item_type="material",
-        main_item="Concrete",
         material_name="Cement",
         unit_type="bag",
         rate=2500,
@@ -45,7 +43,6 @@ def test_material_rate_item_allows_no_attributes():
 def test_labour_rate_item_requires_name():
     item = RateItemCreate(
         item_type="labour",
-        main_item="Concrete",
         labour_name="Mason",
         labour_group="Skilled",
         unit_type="day",
@@ -60,7 +57,6 @@ def test_labour_rate_item_requires_name():
 def test_machinery_rate_item_requires_name():
     item = RateItemCreate(
         item_type="machinery",
-        main_item="Concrete",
         machinery_name="Mixer",
         machinery_source="Own",
         machinery_location=" Colombo yard ",
@@ -76,7 +72,6 @@ def test_machinery_rate_item_requires_name():
 def test_machinery_rate_item_allows_no_location():
     item = RateItemCreate(
         item_type="machinery",
-        main_item="Concrete",
         machinery_name="Mixer",
         machinery_source="Rented",
         unit_type="day",
@@ -86,11 +81,24 @@ def test_machinery_rate_item_allows_no_location():
     assert item.machinery_location is None
 
 
+def test_percentage_rate_item_requires_name_percentage_and_rate():
+    item = RateItemCreate(
+        item_type="percentage",
+        percentage_name="Overhead",
+        percentage=12.5,
+        rate=500,
+    )
+
+    assert item.percentage_name == "Overhead"
+    assert item.percentage == 12.5
+    assert item.unit_type is None
+    assert item.rate == 500
+
+
 def test_material_rate_item_rejects_missing_material_name():
     with pytest.raises(ValidationError):
         RateItemCreate(
             item_type="material",
-            main_item="Concrete",
             material_name=" ",
             unit_type="bag",
             rate=2500,
@@ -101,7 +109,6 @@ def test_labour_rate_item_rejects_missing_labour_name():
     with pytest.raises(ValidationError):
         RateItemCreate(
             item_type="labour",
-            main_item="Concrete",
             unit_type="day",
             rate=4500,
         )
@@ -111,7 +118,6 @@ def test_machinery_rate_item_rejects_missing_machinery_name():
     with pytest.raises(ValidationError):
         RateItemCreate(
             item_type="machinery",
-            main_item="Concrete",
             unit_type="day",
             rate=8000,
         )
@@ -121,7 +127,6 @@ def test_rate_item_rejects_negative_rate():
     with pytest.raises(ValidationError):
         RateItemCreate(
             item_type="material",
-            main_item="Concrete",
             material_name="Cement",
             unit_type="bag",
             rate=-1,
@@ -132,15 +137,33 @@ def test_rate_item_requires_unit_type():
     with pytest.raises(ValidationError):
         RateItemCreate(
             item_type="material",
-            main_item="Concrete",
             material_name="Cement",
             unit_type="",
             rate=1,
         )
 
 
+def test_percentage_rate_item_rejects_missing_percentage_name():
+    with pytest.raises(ValidationError):
+        RateItemCreate(
+            item_type="percentage",
+            percentage_name=" ",
+            percentage=10,
+            rate=500,
+        )
+
+
+def test_percentage_rate_item_rejects_missing_percentage_value():
+    with pytest.raises(ValidationError):
+        RateItemCreate(
+            item_type="percentage",
+            percentage_name="Overhead",
+            rate=500,
+        )
+
+
 def test_rate_option_trims_value():
-    option = RateOptionCreate(option_type="main_item", value=" Concrete ")
+    option = RateOptionCreate(option_type="material_name", value=" Concrete ")
 
     assert option.value == "Concrete"
 
@@ -214,7 +237,6 @@ def test_old_material_type_is_rejected():
     with pytest.raises(ValidationError):
         RateItemCreate(
             item_type="material",
-            main_item="Concrete",
             material_name="Cement",
             material_type="OPC",
             unit_type="bag",

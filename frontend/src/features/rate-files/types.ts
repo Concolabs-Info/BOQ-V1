@@ -1,7 +1,6 @@
-export type RateItemType = "material" | "labour" | "machinery";
+export type RateItemType = "material" | "labour" | "machinery" | "percentage";
 
 export type RateOptionType =
-  | "main_item"
   | "material_name"
   | "supplier"
   | "brand"
@@ -13,7 +12,7 @@ export type RateOptionType =
   | "labour_unit_type"
   | "machinery_unit_type";
 
-export const DEFAULT_UNIT_TYPES_BY_ITEM_TYPE: Record<RateItemType, string[]> = {
+export const DEFAULT_UNIT_TYPES_BY_ITEM_TYPE: Record<Exclude<RateItemType, "percentage">, string[]> = {
   material: ["m", "m2", "m3", "nr", "kg", "ton", "bag", "sheet", "litre"],
   labour: ["minute", "hour", "day"],
   machinery: ["hour", "day", "shift", "trip"],
@@ -54,7 +53,7 @@ export type RateItem = {
   rate_file_id: string;
   project_id: string;
   item_type: RateItemType;
-  main_item: string;
+  main_item: string | null;
   material_name: string | null;
   supplier: string | null;
   brand: string | null;
@@ -64,7 +63,9 @@ export type RateItem = {
   machinery_name: string | null;
   machinery_source: string | null;
   machinery_location: string | null;
-  unit_type: string;
+  percentage_name: string | null;
+  percentage: number | null;
+  unit_type: string | null;
   unit_detail: string | null;
   rate: number;
   created_at: string;
@@ -73,7 +74,7 @@ export type RateItem = {
 
 export type RateItemInput = {
   item_type: RateItemType;
-  main_item: string;
+  main_item: string | null;
   material_name: string | null;
   supplier: string | null;
   brand: string | null;
@@ -83,7 +84,9 @@ export type RateItemInput = {
   machinery_name: string | null;
   machinery_source: string | null;
   machinery_location: string | null;
-  unit_type: string;
+  percentage_name: string | null;
+  percentage: number | null;
+  unit_type: string | null;
   unit_detail: string | null;
   rate: number;
 };
@@ -111,10 +114,10 @@ export const RATE_ITEM_TYPE_LABELS: Record<RateItemType, string> = {
   material: "Material",
   labour: "Labour",
   machinery: "Machinery",
+  percentage: "Percentage",
 };
 
 export const RATE_OPTION_LABELS: Record<RateOptionType, string> = {
-  main_item: "main item",
   material_name: "material name",
   supplier: "supplier",
   brand: "brand",

@@ -25,7 +25,11 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
     { title: "Projects", href: appRoutes.projects },
     ...(projectId ? [{ title: "Project workspace", href: appRoutes.pre(projectId, "upload") }] : []),
   ];
-  const settingsNav = projectId ? [{ title: "Rate Files", href: appRoutes.workspaceRateFiles(projectId) }] : [];
+  const settingsNav = projectId ? [
+    { title: "Rate Files", href: appRoutes.workspaceRateFiles(projectId) },
+    { title: "Norm", href: appRoutes.workspaceNorm(projectId) },
+    { title: "Rate Breakdown", href: appRoutes.workspaceRateBreakdown(projectId) },
+  ] : [];
 
   const navigation = <>
     <div className="flex items-center gap-3 px-1">
@@ -36,7 +40,7 @@ export function PlatformShell({ title, eyebrow, children, headerNavigation, lock
       <p className="px-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Workspace</p>
       <div className="mt-3 space-y-1">
         {nav.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "/") || (item.title === "Project workspace" && projectId !== null && pathname.includes(`/workspace/${projectId}/`) && !pathname.endsWith("/review") && !pathname.includes("/boq") && !pathname.includes("/settings/"));
+          const active = pathname === item.href || pathname.startsWith(item.href + "/") || (item.title === "Project workspace" && projectId !== null && pathname.includes(`/workspace/${projectId}/`) && !pathname.endsWith("/review") && !pathname.includes("/boq") && !pathname.includes("/settings/") && !pathname.includes("/norm") && !pathname.includes("/rate-breakdown"));
           return <Link key={item.title} href={item.href} onClick={() => setMobileOpen(false)} className={active ? "flex items-center rounded-xl border-l-2 border-blue-600 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700" : "flex items-center rounded-xl border-l-2 border-transparent px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"}>{item.title}</Link>;
         })}
       </div>

@@ -10,7 +10,7 @@ import { RateFileSwitcher } from "./RateFileSwitcher";
 import { RateItemDrawer } from "./RateItemDrawer";
 import { RateItemsTable } from "./RateItemsTable";
 import { useRateFileMutations, useRateFiles, useRateItems, useRateOptions } from "./hooks";
-import type { RateItem, RateItemInput, RateItemType } from "./types";
+import type { RateFile, RateItem, RateItemInput, RateItemType } from "./types";
 import { RATE_ITEM_TYPE_LABELS } from "./types";
 
 export function RateFilesPage({ projectId }: { projectId: string }) {
@@ -23,9 +23,10 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [typeModalOpen, setTypeModalOpen] = useState(false);
   const [newItemType, setNewItemType] = useState<RateItemType>("material");
+  const [deleteRateFile, setDeleteRateFile] = useState<RateFile | null>(null);
   const [deleteItem, setDeleteItem] = useState<RateItem | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [sidebarWidth, setSidebarWidth] = useState(200);
 
   const rateFilesQuery = useRateFiles(projectId);
   const optionsQuery = useRateOptions(projectId);
@@ -91,12 +92,21 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
     });
   }
 
+  async function confirmDeleteRateFile() {
+    if (!deleteRateFile) return;
+    await run(async () => {
+      await mutations.deleteFile.mutateAsync(deleteRateFile.id);
+      if (activeRateFileId === deleteRateFile.id) setQuery({ rateFileId: null, itemId: null });
+      setDeleteRateFile(null);
+    });
+  }
+
   function startResize(event: React.PointerEvent<HTMLDivElement>) {
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = sidebarWidth;
     const move = (moveEvent: PointerEvent) => {
-      const nextWidth = Math.min(440, Math.max(180, startWidth + moveEvent.clientX - startX));
+      const nextWidth = Math.min(440, Math.max(160, startWidth + moveEvent.clientX - startX));
       setSidebarWidth(nextWidth);
     };
     const stop = () => {
@@ -137,11 +147,7 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
               const created = await mutations.duplicateFile.mutateAsync(id);
               setQuery({ rateFileId: created.id, itemId: null });
             })}
-            onDelete={(id) => void run(async () => {
-              if (!window.confirm("Delete this rate file and all of its rate compositions?")) return;
-              await mutations.deleteFile.mutateAsync(id);
-              if (activeRateFileId === id) setQuery({ rateFileId: null, itemId: null });
-            })}
+            onDelete={(id) => setDeleteRateFile((rateFilesQuery.data || []).find((file) => file.id === id) || null)}
           />
           <div
             role="separator"
@@ -154,7 +160,7 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
             <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-200 group-hover:bg-blue-500" />
             <div className="absolute inset-y-0 left-1/2 hidden w-1 -translate-x-1/2 bg-blue-500/20 group-hover:block" />
           </div>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-scroll overscroll-contain [scrollbar-gutter:stable]">
             <div className="border-b border-slate-200 bg-white px-5 py-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -244,7 +250,7 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
         footer={<Button variant="secondary" onClick={() => setTypeModalOpen(false)}>Cancel</Button>}
       >
         <div className="grid gap-3">
-          {(["material", "labour", "machinery"] as RateItemType[]).map((itemType) => (
+          {(["material", "labour", "machinery", "percentage"] as RateItemType[]).map((itemType) => (
             <button
               key={itemType}
               type="button"
@@ -253,10 +259,31 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
             >
               <span className="font-semibold text-slate-950">{RATE_ITEM_TYPE_LABELS[itemType]}</span>
               <span className="mt-1 block text-sm text-slate-500">
-                {itemType === "material" ? "Supplier, brand, type, unit and rate." : itemType === "labour" ? "Name, group, unit and rate." : "Name, source, unit and rate."}
+                {itemType === "material" ? "Supplier, brand, type, unit and rate." : itemType === "labour" ? "Name, group, unit and rate." : itemType === "machinery" ? "Name, source, unit and rate." : "Name, percentage and manual rate."}
               </span>
             </button>
           ))}
+        </div>
+      </ModalDialog>
+      <ModalDialog
+        open={Boolean(deleteRateFile)}
+        title="Delete rate file"
+        description="This will remove the rate file and all rate compositions inside it."
+        ariaLabel="Delete rate file"
+        onClose={() => setDeleteRateFile(null)}
+        footer={(
+          <>
+            <Button variant="secondary" disabled={saving} onClick={() => setDeleteRateFile(null)}>Cancel</Button>
+            <Button variant="danger" disabled={saving} onClick={() => void confirmDeleteRateFile()}>{saving ? "Deleting..." : "Delete rate file"}</Button>
+          </>
+        )}
+      >
+        {error ? <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+        <div className="rounded-xl border border-red-100 bg-red-50 p-4">
+          <p className="text-sm font-semibold text-slate-950">{deleteRateFile?.name || "Rate file"}</p>
+          <p className="mt-1 text-sm text-red-700">
+            {(deleteRateFile?.item_count || 0).toLocaleString()} composition item{deleteRateFile?.item_count === 1 ? "" : "s"} will be deleted with this rate file.
+          </p>
         </div>
       </ModalDialog>
       <ModalDialog
@@ -275,10 +302,10 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
         {error ? <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
           <p className="text-sm font-semibold text-slate-950">
-            {deleteItem?.material_name || deleteItem?.labour_name || deleteItem?.machinery_name || "Rate item"}
+            {deleteItem?.material_name || deleteItem?.labour_name || deleteItem?.machinery_name || deleteItem?.percentage_name || "Rate item"}
           </p>
           <p className="mt-1 text-sm text-slate-500">
-            {[deleteItem?.main_item, deleteItem?.unit_type, deleteItem?.unit_detail].filter(Boolean).join(" · ") || "No additional details"}
+            {[deleteItem?.unit_type, deleteItem?.unit_detail].filter(Boolean).join(" · ") || "No additional details"}
           </p>
         </div>
       </ModalDialog>

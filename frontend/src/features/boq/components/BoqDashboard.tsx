@@ -429,7 +429,7 @@ function BoqRatePickerDialog({
   const needle = search.trim().toLowerCase();
   const filteredItems = items.filter((item) => {
     if (!needle) return true;
-    return [item.main_item, item.material_name, item.supplier, item.brand, item.unit_type, item.unit_detail, ...(item.material_attributes || []).flatMap((attribute) => [attribute.attribute, attribute.value])]
+    return [item.material_name, item.supplier, item.brand, item.unit_type, item.unit_detail, ...(item.material_attributes || []).flatMap((attribute) => [attribute.attribute, attribute.value])]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(needle));
   });
@@ -449,7 +449,7 @@ function BoqRatePickerDialog({
         <span className="ml-2 text-blue-800">{rateFileName || "No rate file selected"}</span>
       </div>
       <div className="mb-4">
-        <input className="input w-full" placeholder="Search material, main item, supplier, unit" value={search} onChange={(event) => onSearch(event.target.value)} />
+        <input className="input w-full" placeholder="Search material, supplier, unit" value={search} onChange={(event) => onSearch(event.target.value)} />
       </div>
       {!rateFileName ? (
         <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">Select a rate file above the BOQ table first.</div>
@@ -458,7 +458,6 @@ function BoqRatePickerDialog({
           <table className="w-full border-collapse text-left text-sm">
             <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
-                <th className="px-5 py-3">Main item</th>
                 <th className="px-5 py-3">Material</th>
                 <th className="px-5 py-3">Details</th>
                 <th className="px-5 py-3">Unit</th>
@@ -471,7 +470,6 @@ function BoqRatePickerDialog({
                 const rate = sellRate(item);
                 return (
                   <tr key={item.id} className="border-t border-slate-200">
-                    <td className="px-5 py-3 font-semibold text-slate-900">{item.main_item}</td>
                     <td className="px-5 py-3 text-slate-600">{item.material_name || <EmptyValue>No material</EmptyValue>}</td>
                     <td className="px-5 py-3 text-slate-600">
                       {[item.supplier, item.brand, ...(item.material_attributes || []).map((attribute) => `${attribute.attribute}: ${attribute.value}`), item.unit_detail].filter(Boolean).join(" · ") || <EmptyValue>No details</EmptyValue>}
@@ -485,7 +483,7 @@ function BoqRatePickerDialog({
                 );
               })}
               {!filteredItems.length ? (
-                <tr><td className="px-5 py-10 text-center text-slate-500" colSpan={6}>No rates found in this rate file.</td></tr>
+                <tr><td className="px-5 py-10 text-center text-slate-500" colSpan={5}>No rates found in this rate file.</td></tr>
               ) : null}
             </tbody>
           </table>

@@ -41,6 +41,7 @@ export async function listRateItems(projectId: string, rateFileId: string, searc
   return result.items.map((item) => ({
     ...item,
     material_attributes: item.material_attributes || [],
+    percentage: item.percentage == null ? null : Number(item.percentage),
     rate: Number(item.rate),
   }));
 }

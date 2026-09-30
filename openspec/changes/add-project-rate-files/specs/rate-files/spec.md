@@ -103,6 +103,73 @@ The system SHALL expose Rate Files as a direct project workspace sidebar option.
 - **WHEN** the user clicks Rate Files
 - **THEN** the user is taken to the project's Rate Files page
 
+### Requirement: Norm workspace navigation
+The system SHALL expose Norm as a direct project workspace sidebar option below Rate Files.
+
+#### Scenario: Open norm page
+- **GIVEN** the user is inside a project workspace
+- **WHEN** the user clicks Norm
+- **THEN** the user is taken to the project's Norm page
+
+#### Scenario: Use resolved project id for norm API calls
+- **GIVEN** the user opens `/workspace/{projectId}/norm`
+- **WHEN** the Norm page loads or saves data
+- **THEN** the frontend calls Norm APIs with the resolved project id
+- **AND** it SHALL NOT call `/projects/undefined/norm-items` or `/projects/undefined/norm-options`
+
+### Requirement: Project norm items
+The system SHALL allow project-scoped Norm items grouped as Material, Labor, Machinery and Percentage.
+
+#### Scenario: Add norm item by type
+- **GIVEN** the user is on the Norm page
+- **WHEN** the user clicks Add and chooses Material, Labor or Machinery
+- **THEN** a drawer opens with the matching name field, quantity field and unit dropdown
+- **AND** saving stores the norm item under the selected type
+
+#### Scenario: Add percentage norm item
+- **GIVEN** the user is on the Norm page
+- **WHEN** the user clicks Add and chooses Percentage
+- **THEN** a drawer opens with Name and Quantity fields only
+- **AND** saving stores the norm item under the Percentage type without requiring a unit
+
+#### Scenario: Add custom norm unit
+- **GIVEN** the user is adding or editing a Norm item
+- **WHEN** the user selects `+ Add another unit` inside the unit dropdown
+- **THEN** a centered modal asks for the new unit value
+- **AND** after saving, the new unit is selected and available for the same project and Norm type
+
+#### Scenario: Show grouped norm lists
+- **GIVEN** a project has Material, Labor, Machinery and Percentage Norm items
+- **WHEN** the Norm page loads
+- **THEN** the page shows separate Material list, Labor list, Machinery list and Percentage list sections
+
+#### Scenario: Show norm rows in a grouped table
+- **GIVEN** a project has saved Norm items
+- **WHEN** the Norm page loads
+- **THEN** saved items appear in one table with grouped section rows for Material, Labor, Machinery and Percentage
+- **AND** each row shows type, name, quantity, unit and actions
+
+#### Scenario: Filter norm table by type and quantity
+- **GIVEN** the Norm table is visible
+- **WHEN** the user selects type checkboxes or enters Quantity from/to values
+- **THEN** the table shows only rows matching the selected types and inclusive quantity range
+- **AND** no selected type checkbox means all types are included
+
+### Requirement: Rate Breakdown structure
+The system SHALL allow project-scoped Rate Breakdown rows for structure only, without BOQ pricing or Norm attachment behavior. The system SHALL store these rows in a new empty `rate_breakdown_item` table rather than migrating old Work Breakdown rows.
+
+#### Scenario: Manage rate breakdown item
+- **GIVEN** the user is on the Rate Breakdown page
+- **WHEN** the user creates or edits a row
+- **THEN** the system stores title, optional code and optional description for that project
+- **AND** no BOQ pricing or generation logic runs
+
+#### Scenario: Use resolved project id for rate breakdown API calls
+- **GIVEN** the user opens `/workspace/{projectId}/rate-breakdown`
+- **WHEN** the Rate Breakdown page loads or saves data
+- **THEN** the frontend calls Rate Breakdown APIs with the resolved project id
+- **AND** it SHALL NOT call `/projects/undefined/rate-breakdown-items`
+
 ### Requirement: BOQ rate file selection
 The system SHALL allow a project BOQ to select one project rate file for pricing.
 

@@ -10,25 +10,26 @@ import { rateFileKeys, useMaterialAttributes } from "./hooks";
 import type { RateItem, RateItemInput, RateItemType, RateOptionType, RateOptions } from "./types";
 import { DEFAULT_UNIT_TYPES_BY_ITEM_TYPE, RATE_ITEM_TYPE_LABELS, RATE_OPTION_LABELS, UNIT_TYPE_LABELS } from "./types";
 
-const UNIT_OPTION_TYPE_BY_ITEM_TYPE: Record<RateItemType, RateOptionType> = {
+const UNIT_OPTION_TYPE_BY_ITEM_TYPE: Record<Exclude<RateItemType, "percentage">, RateOptionType> = {
   material: "material_unit_type",
   labour: "labour_unit_type",
   machinery: "machinery_unit_type",
 };
 
-const DEFAULT_UNIT_TYPE_BY_ITEM_TYPE: Record<RateItemType, string> = {
+const DEFAULT_UNIT_TYPE_BY_ITEM_TYPE: Record<Exclude<RateItemType, "percentage">, string> = {
   material: "m2",
   labour: "hour",
   machinery: "hour",
 };
 
 function defaultUnitType(itemType: RateItemType) {
+  if (itemType === "percentage") return "";
   return DEFAULT_UNIT_TYPE_BY_ITEM_TYPE[itemType] || DEFAULT_UNIT_TYPES_BY_ITEM_TYPE[itemType][0] || "";
 }
 
 const defaultForm = (itemType: RateItemType): RateItemInput => ({
   item_type: itemType,
-  main_item: "",
+  main_item: null,
   material_name: null,
   supplier: null,
   brand: null,
@@ -38,6 +39,8 @@ const defaultForm = (itemType: RateItemType): RateItemInput => ({
   machinery_name: null,
   machinery_source: null,
   machinery_location: null,
+  percentage_name: null,
+  percentage: null,
   unit_type: defaultUnitType(itemType),
   unit_detail: defaultUnitDetail(itemType, defaultUnitType(itemType)),
   rate: 0,
@@ -261,7 +264,7 @@ export function RateItemDrawer({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const materialName = trimValue(form.material_name);
-  const unitOptionType = UNIT_OPTION_TYPE_BY_ITEM_TYPE[form.item_type];
+  const unitOptionType = form.item_type === "percentage" ? null : UNIT_OPTION_TYPE_BY_ITEM_TYPE[form.item_type];
   const materialAttributesQuery = useMaterialAttributes(projectId, materialName);
   const materialAttributes = materialAttributesQuery.data || [];
 
@@ -289,6 +292,8 @@ export function RateItemDrawer({
       machinery_name: item.machinery_name,
       machinery_source: item.machinery_source,
       machinery_location: item.machinery_location,
+      percentage_name: item.percentage_name,
+      percentage: item.percentage,
       unit_type: item.unit_type,
       unit_detail: item.unit_detail,
       rate: item.rate,
@@ -296,7 +301,6 @@ export function RateItemDrawer({
   }, [item, itemType, open]);
 
   const optionValues = useMemo(() => ({
-    main_item: options?.main_item || [],
     material_name: options?.material_name || [],
     supplier: options?.supplier || [],
     brand: options?.brand || [],
@@ -320,7 +324,7 @@ export function RateItemDrawer({
   }
 
   function setUnitType(value: string | null) {
-    setForm((current) => ({ ...current, unit_type: value || "", unit_detail: defaultUnitDetail(current.item_type, value) }));
+    setForm((current) => ({ ...current, unit_type: value || null, unit_detail: defaultUnitDetail(current.item_type, value) }));
   }
 
   function setMaterialName(value: string | null) {
@@ -454,13 +458,8 @@ export function RateItemDrawer({
   }
 
   async function submit() {
-    const mainItem = trimValue(form.main_item);
     const unitType = trimValue(form.unit_type);
-    if (!mainItem) {
-      setLocalError("Main item is required.");
-      return;
-    }
-    if (!unitType) {
+    if (form.item_type !== "percentage" && !unitType) {
       setLocalError("Unit type is required.");
       return;
     }
@@ -480,10 +479,18 @@ export function RateItemDrawer({
       setLocalError("Machinery name is required.");
       return;
     }
+    if (form.item_type === "percentage" && !trimValue(form.percentage_name)) {
+      setLocalError("Name is required.");
+      return;
+    }
+    if (form.item_type === "percentage" && (form.percentage == null || Number(form.percentage) < 0)) {
+      setLocalError("Percentage must be zero or greater.");
+      return;
+    }
     setLocalError(null);
     await onSave({
       ...form,
-      main_item: mainItem,
+      main_item: null,
       material_name: trimValue(form.material_name),
       supplier: trimValue(form.supplier),
       brand: trimValue(form.brand),
@@ -495,8 +502,10 @@ export function RateItemDrawer({
       machinery_name: trimValue(form.machinery_name),
       machinery_source: trimValue(form.machinery_source),
       machinery_location: form.item_type === "machinery" && trimValue(form.machinery_source) ? trimValue(form.machinery_location) : null,
-      unit_type: unitType,
-      unit_detail: trimValue(form.unit_detail),
+      percentage_name: trimValue(form.percentage_name),
+      percentage: form.item_type === "percentage" ? Number(form.percentage) : null,
+      unit_type: form.item_type === "percentage" ? null : unitType,
+      unit_detail: form.item_type === "percentage" ? null : trimValue(form.unit_detail),
       rate: Number(form.rate),
     });
   }
@@ -532,7 +541,18 @@ export function RateItemDrawer({
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
           {RATE_ITEM_TYPE_LABELS[form.item_type]}
         </div>
-        <SelectField label="Main item" field="main_item" optionType="main_item" />
+        {form.item_type === "percentage" ? (
+          <>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Name</span>
+              <input className="input mt-1" placeholder="Overhead" value={form.percentage_name || ""} onChange={(event) => updateField("percentage_name", event.target.value)} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Percentage</span>
+              <input className="input mt-1" type="number" min="0" step="0.01" value={form.percentage ?? 0} onChange={(event) => updateField("percentage", Number(event.target.value))} />
+            </label>
+          </>
+        ) : null}
         {form.item_type === "material" ? (
           <>
             <SelectField label="Material name" field="material_name" optionType="material_name" />
@@ -619,11 +639,15 @@ export function RateItemDrawer({
             ) : null}
           </>
         ) : null}
-        <SelectField label="Unit type" field="unit_type" optionType={unitOptionType} />
-        <label className="block">
-          <span className="text-sm font-semibold text-slate-700">Unit</span>
-          <input className="input mt-1" placeholder={unitDetailPlaceholder(form.item_type, form.unit_type)} value={form.unit_detail || ""} onChange={(event) => updateField("unit_detail", event.target.value)} />
-        </label>
+        {unitOptionType ? (
+          <>
+            <SelectField label="Unit type" field="unit_type" optionType={unitOptionType} />
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Unit</span>
+              <input className="input mt-1" placeholder={unitDetailPlaceholder(form.item_type, form.unit_type)} value={form.unit_detail || ""} onChange={(event) => updateField("unit_detail", event.target.value)} />
+            </label>
+          </>
+        ) : null}
         <label className="block">
           <span className="text-sm font-semibold text-slate-700">Rate</span>
           <input className="input mt-1" type="number" min="0" step="0.01" value={form.rate} onChange={(event) => updateField("rate", Number(event.target.value))} />

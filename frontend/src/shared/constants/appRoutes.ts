@@ -34,6 +34,8 @@ export const appRoutes = {
   workspaceBoqTemplates: (projectId: string) => `/workspace/${projectId}/boq/templates`,
   workspaceBoqExports: (projectId: string) => `/workspace/${projectId}/boq/exports`,
   workspaceRateFiles: (projectId: string) => `/workspace/${projectId}/settings/rate-files`,
+  workspaceNorm: (projectId: string) => `/workspace/${projectId}/norm`,
+  workspaceRateBreakdown: (projectId: string) => `/workspace/${projectId}/rate-breakdown`,
   admin: "/workspace/demo/pre/upload",
   adminOrganizations: "/workspace/demo/pre/upload",
   adminSuperAdmins: "/workspace/demo/pre/upload",

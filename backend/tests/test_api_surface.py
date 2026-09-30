@@ -85,5 +85,10 @@ def test_required_pre_routes_exist():
         "/api/v1/projects/{project_id}/boq/rate-mappings",
         "/api/v1/projects/{project_id}/boq/rate-mappings/selection",
         "/api/v1/projects/{project_id}/boq/rate-mappings/{rate_file_id}",
+        "/api/v1/projects/{project_id}/norm-options",
+        "/api/v1/projects/{project_id}/norm-items",
+        "/api/v1/projects/{project_id}/norm-items/{item_id}",
+        "/api/v1/projects/{project_id}/rate-breakdown-items",
+        "/api/v1/projects/{project_id}/rate-breakdown-items/{item_id}",
     }
     assert expected.issubset(paths)

@@ -5,30 +5,41 @@
 ## ADDED Requirements
 
 ### Requirement: Rate file composition items
-The system SHALL allow a project rate file to contain Material, Labour and Machinery rows grouped by main item.
+The system SHALL allow a project rate file to contain Material, Labour, Machinery and Percentage rows grouped by item type.
 
 #### Scenario: Add material composition row
 - **GIVEN** a selected project rate file
 - **WHEN** the user adds a Material row
-- **THEN** the system stores main item, material name, supplier, brand, type, unit type, unit detail and rate
+- **THEN** the system stores material name, supplier, brand, attributes, unit type, unit detail and rate
 
 #### Scenario: Add labour composition row
 - **GIVEN** a selected project rate file
 - **WHEN** the user adds a Labour row
-- **THEN** the system stores main item, name, group, unit type, unit detail and rate
+- **THEN** the system stores name, group, unit type, unit detail and rate
 
 #### Scenario: Add machinery composition row
 - **GIVEN** a selected project rate file
 - **WHEN** the user adds a Machinery row
-- **THEN** the system stores main item, name, source, unit type, unit detail and rate
+- **THEN** the system stores name, source, location, unit type, unit detail and rate
+
+#### Scenario: Add percentage composition row
+- **GIVEN** a selected project rate file
+- **WHEN** the user adds a Percentage row
+- **THEN** the system stores name, percentage and manual rate
+- **AND** the row is not used for BOQ pricing or automatic matching in this version
 
 #### Scenario: Reject incomplete composition row
 - **GIVEN** the user saves a rate item
-- **WHEN** main item, unit type, rate or the type-specific name is missing
+- **WHEN** rate or the type-specific name is missing
+- **THEN** the system rejects the row with validation feedback
+
+#### Scenario: Reject incomplete percentage row
+- **GIVEN** the user saves a Percentage rate item
+- **WHEN** name, percentage or rate is missing or negative
 - **THEN** the system rejects the row with validation feedback
 
 ### Requirement: Composition dropdown options
-The system SHALL allow project-scoped reusable dropdown values for main item, material name, supplier, brand, type, labour name, labour group, machinery name, machinery source and unit type.
+The system SHALL allow project-scoped reusable dropdown values for material name, supplier, brand, labour name, labour group, machinery name, machinery source and type-specific unit values.
 
 #### Scenario: Add dropdown value from drawer
 - **GIVEN** the user is adding or editing a composition row
@@ -36,24 +47,30 @@ The system SHALL allow project-scoped reusable dropdown values for main item, ma
 - **THEN** a centered modal asks for the new value
 - **AND** after saving, the value is available for that project and selected in the current drawer
 
-### Requirement: Main item grouped rate table
-The system SHALL group rate file rows by main item and show each main item's total rate as the sum of its child row rates.
+### Requirement: Type grouped rate table
+The system SHALL group rate file rows into Material, Labour, Machinery and Percentage lists.
 
-#### Scenario: Show grouped composition
-- **GIVEN** a rate file has Material, Labour and Machinery rows under `Concrete`
+#### Scenario: Show type grouped rates
+- **GIVEN** a rate file has Material, Labour, Machinery and Percentage rows
 - **WHEN** the Rate Files table loads
-- **THEN** `Concrete` appears as an expandable group
-- **AND** the group total equals the sum of its child row rates
+- **THEN** the rows appear under Material list, Labour list, Machinery list and Percentage list headings
+- **AND** no main item field is shown in the add/edit drawer
+
+#### Scenario: Filter grouped rates by type and rate
+- **GIVEN** the Rate Files table is visible
+- **WHEN** the user selects type checkboxes or enters Rate from/to values
+- **THEN** the table shows only rows matching the selected types and inclusive rate range
+- **AND** no selected type checkbox means all types are included
 
 ### Requirement: BOQ material-only compatibility
 The system SHALL keep BOQ rate matching and manual BOQ rate selection limited to Material rows until full composition pricing is implemented.
 
 #### Scenario: BOQ loads selected rate file
-- **GIVEN** a selected rate file contains Material, Labour and Machinery rows
+- **GIVEN** a selected rate file contains Material, Labour, Machinery and Percentage rows
 - **WHEN** the BOQ loads rate items for matching or manual selection
 - **THEN** only Material rows are loaded for BOQ pricing
 
 ## MODIFIED Requirements
 
 ### Requirement: Material-only rate items without element category
-This requirement from `add-project-rate-files` is superseded. Rate files are no longer material-only; they now support Material, Labour and Machinery composition rows.
+This requirement from `add-project-rate-files` is superseded. Rate files are no longer material-only; they now support Material, Labour, Machinery and Percentage composition rows.
