@@ -81,7 +81,7 @@ class RateItemCreate(ApiModel):
     percentage: float | None = Field(default=None, ge=0)
     unit_type: str | None = Field(default=None, max_length=80)
     unit_detail: str | None = Field(default=None, max_length=160)
-    rate: float = Field(ge=0)
+    rate: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def normalize_and_validate(self):
@@ -116,6 +116,10 @@ class RateItemCreate(ApiModel):
             raise ValueError("Percentage name is required")
         if self.item_type == "percentage" and self.percentage is None:
             raise ValueError("Percentage is required")
+        if self.item_type == "percentage":
+            self.rate = None
+        elif self.rate is None:
+            raise ValueError("Rate is required")
         return self
 
 
@@ -577,6 +581,10 @@ def update_rate_item(project_id: UUID, rate_file_id: UUID, item_id: UUID, body: 
         raise HTTPException(422, "Percentage name is required")
     if merged["item_type"] == "percentage" and merged.get("percentage") is None:
         raise HTTPException(422, "Percentage is required")
+    if merged["item_type"] == "percentage":
+        merged["rate"] = None
+    elif merged.get("rate") is None:
+        raise HTTPException(422, "Rate is required")
     with transaction() as conn:
         row = conn.execute(
             """UPDATE rate_item

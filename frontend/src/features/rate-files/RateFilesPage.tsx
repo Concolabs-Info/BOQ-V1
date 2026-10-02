@@ -259,7 +259,7 @@ export function RateFilesPage({ projectId }: { projectId: string }) {
             >
               <span className="font-semibold text-slate-950">{RATE_ITEM_TYPE_LABELS[itemType]}</span>
               <span className="mt-1 block text-sm text-slate-500">
-                {itemType === "material" ? "Supplier, brand, type, unit and rate." : itemType === "labour" ? "Name, group, unit and rate." : itemType === "machinery" ? "Name, source, unit and rate." : "Name, percentage and manual rate."}
+                {itemType === "material" ? "Supplier, brand, type, unit and rate." : itemType === "labour" ? "Name, group, unit and rate." : itemType === "machinery" ? "Name, source, unit and rate." : "Name and percentage."}
               </span>
             </button>
           ))}

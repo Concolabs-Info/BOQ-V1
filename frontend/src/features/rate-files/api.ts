@@ -42,7 +42,7 @@ export async function listRateItems(projectId: string, rateFileId: string, searc
     ...item,
     material_attributes: item.material_attributes || [],
     percentage: item.percentage == null ? null : Number(item.percentage),
-    rate: Number(item.rate),
+    rate: item.rate == null ? null : Number(item.rate),
   }));
 }
 

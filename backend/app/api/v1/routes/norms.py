@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import Field, model_validator
 
 from ....database.connection import fetch_all, fetch_one, transaction
+from ....database.json_value import Jsonb
 from ..schemas import ApiModel
 
 router = APIRouter(tags=["norms"])
@@ -87,10 +88,6 @@ class RateBreakdownRowInput(ApiModel):
             raise ValueError("Item description is required")
         if self.item_type != "percentage" and not self.unit:
             raise ValueError("Unit is required")
-        if self.item_type == "percentage":
-            self.rate_item_id = None
-            self.selected_rate = None
-            self.selected_rate_label = None
         return self
 
 
@@ -191,18 +188,106 @@ def _rate_item_label(item: dict) -> str:
         details.append(unit)
     text = " · ".join(str(value) for value in details if value)
     suffix = f" ({text})" if text else ""
-    return f"{_rate_item_name(item)}{suffix}"
+    value_suffix = f" - {item.get('percentage')}%" if item["item_type"] == "percentage" and item.get("percentage") is not None else ""
+    return f"{_rate_item_name(item)}{suffix}{value_suffix}"
 
 
 def _rate_item_type_for_norm(item_type: str) -> str:
     return "labour" if item_type == "labor" else item_type
 
 
+def _rate_option_type_for_norm(item_type: str) -> tuple[str, str] | None:
+    if item_type == "material":
+        return "material_name", "material_unit_type"
+    if item_type == "labor":
+        return "labour_name", "labour_unit_type"
+    if item_type == "machinery":
+        return "machinery_name", "machinery_unit_type"
+    return None
+
+
 def _round_money(value: float) -> float:
     return round(value + 0.0000001, 2)
 
 
-def _build_breakdown_rows(project_id: UUID, rate_file_id: UUID, rows: list[RateBreakdownRowInput]) -> list[dict]:
+def _manual_unit_detail(row: RateBreakdownRowInput) -> str | None:
+    if not row.unit:
+        return None
+    quantity = f"{row.quantity:g}"
+    return f"{quantity} {row.unit}"
+
+
+def _create_manual_rate_item(conn, project_id: UUID, rate_file_id: UUID, row: RateBreakdownRowInput) -> dict:
+    rate_type = _rate_item_type_for_norm(row.item_type)
+    if rate_type == "percentage":
+        created = conn.execute(
+            """INSERT INTO rate_item(
+                 rate_file_id,project_id,item_type,main_item,material_name,supplier,brand,material_attributes,
+                 labour_name,labour_group,machinery_name,machinery_source,machinery_location,percentage_name,percentage,unit_type,unit_detail,rate
+               )
+               VALUES (%s,%s,'percentage',NULL,NULL,NULL,NULL,%s,NULL,NULL,NULL,NULL,NULL,%s,%s,NULL,NULL,NULL)
+               RETURNING *""",
+            (
+                str(rate_file_id),
+                str(project_id),
+                Jsonb([]),
+                row.description,
+                row.selected_rate,
+            ),
+        ).fetchone()
+        conn.execute("UPDATE rate_file SET updated_at=now() WHERE id=%s", (str(rate_file_id),))
+        return dict(created)
+
+    material_name = row.description if rate_type == "material" else None
+    labour_name = row.description if rate_type == "labour" else None
+    machinery_name = row.description if rate_type == "machinery" else None
+    created = conn.execute(
+        """INSERT INTO rate_item(
+             rate_file_id,project_id,item_type,main_item,material_name,supplier,brand,material_attributes,
+             labour_name,labour_group,machinery_name,machinery_source,machinery_location,percentage_name,percentage,unit_type,unit_detail,rate
+           )
+           VALUES (%s,%s,%s,NULL,%s,NULL,NULL,%s,%s,NULL,%s,NULL,NULL,NULL,NULL,%s,%s,%s)
+           RETURNING *""",
+        (
+            str(rate_file_id),
+            str(project_id),
+            rate_type,
+            material_name,
+            Jsonb([]),
+            labour_name,
+            machinery_name,
+            row.unit,
+            _manual_unit_detail(row),
+            row.selected_rate,
+        ),
+    ).fetchone()
+    option_types = _rate_option_type_for_norm(row.item_type)
+    if option_types:
+        name_option_type, unit_option_type = option_types
+        conn.execute(
+            """INSERT INTO rate_option(project_id,option_type,value)
+               VALUES (%s,%s,%s)
+               ON CONFLICT(project_id,option_type,value) DO UPDATE SET value=excluded.value""",
+            (str(project_id), name_option_type, row.description),
+        )
+        if row.unit:
+            conn.execute(
+                """INSERT INTO rate_option(project_id,option_type,value)
+                   VALUES (%s,%s,%s)
+                   ON CONFLICT(project_id,option_type,value) DO UPDATE SET value=excluded.value""",
+                (str(project_id), unit_option_type, row.unit),
+            )
+    conn.execute("UPDATE rate_file SET updated_at=now() WHERE id=%s", (str(rate_file_id),))
+    return dict(created)
+
+
+def _selected_value_for_rate_item(item: dict) -> float | None:
+    if item["item_type"] == "percentage":
+        return float(item["percentage"]) if item.get("percentage") is not None else None
+    return float(item["rate"]) if item.get("rate") is not None else None
+
+
+def _build_breakdown_rows(project_id: UUID, rate_file_id: UUID, rows: list[RateBreakdownRowInput], conn=None) -> list[dict]:
     subtotal = 0.0
     built: list[dict] = []
     for index, row in enumerate(rows):
@@ -210,24 +295,25 @@ def _build_breakdown_rows(project_id: UUID, rate_file_id: UUID, rows: list[RateB
         selected_rate_label = None
         amount = None
         rate_item_id = None
-        if row.item_type == "percentage":
-            amount = _round_money(subtotal * (row.quantity / 100))
-            subtotal += amount
-        elif row.rate_item_id:
+        if row.rate_item_id:
             rate_item = _require_rate_item(project_id, rate_file_id, row.rate_item_id)
             expected_type = _rate_item_type_for_norm(row.item_type)
             if rate_item["item_type"] != expected_type:
                 raise HTTPException(422, "Selected rate type does not match the breakdown row")
-            selected_rate = float(rate_item["rate"])
+            selected_rate = _selected_value_for_rate_item(rate_item)
+            if selected_rate is None:
+                raise HTTPException(422, "Selected rate item is missing a rate value")
             selected_rate_label = _rate_item_label(rate_item)
-            amount = _round_money(row.quantity * selected_rate)
+            amount = _round_money(subtotal * (selected_rate / 100)) if row.item_type == "percentage" else _round_money(row.quantity * selected_rate)
             subtotal += amount
             rate_item_id = str(row.rate_item_id)
         elif row.selected_rate is not None:
-            selected_rate = row.selected_rate
-            selected_rate_label = row.selected_rate_label or "Manual rate"
-            amount = _round_money(row.quantity * selected_rate)
+            rate_item = _create_manual_rate_item(conn, project_id, rate_file_id, row) if conn is not None else None
+            selected_rate = _selected_value_for_rate_item(rate_item) if rate_item else row.selected_rate
+            selected_rate_label = _rate_item_label(rate_item) if rate_item else row.selected_rate_label or ("Manual percentage" if row.item_type == "percentage" else "Manual rate")
+            amount = _round_money(subtotal * (selected_rate / 100)) if row.item_type == "percentage" else _round_money(row.quantity * selected_rate)
             subtotal += amount
+            rate_item_id = str(rate_item["id"]) if rate_item else None
         built.append(
             {
                 "item_type": row.item_type,
@@ -433,8 +519,8 @@ def create_rate_breakdown_item(project_id: UUID, body: RateBreakdownItemCreate):
     _require_project(project_id)
     norm_group = _require_norm_group(project_id, body.norm_group_id)
     _require_rate_file(project_id, body.rate_file_id)
-    built_rows = _build_breakdown_rows(project_id, body.rate_file_id, body.rows)
     with transaction() as conn:
+        built_rows = _build_breakdown_rows(project_id, body.rate_file_id, body.rows, conn)
         row = conn.execute(
             """INSERT INTO rate_breakdown_item(project_id,norm_group_id,rate_file_id,main_item_name,title,analysis_quantity,analysis_unit)
                VALUES (%s,%s,%s,%s,%s,%s,%s)
@@ -478,8 +564,8 @@ def update_rate_breakdown_item(project_id: UUID, item_id: UUID, body: RateBreakd
     _require_rate_breakdown_item(project_id, item_id)
     norm_group = _require_norm_group(project_id, body.norm_group_id)
     _require_rate_file(project_id, body.rate_file_id)
-    built_rows = _build_breakdown_rows(project_id, body.rate_file_id, body.rows)
     with transaction() as conn:
+        built_rows = _build_breakdown_rows(project_id, body.rate_file_id, body.rows, conn)
         row = conn.execute(
             """UPDATE rate_breakdown_item
                SET norm_group_id=%s,rate_file_id=%s,main_item_name=%s,title=%s,analysis_quantity=%s,analysis_unit=%s,updated_at=now()

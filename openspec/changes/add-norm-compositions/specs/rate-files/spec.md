@@ -34,6 +34,7 @@ The system SHALL open a drawer directly when the user clicks Add in the Norm pag
 - **AND** each visible type section has a plus icon for adding another row of that same type
 - **AND** each visible type section renders its child rows in a compact editable table
 - **AND** Percentage rows do not show a Unit column
+- **AND** Percentage rows label their numeric column as `Percentage (%)`, while other rows label it as Quantity
 
 ### Requirement: Expandable Norm table
 The system SHALL display Norm main items as top-level table rows that expand with a chevron arrow.

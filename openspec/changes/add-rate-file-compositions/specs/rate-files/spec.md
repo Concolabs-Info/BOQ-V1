@@ -25,7 +25,8 @@ The system SHALL allow a project rate file to contain Material, Labour, Machiner
 #### Scenario: Add percentage composition row
 - **GIVEN** a selected project rate file
 - **WHEN** the user adds a Percentage row
-- **THEN** the system stores name, percentage and manual rate
+- **THEN** the system stores name and percentage without a rate value
+- **AND** the Percentage numeric field is labeled `Percentage (%)`
 - **AND** the row is not used for BOQ pricing or automatic matching in this version
 
 #### Scenario: Reject incomplete composition row
@@ -35,7 +36,7 @@ The system SHALL allow a project rate file to contain Material, Labour, Machiner
 
 #### Scenario: Reject incomplete percentage row
 - **GIVEN** the user saves a Percentage rate item
-- **WHEN** name, percentage or rate is missing or negative
+- **WHEN** name or percentage is missing or percentage is negative
 - **THEN** the system rejects the row with validation feedback
 
 ### Requirement: Composition dropdown options

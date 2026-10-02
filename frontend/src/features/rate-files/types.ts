@@ -67,7 +67,7 @@ export type RateItem = {
   percentage: number | null;
   unit_type: string | null;
   unit_detail: string | null;
-  rate: number;
+  rate: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -88,7 +88,7 @@ export type RateItemInput = {
   percentage: number | null;
   unit_type: string | null;
   unit_detail: string | null;
-  rate: number;
+  rate: number | null;
 };
 
 export type RateOptions = Record<RateOptionType, string[]>;

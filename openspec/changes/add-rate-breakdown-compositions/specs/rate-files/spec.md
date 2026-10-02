@@ -16,30 +16,41 @@ The system SHALL store project-scoped Rate Breakdown analyses as main-item compo
 
 #### Scenario: Select matching rates
 - **GIVEN** a loaded Rate Breakdown analysis row
-- **WHEN** the row is Material, Labor or Machinery
-- **THEN** the Rate column shows a dropdown of rates from the selected Rate File with the same type and exact normalized item name
+- **WHEN** the row is Material, Labor, Machinery or Percentage
+- **THEN** the Rate column shows a dropdown of rates from the selected Rate File with the same type and overlapping meaningful word tokens
+- **AND** number, fraction and punctuation tokens are ignored during matching
 - **AND** duplicate rate choices include distinguishing details such as supplier, brand, attributes, source, location, unit and rate
+- **AND** the dropdown includes a client-side search field that filters the already-matched options by visible details
 - **WHEN** the user selects a rate
-- **THEN** the amount is calculated as quantity multiplied by selected rate
-- **AND** the closed Rate cell continues to show the selected rate name, distinguishing details and rate value
+- **THEN** non-Percentage amounts are calculated as quantity multiplied by selected rate
+- **AND** Percentage amounts are calculated as previous subtotal multiplied by selected percentage divided by 100
+- **AND** the closed Rate cell continues to show the selected rate or percentage name, distinguishing details and value
 
 #### Scenario: Calculate percentage row
 - **GIVEN** a loaded Rate Breakdown analysis has rows above a Percentage row
-- **WHEN** the table calculates the Percentage row
-- **THEN** the row does not require a Rate File rate
-- **AND** the amount is calculated as the previous subtotal multiplied by the percentage quantity divided by 100
+- **WHEN** the Percentage row has a selected Rate File Percentage item
+- **THEN** the amount is calculated as the previous subtotal multiplied by the selected Percentage value divided by 100
+- **AND** the Norm quantity remains visible as copied Norm data but does not control the priced amount
+- **WHEN** no Percentage item is selected
+- **THEN** the row may be saved without a calculated amount
 
 #### Scenario: Enter manual rate
-- **GIVEN** a loaded Rate Breakdown analysis row is Material, Labor or Machinery
+- **GIVEN** a loaded Rate Breakdown analysis row is Material, Labor, Machinery or Percentage
 - **WHEN** the user opens the Rate picker
-- **THEN** the picker includes `+ Manual rate`
-- **WHEN** the user clicks `+ Manual rate`
-- **THEN** a centered modal asks for a required non-negative rate and optional note
-- **WHEN** the user saves the manual rate
-- **THEN** the row stores no linked Rate File item
-- **AND** the closed Rate cell shows the manual note, defaulting to `Manual rate`, and the rate value
-- **AND** the amount is calculated as quantity multiplied by the manual rate
-- **AND** changing the selected Rate File clears the manual rate selection
+- **THEN** the picker includes `+ Manual rate` for non-Percentage rows and `+ Manual percentage` for Percentage rows
+- **WHEN** the user clicks the manual action
+- **THEN** a centered modal asks for a required non-negative rate or percentage and optional note
+- **WHEN** the user saves the manual value
+- **THEN** the row keeps the manual value in the draft
+- **WHEN** the user saves the full Rate Breakdown analysis
+- **THEN** the system creates a matching Rate File item in the selected Rate File for rows without a linked rate item
+- **AND** the saved breakdown row stores the new linked Rate File item snapshot
+- **AND** manual non-Percentage rows copy the Rate Breakdown Unit cell into Rate File `unit_type`
+- **AND** manual non-Percentage rows copy Rate Breakdown Quantity plus Unit into Rate File `unit_detail`, such as `2 day`
+- **AND** manual Percentage rows create Rate File Percentage items with name and percentage but no rate value
+- **AND** manual Percentage rows do not copy unit fields
+- **AND** the closed Rate cell shows the selected label and value
+- **AND** changing the selected Rate File clears the manual selection
 
 #### Scenario: Save analysis snapshot
 - **GIVEN** the user saves a Rate Breakdown analysis

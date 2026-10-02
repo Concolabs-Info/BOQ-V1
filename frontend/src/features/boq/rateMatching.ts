@@ -100,7 +100,7 @@ function hasExactSizeMatch(rowText: string, value: string | null | undefined) {
 }
 
 export function sellRate(item: RateItem) {
-  return Number(item.rate.toFixed(2));
+  return Number((item.rate || 0).toFixed(2));
 }
 
 export function rowSignature(row: BoqRow) {
@@ -111,6 +111,7 @@ export function rowSignature(row: BoqRow) {
 
 export function exactRateItemMatch(row: BoqRow, item: RateItem): RateMatchCandidate | null {
   if (item.item_type !== "material") return null;
+  if (item.rate == null) return null;
   const rowUnit = normalizeUnit(row.unit);
   const itemUnit = normalizeUnit(item.unit_type);
   if (!rowUnit || !itemUnit || rowUnit !== itemUnit) return null;

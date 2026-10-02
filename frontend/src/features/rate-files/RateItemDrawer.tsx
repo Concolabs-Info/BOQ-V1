@@ -43,7 +43,7 @@ const defaultForm = (itemType: RateItemType): RateItemInput => ({
   percentage: null,
   unit_type: defaultUnitType(itemType),
   unit_detail: defaultUnitDetail(itemType, defaultUnitType(itemType)),
-  rate: 0,
+  rate: itemType === "percentage" ? null : 0,
 });
 
 function trimValue(value: string | null | undefined) {
@@ -463,7 +463,7 @@ export function RateItemDrawer({
       setLocalError("Unit type is required.");
       return;
     }
-    if (form.rate < 0) {
+    if (form.item_type !== "percentage" && (form.rate == null || form.rate < 0)) {
       setLocalError("Rate must be zero or greater.");
       return;
     }
@@ -506,7 +506,7 @@ export function RateItemDrawer({
       percentage: form.item_type === "percentage" ? Number(form.percentage) : null,
       unit_type: form.item_type === "percentage" ? null : unitType,
       unit_detail: form.item_type === "percentage" ? null : trimValue(form.unit_detail),
-      rate: Number(form.rate),
+      rate: form.item_type === "percentage" ? null : Number(form.rate),
     });
   }
 
@@ -548,7 +548,7 @@ export function RateItemDrawer({
               <input className="input mt-1" placeholder="Overhead" value={form.percentage_name || ""} onChange={(event) => updateField("percentage_name", event.target.value)} />
             </label>
             <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Percentage</span>
+              <span className="text-sm font-semibold text-slate-700">Percentage (%)</span>
               <input className="input mt-1" type="number" min="0" step="0.01" value={form.percentage ?? 0} onChange={(event) => updateField("percentage", Number(event.target.value))} />
             </label>
           </>
@@ -648,10 +648,12 @@ export function RateItemDrawer({
             </label>
           </>
         ) : null}
-        <label className="block">
-          <span className="text-sm font-semibold text-slate-700">Rate</span>
-          <input className="input mt-1" type="number" min="0" step="0.01" value={form.rate} onChange={(event) => updateField("rate", Number(event.target.value))} />
-        </label>
+        {form.item_type !== "percentage" ? (
+          <label className="block">
+            <span className="text-sm font-semibold text-slate-700">Rate</span>
+            <input className="input mt-1" type="number" min="0" step="0.01" value={form.rate ?? 0} onChange={(event) => updateField("rate", Number(event.target.value))} />
+          </label>
+        ) : null}
       </div>
       <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-200 bg-white px-6 py-4">
         <Button variant="secondary" onClick={onClose}>Cancel</Button>

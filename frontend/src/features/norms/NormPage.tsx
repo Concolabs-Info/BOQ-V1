@@ -472,7 +472,7 @@ function NormChildTable({
         <thead className="bg-white text-xs uppercase tracking-[0.12em] text-slate-500">
           <tr>
             <th className="border-b border-slate-200 px-3 py-2 text-left font-bold">Name</th>
-            <th className="w-32 border-b border-slate-200 px-3 py-2 text-left font-bold">Quantity</th>
+            <th className="w-32 border-b border-slate-200 px-3 py-2 text-left font-bold">{itemType === "percentage" ? "Percentage (%)" : "Quantity"}</th>
             {unitItemType ? <th className="w-40 border-b border-slate-200 px-3 py-2 text-left font-bold">Unit</th> : null}
             <th className="w-24 border-b border-slate-200 px-3 py-2 text-right font-bold">Actions</th>
           </tr>

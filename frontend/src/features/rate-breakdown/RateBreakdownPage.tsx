@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/shared/components/Button";
 import { ModalDialog } from "@/shared/components/ModalDialog";
 import { PlatformShell } from "@/features/platform/components/PlatformShell";
 import { useNormItems } from "@/features/norms/hooks";
 import type { NormComposition, NormItemType } from "@/features/norms/types";
 import { NORM_ITEM_TYPE_LABELS } from "@/features/norms/types";
-import { useRateFiles, useRateItems } from "@/features/rate-files/hooks";
+import { rateFileKeys, useRateFiles, useRateItems } from "@/features/rate-files/hooks";
 import type { RateItem } from "@/features/rate-files/types";
 import { useRateBreakdownItems, useRateBreakdownMutations } from "./hooks";
 import type { RateBreakdownItem, RateBreakdownItemInput, RateBreakdownRowInput } from "./types";
@@ -29,19 +30,46 @@ type Draft = {
   rows: DraftRow[];
 };
 
-const RATE_TYPE_BY_NORM_TYPE: Record<Exclude<NormItemType, "percentage">, RateItem["item_type"]> = {
+const RATE_TYPE_BY_NORM_TYPE: Record<NormItemType, RateItem["item_type"]> = {
   material: "material",
   labor: "labour",
   machinery: "machinery",
+  percentage: "percentage",
 };
 
 function normalizeText(value: string | null | undefined) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function matchTokens(value: string | null | undefined) {
+  return normalizeText(value)
+    .replace(/labour/g, "labor")
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+}
+
+function tokensOverlap(left: string | null | undefined, right: string | null | undefined) {
+  const leftTokens = matchTokens(left);
+  const rightTokens = matchTokens(right);
+  if (!leftTokens.length || !rightTokens.length) return false;
+  return leftTokens.some((leftToken) => rightTokens.some((rightToken) => (
+    leftToken === rightToken
+    || (leftToken.length >= 4 && rightToken.startsWith(leftToken))
+    || (rightToken.length >= 4 && leftToken.startsWith(rightToken))
+  )));
+}
+
 function formatMoney(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return "";
   return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatRateValue(itemType: NormItemType, value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return itemType === "percentage" ? "No percentage" : "No rate";
+  if (itemType === "percentage") return `${value.toLocaleString(undefined, { maximumFractionDigits: 4 })}%`;
+  return `Rs ${formatMoney(value)}`;
 }
 
 function rateName(item: RateItem) {
@@ -60,35 +88,49 @@ function rateLabel(item: RateItem) {
     if (item.labour_group) details.push(item.labour_group);
   } else if (item.item_type === "machinery") {
     details.push(...[item.machinery_source, item.machinery_location].filter(Boolean) as string[]);
+  } else if (item.item_type === "percentage" && item.percentage != null) {
+    details.push(`${item.percentage}%`);
   }
   const unit = [item.unit_type, item.unit_detail].filter(Boolean).join(" ");
   if (unit) details.push(unit);
-  return `${rateName(item)}${details.length ? ` (${details.join(" · ")})` : ""} - Rs ${formatMoney(item.rate)}`;
+  return `${rateName(item)}${details.length ? ` (${details.join(" · ")})` : ""}${item.rate == null ? "" : ` - Rs ${formatMoney(item.rate)}`}`;
 }
 
 function rateDetailLabel(item: RateItem) {
   return rateLabel(item).replace(/\s-\sRs\s[\d,.]+$/, "");
 }
 
+function rateValue(item: RateItem) {
+  return item.item_type === "percentage" ? item.percentage : item.rate;
+}
+
+function rateSearchText(item: RateItem, itemType: NormItemType) {
+  return normalizeText([
+    rateName(item),
+    rateLabel(item),
+    rateDetailLabel(item),
+    formatRateValue(itemType, rateValue(item)),
+  ].join(" "));
+}
+
 function matchingRates(row: DraftRow, rates: RateItem[]) {
-  if (row.item_type === "percentage") return [];
   const rateType = RATE_TYPE_BY_NORM_TYPE[row.item_type];
-  const name = normalizeText(row.description);
-  return rates.filter((rate) => rate.item_type === rateType && normalizeText(rateName(rate)) === name);
+  return rates.filter((rate) => rate.item_type === rateType && tokensOverlap(row.description, rateName(rate)));
 }
 
 function calculateRows(rows: DraftRow[], rates: RateItem[]) {
   let subtotal = 0;
   return rows.map((row) => {
     const selected = row.rate_item_id ? rates.find((rate) => rate.id === row.rate_item_id) || null : null;
-    let selectedRate = row.selected_rate != null ? row.selected_rate : selected ? Number(selected.rate) : null;
+    const selectedValue = selected ? rateValue(selected) : null;
+    const selectedRate = row.selected_rate != null ? row.selected_rate : selectedValue != null ? Number(selectedValue) : null;
     let selectedLabel = row.selected_rate_label || (selected ? rateLabel(selected) : null);
     let amount: number | null = null;
     if (row.item_type === "percentage") {
-      selectedRate = null;
-      selectedLabel = null;
-      amount = Number((subtotal * (row.quantity / 100)).toFixed(2));
-      subtotal += amount;
+      if (selectedRate != null) {
+        amount = Number((subtotal * (selectedRate / 100)).toFixed(2));
+        subtotal += amount;
+      }
     } else if (selectedRate != null) {
       amount = Number((row.quantity * selectedRate).toFixed(2));
       subtotal += amount;
@@ -170,15 +212,16 @@ function toPayload(draft: Draft): RateBreakdownItemInput {
       description: row.description,
       unit: row.unit,
       quantity: row.quantity,
-      rate_item_id: row.item_type === "percentage" ? null : row.rate_item_id,
-      selected_rate_label: row.item_type === "percentage" ? null : row.selected_rate_label,
-      selected_rate: row.item_type === "percentage" ? null : row.selected_rate,
+      rate_item_id: row.rate_item_id,
+      selected_rate_label: row.selected_rate_label,
+      selected_rate: row.selected_rate,
       sort_order: index,
     })),
   };
 }
 
 export function RateBreakdownPage({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
   const breakdownQuery = useRateBreakdownItems(projectId);
   const normQuery = useNormItems(projectId);
   const rateFilesQuery = useRateFiles(projectId);
@@ -223,7 +266,7 @@ export function RateBreakdownPage({ projectId }: { projectId: string }) {
     setDraft((current) => current ? {
       ...current,
       rate_file_id: rateFileId,
-      rows: current.rows.map((row) => row.item_type === "percentage" ? row : { ...row, rate_item_id: null, selected_rate: null, selected_rate_label: null, amount: null }),
+      rows: current.rows.map((row) => ({ ...row, rate_item_id: null, selected_rate: null, selected_rate_label: null, amount: null })),
     } : current);
   }
 
@@ -235,10 +278,9 @@ export function RateBreakdownPage({ projectId }: { projectId: string }) {
   }
 
   function updateDraftManualRate(rowId: string, rate: number, note: string) {
-    const label = note.trim() || "Manual rate";
     setDraft((current) => current ? {
       ...current,
-      rows: current.rows.map((row) => row.draft_id === rowId ? { ...row, rate_item_id: null, selected_rate: rate, selected_rate_label: label, amount: null } : row),
+      rows: current.rows.map((row) => row.draft_id === rowId ? { ...row, rate_item_id: null, selected_rate: rate, selected_rate_label: note.trim() || (row.item_type === "percentage" ? "Manual percentage" : "Manual rate"), amount: null } : row),
     } : current);
   }
 
@@ -258,6 +300,8 @@ export function RateBreakdownPage({ projectId }: { projectId: string }) {
       const payload = toPayload(calculatedDraft);
       if (calculatedDraft.id) await mutations.updateItem.mutateAsync({ id: calculatedDraft.id, payload });
       else await mutations.createItem.mutateAsync(payload);
+      await queryClient.invalidateQueries({ queryKey: rateFileKeys.all(projectId) });
+      await queryClient.invalidateQueries({ queryKey: rateFileKeys.items(projectId, calculatedDraft.rate_file_id, "") });
       setDraft(null);
     });
   }
@@ -377,19 +421,24 @@ function AnalysisEditor({
 
   function saveManualRate() {
     if (!manualRate) return;
+    const row = draft.rows.find((item) => item.draft_id === manualRate.rowId);
+    const isPercentage = row?.item_type === "percentage";
     if (!manualRate.rate.trim()) {
-      setManualRateError("Enter a non-negative rate.");
+      setManualRateError(`Enter a non-negative ${isPercentage ? "percentage" : "rate"}.`);
       return;
     }
     const rate = Number(manualRate.rate);
     if (!Number.isFinite(rate) || rate < 0) {
-      setManualRateError("Enter a non-negative rate.");
+      setManualRateError(`Enter a non-negative ${isPercentage ? "percentage" : "rate"}.`);
       return;
     }
     onManualRate(manualRate.rowId, rate, manualRate.note);
     setManualRate(null);
     setManualRateError(null);
   }
+
+  const manualRow = manualRate ? draft.rows.find((row) => row.draft_id === manualRate.rowId) || null : null;
+  const manualIsPercentage = manualRow?.item_type === "percentage";
 
   return (
     <div className="p-5">
@@ -428,11 +477,7 @@ function AnalysisEditor({
                   <td className="px-4 py-3 text-slate-700">{row.unit || ""}</td>
                   <td className="px-4 py-3 text-right text-slate-700">{row.quantity.toLocaleString()}</td>
                   <td className="px-4 py-3">
-                    {row.item_type === "percentage" ? (
-                      <span className="font-semibold text-slate-700">{row.quantity}% of previous subtotal</span>
-                    ) : (
-                      <RatePicker row={row} options={options} onChange={(rateItemId) => onRateChange(row.draft_id, rateItemId)} onManual={() => openManualRate(row)} />
-                    )}
+                    <RatePicker row={row} options={options} onChange={(rateItemId) => onRateChange(row.draft_id, rateItemId)} onManual={() => openManualRate(row)} />
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-950">{row.amount == null ? <span className="text-slate-400">Not priced</span> : formatMoney(row.amount)}</td>
                 </tr>
@@ -444,9 +489,9 @@ function AnalysisEditor({
       </div>
       <ModalDialog
         open={Boolean(manualRate)}
-        title="Manual rate"
-        description="Enter a one-off rate for this breakdown row."
-        ariaLabel="Manual rate"
+        title={manualIsPercentage ? "Manual percentage" : "Manual rate"}
+        description={manualIsPercentage ? "Enter a one-off percentage for this breakdown row." : "Enter a one-off rate for this breakdown row."}
+        ariaLabel={manualIsPercentage ? "Manual percentage" : "Manual rate"}
         onClose={() => setManualRate(null)}
         footer={(
           <>
@@ -458,7 +503,7 @@ function AnalysisEditor({
         <div className="space-y-4">
           {manualRateError ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{manualRateError}</p> : null}
           <label className="block">
-            <span className="text-sm font-semibold text-slate-700">Rate</span>
+            <span className="text-sm font-semibold text-slate-700">{manualIsPercentage ? "Percentage" : "Rate"}</span>
             <input
               className="input mt-1 w-full"
               type="number"
@@ -466,7 +511,7 @@ function AnalysisEditor({
               step="0.01"
               value={manualRate?.rate || ""}
               onChange={(event) => setManualRate((current) => current ? { ...current, rate: event.target.value } : current)}
-              placeholder="0.00"
+              placeholder={manualIsPercentage ? "2.5" : "0.00"}
             />
           </label>
           <label className="block">
@@ -475,7 +520,7 @@ function AnalysisEditor({
               className="input mt-1 w-full"
               value={manualRate?.note || ""}
               onChange={(event) => setManualRate((current) => current ? { ...current, note: event.target.value } : current)}
-              placeholder="Manual rate"
+              placeholder={manualIsPercentage ? "Manual percentage" : "Manual rate"}
               maxLength={240}
             />
           </label>
@@ -522,12 +567,12 @@ function SummaryRows({ summary }: { summary: ReturnType<typeof summaryFor> }) {
   );
 }
 
-function RateDisplay({ label, rate }: { label: string | null; rate: number | null }) {
-  if (!label && rate == null) return <span className="text-slate-400">Select rate</span>;
+function RateDisplay({ itemType, label, rate }: { itemType: NormItemType; label: string | null; rate: number | null }) {
+  if (!label && rate == null) return <span className="text-slate-400">{itemType === "percentage" ? "Select percentage" : "Select rate"}</span>;
   return (
     <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-      <p className="line-clamp-2 text-xs font-semibold text-slate-800">{label || "Selected rate"}</p>
-      <p className="mt-1 text-sm font-bold text-slate-950">{rate == null ? "No rate" : `Rs ${formatMoney(rate)}`}</p>
+      <p className="line-clamp-2 text-xs font-semibold text-slate-800">{label || (itemType === "percentage" ? "Selected percentage" : "Selected rate")}</p>
+      <p className="mt-1 text-sm font-bold text-slate-950">{formatRateValue(itemType, rate)}</p>
     </div>
   );
 }
@@ -544,13 +589,20 @@ function RatePicker({
   onManual: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const selected = row.rate_item_id ? options.find((rate) => rate.id === row.rate_item_id) || null : null;
   const label = row.selected_rate_label || (selected ? rateDetailLabel(selected) : null);
-  const rate = row.selected_rate ?? (selected ? Number(selected.rate) : null);
+  const selectedValue = selected ? rateValue(selected) : null;
+  const rate = row.selected_rate ?? (selectedValue != null ? Number(selectedValue) : null);
+  const searchQuery = normalizeText(search);
+  const filteredOptions = searchQuery ? options.filter((rateItem) => rateSearchText(rateItem, row.item_type).includes(searchQuery)) : options;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setSearch("");
+      return;
+    }
     function close(event: MouseEvent) {
       if (!ref.current?.contains(event.target as Node)) setOpen(false);
     }
@@ -567,7 +619,7 @@ function RatePicker({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        <RateDisplay label={label} rate={rate} />
+        <RateDisplay itemType={row.item_type} label={label} rate={rate} />
       </button>
       {open ? (
         <div className="absolute left-0 right-0 z-30 mt-1 max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg" role="listbox">
@@ -576,12 +628,28 @@ function RatePicker({
             className="block w-full px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-50"
             onClick={() => {
               onChange("");
+              setSearch("");
               setOpen(false);
             }}
           >
-            Select rate
+            {row.item_type === "percentage" ? "Select percentage" : "Select rate"}
           </button>
-          {options.length ? options.map((rateItem) => (
+          <div className="border-y border-slate-100 px-3 py-2">
+            <input
+              className="input h-9 w-full text-sm"
+              autoFocus
+              placeholder={row.item_type === "percentage" ? "Search percentages" : "Search rates"}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setSearch("");
+                  setOpen(false);
+                }
+              }}
+            />
+          </div>
+          {filteredOptions.length ? filteredOptions.map((rateItem) => (
             <button
               key={rateItem.id}
               type="button"
@@ -590,13 +658,16 @@ function RatePicker({
               className={rateItem.id === row.rate_item_id ? "block w-full bg-blue-50 px-3 py-2 text-left text-blue-800" : "block w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50"}
               onClick={() => {
                 onChange(rateItem.id);
+                setSearch("");
                 setOpen(false);
               }}
             >
               <span className="block text-xs font-semibold">{rateDetailLabel(rateItem)}</span>
-              <span className="mt-1 block text-sm font-bold text-slate-950">Rs {formatMoney(rateItem.rate)}</span>
+              <span className="mt-1 block text-sm font-bold text-slate-950">{formatRateValue(row.item_type, rateValue(rateItem))}</span>
             </button>
-          )) : (
+          )) : options.length ? (
+            <p className="px-3 py-3 text-sm text-slate-500">No rates match your search.</p>
+          ) : (
             <p className="px-3 py-3 text-sm text-slate-500">No matching rates found.</p>
           )}
           <button
@@ -604,10 +675,11 @@ function RatePicker({
             className="block w-full border-t border-slate-200 px-3 py-2 text-left text-sm font-semibold text-blue-700 hover:bg-blue-50"
             onClick={() => {
               onManual();
+              setSearch("");
               setOpen(false);
             }}
           >
-            + Manual rate
+            {row.item_type === "percentage" ? "+ Manual percentage" : "+ Manual rate"}
           </button>
         </div>
       ) : null}
@@ -706,11 +778,7 @@ function ReadonlyAnalysis({ item }: { item: RateBreakdownItem }) {
               <td className="px-4 py-3 text-slate-700">{row.unit || ""}</td>
               <td className="px-4 py-3 text-right text-slate-700">{row.quantity.toLocaleString()}</td>
               <td className="px-4 py-3">
-                {row.item_type === "percentage" ? (
-                  <span className="font-semibold text-slate-700">{row.quantity}% of previous subtotal</span>
-                ) : (
-                  <RateDisplay label={row.selected_rate_label} rate={row.selected_rate} />
-                )}
+                <RateDisplay itemType={row.item_type} label={row.selected_rate_label} rate={row.selected_rate} />
               </td>
               <td className="px-4 py-3 text-right font-semibold text-slate-950">{row.amount == null ? <span className="text-slate-400">Not priced</span> : formatMoney(row.amount)}</td>
             </tr>

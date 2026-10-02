@@ -67,8 +67,8 @@ export function RateItemsTable({
   const rateMax = parseOptionalNumber(rateTo);
   const filteredItems = useMemo(() => items.filter((item) => {
     if (selectedTypes.size > 0 && !selectedTypes.has(item.item_type)) return false;
-    if (rateMin !== null && item.rate < rateMin) return false;
-    if (rateMax !== null && item.rate > rateMax) return false;
+    if (item.item_type !== "percentage" && item.rate != null && rateMin !== null && item.rate < rateMin) return false;
+    if (item.item_type !== "percentage" && item.rate != null && rateMax !== null && item.rate > rateMax) return false;
     return true;
   }), [items, rateMax, rateMin, selectedTypes]);
   const groups = useMemo(() => {
@@ -160,7 +160,7 @@ export function RateItemsTable({
                     </button>
                     <span className="ml-3 text-xs font-medium text-slate-500">{groupItems.length} item{groupItems.length === 1 ? "" : "s"}</span>
                   </td>
-                  <td className="px-5 py-3 text-right font-semibold text-slate-950">{itemType === "percentage" ? <span className="text-xs font-semibold uppercase text-slate-500">Manual rates</span> : `${currency} ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</td>
+                  <td className="px-5 py-3 text-right font-semibold text-slate-950">{itemType === "percentage" ? <span className="text-xs font-semibold uppercase text-slate-500">No rate</span> : `${currency} ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</td>
                   <td className="px-5 py-3 text-right text-xs font-semibold uppercase text-slate-500">{itemType === "percentage" ? "Separate" : "Total"}</td>
                 </tr>,
                 ...(isCollapsed ? [] : groupItems.map((item) => {
@@ -172,7 +172,7 @@ export function RateItemsTable({
                       <td className="px-5 py-3 text-slate-600">{itemDetails(item) || <EmptyValue>No details</EmptyValue>}</td>
                       <td className="px-5 py-3 text-slate-600">{unit || <EmptyValue>No unit</EmptyValue>}</td>
                       <td className="px-5 py-3 text-slate-600">{item.unit_detail || <EmptyValue>No unit detail</EmptyValue>}</td>
-                      <td className="px-5 py-3 text-right font-semibold text-slate-950">{currency} {item.rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td className="px-5 py-3 text-right font-semibold text-slate-950">{item.rate == null ? <EmptyValue>No rate</EmptyValue> : `${currency} ${item.rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</td>
                       <td className="relative px-5 py-3 text-right">
                         <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm font-semibold hover:bg-slate-50" onClick={() => setMenuId(menuId === item.id ? null : item.id)}>...</button>
                         {menuId === item.id ? (

@@ -9,7 +9,7 @@ Project rate files need to model full rate buildups, not only material catalog r
 - Replace material-only rate items with Material, Labour, Machinery and Percentage rate rows grouped by type.
 - Support Material, Labour, Machinery and Percentage item types.
 - Store a direct rate value instead of unit cost plus markup.
-- Store percentage rows with name, percentage and manual rate.
+- Store percentage rows with name and percentage only.
 - Add project-scoped dropdown options for type-specific dropdown fields.
 - Show Rate Files as Material, Labour, Machinery and Percentage lists.
 - Keep BOQ matching and manual picker limited to Material rows until full composition BOQ pricing is implemented.

@@ -81,18 +81,17 @@ def test_machinery_rate_item_allows_no_location():
     assert item.machinery_location is None
 
 
-def test_percentage_rate_item_requires_name_percentage_and_rate():
+def test_percentage_rate_item_requires_name_and_percentage_without_rate():
     item = RateItemCreate(
         item_type="percentage",
         percentage_name="Overhead",
         percentage=12.5,
-        rate=500,
     )
 
     assert item.percentage_name == "Overhead"
     assert item.percentage == 12.5
     assert item.unit_type is None
-    assert item.rate == 500
+    assert item.rate is None
 
 
 def test_material_rate_item_rejects_missing_material_name():
@@ -133,6 +132,15 @@ def test_rate_item_rejects_negative_rate():
         )
 
 
+def test_non_percentage_rate_item_rejects_missing_rate():
+    with pytest.raises(ValidationError):
+        RateItemCreate(
+            item_type="material",
+            material_name="Cement",
+            unit_type="bag",
+        )
+
+
 def test_rate_item_requires_unit_type():
     with pytest.raises(ValidationError):
         RateItemCreate(
@@ -149,7 +157,6 @@ def test_percentage_rate_item_rejects_missing_percentage_name():
             item_type="percentage",
             percentage_name=" ",
             percentage=10,
-            rate=500,
         )
 
 
@@ -158,7 +165,6 @@ def test_percentage_rate_item_rejects_missing_percentage_value():
         RateItemCreate(
             item_type="percentage",
             percentage_name="Overhead",
-            rate=500,
         )
 
 
