@@ -1,7 +1,9 @@
 import pytest
 from pydantic import ValidationError
 
-from app.api.v1.routes.norms import DEFAULT_NORM_OPTIONS, NormChildInput, NormItemCreate, NormOptionCreate, RateBreakdownItemCreate
+from uuid import uuid4
+
+from app.api.v1.routes.norms import DEFAULT_NORM_OPTIONS, NormChildInput, NormItemCreate, NormOptionCreate, RateBreakdownItemCreate, RateBreakdownRowInput, _build_breakdown_rows
 
 
 def test_norm_composition_trims_and_validates_fields():
@@ -58,9 +60,45 @@ def test_norm_options_are_type_specific():
     assert {"norm_material_unit", "norm_labor_unit", "norm_machinery_unit"}.issubset(DEFAULT_NORM_OPTIONS)
 
 
-def test_rate_breakdown_item_trims_optional_fields():
-    item = RateBreakdownItemCreate(code=" RB-01 ", title=" Structure ", description=" Concrete works ")
+def test_rate_breakdown_item_trims_analysis_fields():
+    item = RateBreakdownItemCreate(
+        norm_group_id=uuid4(),
+        rate_file_id=uuid4(),
+        main_item_name=" Concrete ",
+        rows=[{"item_type": "material", "description": " Cement ", "quantity": 18, "unit": " cwt "}],
+    )
 
-    assert item.code == "RB-01"
-    assert item.title == "Structure"
-    assert item.description == "Concrete works"
+    assert item.main_item_name == "Concrete"
+    assert item.analysis_quantity == 1
+    assert item.analysis_unit == "cube"
+    assert item.rows[0].description == "Cement"
+    assert item.rows[0].unit == "cwt"
+
+
+def test_rate_breakdown_item_requires_child_row():
+    with pytest.raises(ValidationError):
+        RateBreakdownItemCreate(norm_group_id=uuid4(), rate_file_id=uuid4(), main_item_name="Concrete", rows=[])
+
+
+def test_rate_breakdown_percentage_row_clears_rate_item():
+    row = RateBreakdownRowInput(item_type="percentage", description="Allowance", quantity=2.5, rate_item_id=uuid4(), selected_rate=2500, selected_rate_label="Manual")
+
+    assert row.rate_item_id is None
+    assert row.selected_rate is None
+    assert row.selected_rate_label is None
+    assert row.unit is None
+
+
+def test_rate_breakdown_manual_rate_row_trims_and_defaults_label():
+    row = RateBreakdownRowInput(item_type="material", description="Cement", quantity=18, unit="bag", selected_rate=2500, selected_rate_label="  ")
+    built = _build_breakdown_rows(uuid4(), uuid4(), [row])
+
+    assert built[0]["rate_item_id"] is None
+    assert built[0]["selected_rate"] == 2500
+    assert built[0]["selected_rate_label"] == "Manual rate"
+    assert built[0]["amount"] == 45000
+
+
+def test_rate_breakdown_manual_rate_rejects_negative_rate():
+    with pytest.raises(ValidationError):
+        RateBreakdownRowInput(item_type="material", description="Cement", quantity=18, unit="bag", selected_rate=-1)

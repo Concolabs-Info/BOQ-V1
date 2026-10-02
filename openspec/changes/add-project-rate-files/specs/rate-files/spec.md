@@ -156,6 +156,8 @@ The system SHALL allow project-scoped Norm items grouped as Material, Labor, Mac
 - **AND** no selected type checkbox means all types are included
 
 ### Requirement: Rate Breakdown structure
+> Superseded note: `add-rate-breakdown-compositions` replaces this structure-only behavior with saved analysis compositions loaded from Norm main items.
+
 The system SHALL allow project-scoped Rate Breakdown rows for structure only, without BOQ pricing or Norm attachment behavior. The system SHALL store these rows in a new empty `rate_breakdown_item` table rather than migrating old Work Breakdown rows.
 
 #### Scenario: Manage rate breakdown item
