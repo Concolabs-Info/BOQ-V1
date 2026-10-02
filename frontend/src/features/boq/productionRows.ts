@@ -1,6 +1,5 @@
 "use client";
 
-import { getBoqDefaultRate } from "@/features/demo/builders";
 import { useDemoStore } from "@/features/demo/store";
 import { requestJson } from "@/shared/services/apiClient";
 import type { BoqRow } from "./types";
@@ -58,18 +57,10 @@ function classification(entityType:string, section:string){
 }
 
 function defaultRate(entityType:string,code:string,unit:string):number|null{
-  const st=useDemoStore.getState();
-  if(st.boqSetup.rate_mode==="manual")return null;
-  if(entityType==="stair_concrete"||entityType==="ramp_concrete")return getBoqDefaultRate("slab",code,unit);
-  if(entityType==="stair_formwork"||entityType==="ramp_formwork")return getBoqDefaultRate("formwork",code,unit);
-  if(entityType.startsWith("stair_")||entityType.startsWith("ramp_"))return unit==="m"?4500:8500;
-  if(entityType==="door_ironmongery")return 25000;
-  if(entityType==="floor_waterproofing")return 4500;
-  if(entityType==="floor_underlay"||entityType==="floor_membrane")return 2000;
-  if(entityType==="floor_insulation")return 3500;
-  if(entityType==="floor_sealer")return 1800;
-  if(entityType==="floor_work"||entityType==="ceiling_feature")return 0;
-  return getBoqDefaultRate(entityType,code,unit);
+  void entityType;
+  void code;
+  void unit;
+  return null;
 }
 
 function toRows(response:ProductionCandidateResponse):BoqRow[]{

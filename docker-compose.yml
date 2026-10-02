@@ -23,6 +23,9 @@ services:
       - ./database/schema/009_doors_windows.sql:/docker-entrypoint-initdb.d/009_doors_windows.sql:ro
       - ./database/schema/010_columns.sql:/docker-entrypoint-initdb.d/010_columns.sql:ro
       - ./database/schema/011_element_harness.sql:/docker-entrypoint-initdb.d/011_element_harness.sql:ro
+      - ./database/migrations/012_rate_files.sql:/docker-entrypoint-initdb.d/012_rate_files.sql:ro
+      - ./database/migrations/013_rate_item_material_spec.sql:/docker-entrypoint-initdb.d/013_rate_item_material_spec.sql:ro
+      - ./database/migrations/014_rate_item_split_spec_size.sql:/docker-entrypoint-initdb.d/014_rate_item_split_spec_size.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quanto} -d ${POSTGRES_DB:-quanto}"]
       interval: 5s
