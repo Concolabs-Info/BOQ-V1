@@ -1,7 +1,22 @@
 "use client";
 
-import { useState } from "react";
-import { Button } from "@/shared/components/Button";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Download, Plus, RefreshCw, Settings2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { BoqTemplatePackage } from "../types";
 
 export function BoqToolbar({
@@ -34,7 +49,38 @@ export function BoqToolbar({
   onSettings: () => void;
 }) {
   const [downloadOpen, setDownloadOpen] = useState(false);
+  const closeDownloadTimer = useRef<number | null>(null);
   const downloadDisabled = saving || stale;
+
+  useEffect(() => {
+    if (downloadDisabled) {
+      clearDownloadClose();
+      setDownloadOpen(false);
+    }
+  }, [downloadDisabled]);
+
+  useEffect(() => {
+    return () => {
+      if (closeDownloadTimer.current) window.clearTimeout(closeDownloadTimer.current);
+    };
+  }, []);
+
+  function clearDownloadClose() {
+    if (!closeDownloadTimer.current) return;
+    window.clearTimeout(closeDownloadTimer.current);
+    closeDownloadTimer.current = null;
+  }
+
+  function openDownloadMenu() {
+    if (downloadDisabled) return;
+    clearDownloadClose();
+    setDownloadOpen(true);
+  }
+
+  function scheduleDownloadClose() {
+    clearDownloadClose();
+    closeDownloadTimer.current = window.setTimeout(() => setDownloadOpen(false), 140);
+  }
 
   function chooseDownload(format: "pdf" | "xlsx" | "csv" | "json") {
     setDownloadOpen(false);
@@ -51,43 +97,66 @@ export function BoqToolbar({
               {status === "ready" ? "Ready" : "Updating"}
             </span>
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className="text-sm text-slate-500">Template</span>
-            <select
-              className="h-9 min-w-52 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-300"
+            <Select
               value={templateId}
-              onChange={(event) => onTemplateChange(event.target.value)}
+              onValueChange={onTemplateChange}
               disabled={saving}
             >
-              {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
-            </select>
-            <Button variant="secondary" disabled={saving} onClick={onAddTemplate}>+ Add template</Button>
-            <Button variant="ghost" disabled={saving || !templateId} onClick={onManageTemplates}>Manage templates</Button>
+              <SelectTrigger className="h-10 min-w-52 rounded-lg bg-white font-medium text-slate-800">
+                <SelectValue placeholder="Select template" />
+              </SelectTrigger>
+              <SelectContent>
+                {templates.map((template) => <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button className="h-10" variant="outline" disabled={saving} onClick={onAddTemplate}><Plus aria-hidden="true" />Add template</Button>
+            <Button className="h-10" variant="ghost" disabled={saving || !templateId} onClick={onManageTemplates}>Manage templates</Button>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" disabled={saving} onClick={onRefresh}>Refresh</Button>
-          <div className="relative">
-            <Button disabled={downloadDisabled} onClick={() => setDownloadOpen((value) => !value)}>Download ▾</Button>
-            {downloadOpen ? (
-              <div className="absolute right-0 z-30 mt-2 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
-                <DownloadOption label="PDF" onClick={() => chooseDownload("pdf")} />
-                <DownloadOption label="Excel" onClick={() => chooseDownload("xlsx")} />
-                <DownloadOption label="CSV" onClick={() => chooseDownload("csv")} />
-                <DownloadOption label="JSON" onClick={() => chooseDownload("json")} />
-                <div className="my-1 border-t border-slate-100" />
-                <DownloadOption label="Export history" onClick={() => { setDownloadOpen(false); onExportHistory(); }} />
-              </div>
-            ) : null}
-          </div>
-          <Button variant="secondary" disabled={saving} onClick={onSettings}>Settings</Button>
+          <Button className="h-10" variant="outline" disabled={saving} onClick={onRefresh}><RefreshCw aria-hidden="true" />Refresh</Button>
+          <DropdownMenu modal={false} open={downloadOpen && !downloadDisabled} onOpenChange={(open) => {
+            clearDownloadClose();
+            setDownloadOpen(open && !downloadDisabled);
+          }}>
+            <div onMouseEnter={openDownloadMenu} onMouseLeave={scheduleDownloadClose}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  className="h-10"
+                  disabled={downloadDisabled}
+                  onFocus={openDownloadMenu}
+                  onPointerEnter={openDownloadMenu}
+                >
+                  <Download aria-hidden="true" />
+                  Download
+                  <ChevronDown aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-48"
+                onMouseEnter={openDownloadMenu}
+                onMouseLeave={scheduleDownloadClose}
+              >
+                <DownloadOption label="PDF" onSelect={() => chooseDownload("pdf")} />
+                <DownloadOption label="Excel" onSelect={() => chooseDownload("xlsx")} />
+                <DownloadOption label="CSV" onSelect={() => chooseDownload("csv")} />
+                <DownloadOption label="JSON" onSelect={() => chooseDownload("json")} />
+                <DropdownMenuSeparator />
+                <DownloadOption label="Export history" onSelect={() => { setDownloadOpen(false); onExportHistory(); }} />
+              </DropdownMenuContent>
+            </div>
+          </DropdownMenu>
+          <Button className="h-10" variant="ghost" disabled={saving} onClick={onSettings}><Settings2 aria-hidden="true" />Settings</Button>
         </div>
       </div>
     </div>
   );
 }
 
-function DownloadOption({ label, onClick }: { label: string; onClick: () => void }) {
-  return <button type="button" className="block w-full px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-slate-50" onClick={onClick}>{label}</button>;
+function DownloadOption({ label, onSelect }: { label: string; onSelect: () => void }) {
+  return <DropdownMenuItem onSelect={onSelect}>{label}</DropdownMenuItem>;
 }

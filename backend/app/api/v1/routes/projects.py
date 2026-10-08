@@ -47,11 +47,11 @@ def list_projects(
 def create_project(body: CreateProject):
     with transaction() as conn:
         row = conn.execute(
-            """INSERT INTO project(name,project_number,client_name,location,description)
-               VALUES (%s,%s,%s,%s,%s)
+            """INSERT INTO project(name,project_number,client_name,location,description,status)
+               VALUES (%s,%s,%s,%s,%s,%s)
                RETURNING id,name,status,project_number,client_name,location,description,pre_status,frame_version,
                          frozen_at,created_at,updated_at""",
-            (body.name.strip(), body.project_number, body.client_name, body.location, body.description),
+            (body.name.strip(), body.project_number, body.client_name, body.location, body.description, body.status or "active"),
         ).fetchone()
     result = dict(row)
     result["project_id"] = str(result["id"])

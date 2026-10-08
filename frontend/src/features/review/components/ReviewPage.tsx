@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { WorkflowStepPage } from "@/features/workflow/components/WorkflowStepPage";
-import { Button } from "@/shared/components/Button";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { appRoutes } from "@/shared/constants/appRoutes";
 import { useOptimisticMutationQueue } from "@/shared/hooks/useOptimisticMutationQueue";
@@ -18,6 +19,115 @@ import { useSpecialStore } from "@/features/quanto/specialStore";
 const categories = ["all", "column", "beam", "slab", "stair", "door", "window", "wall", "floor_finish", "wall_finish", "roof", "ceiling", "needs_review"] as const;
 type Category = typeof categories[number];
 const queryKey = (projectId: string, floorId: string | null, category: string) => ["review", projectId, floorId, category] as const;
+const REVIEW_PANEL_STORAGE_PREFIX = "quanto:review-layout";
+
+const REVIEW_TABLE_COLUMNS = [
+  { key: "select", label: "", defaultWidth: 56, minWidth: 48, maxWidth: 96 },
+  { key: "item", label: "Item", defaultWidth: 240, minWidth: 170, maxWidth: 420 },
+  { key: "element", label: "Element", defaultWidth: 190, minWidth: 140, maxWidth: 340 },
+  { key: "measure", label: "Size / quantity", defaultWidth: 220, minWidth: 160, maxWidth: 380 },
+  { key: "finish", label: "Material / finish", defaultWidth: 230, minWidth: 170, maxWidth: 420 },
+  { key: "source", label: "Source", defaultWidth: 170, minWidth: 120, maxWidth: 300 },
+] as const;
+
+type ReviewColumnKey = typeof REVIEW_TABLE_COLUMNS[number]["key"];
+type ReviewColumnWidths = Record<ReviewColumnKey, number>;
+type ColumnDragState = {
+  pointerId: number;
+  key: ReviewColumnKey;
+  startX: number;
+  startWidth: number;
+};
+
+const DEFAULT_COLUMN_WIDTHS = REVIEW_TABLE_COLUMNS.reduce((widths, column) => {
+  widths[column.key] = column.defaultWidth;
+  return widths;
+}, {} as ReviewColumnWidths);
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function columnConfig(key: ReviewColumnKey) {
+  return REVIEW_TABLE_COLUMNS.find((column) => column.key === key) ?? REVIEW_TABLE_COLUMNS[0];
+}
+
+function useReviewColumnWidths(projectId: string) {
+  const storageKey = `${REVIEW_PANEL_STORAGE_PREFIX}:columns:${projectId}`;
+  const dragRef = useRef<ColumnDragState | null>(null);
+  const [widths, setWidths] = useState<ReviewColumnWidths>(DEFAULT_COLUMN_WIDTHS);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+      if (!saved) {
+        setWidths(DEFAULT_COLUMN_WIDTHS);
+        return;
+      }
+      const parsed = JSON.parse(saved) as Partial<ReviewColumnWidths>;
+      setWidths({
+        ...DEFAULT_COLUMN_WIDTHS,
+        ...Object.fromEntries(
+          REVIEW_TABLE_COLUMNS.map((column) => [
+            column.key,
+            Number.isFinite(parsed[column.key])
+              ? clamp(Number(parsed[column.key]), column.minWidth, column.maxWidth)
+              : column.defaultWidth,
+          ])
+        ),
+      } as ReviewColumnWidths);
+    } catch {
+      setWidths(DEFAULT_COLUMN_WIDTHS);
+    }
+  }, [storageKey]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(widths));
+    } catch {
+      // Column resizing still works for the current visit without browser storage.
+    }
+  }, [storageKey, widths]);
+
+  function beginResize(event: ReactPointerEvent<HTMLButtonElement>, key: ReviewColumnKey) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      key,
+      startX: event.clientX,
+      startWidth: widths[key],
+    };
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  }
+
+  function moveResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const config = columnConfig(drag.key);
+    const nextWidth = clamp(drag.startWidth + event.clientX - drag.startX, config.minWidth, config.maxWidth);
+    setWidths((current) => ({ ...current, [drag.key]: nextWidth }));
+  }
+
+  function finishResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      dragRef.current = null;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    }
+  }
+
+  function resetColumn(key: ReviewColumnKey) {
+    setWidths((current) => ({ ...current, [key]: columnConfig(key).defaultWidth }));
+  }
+
+  const totalWidth = REVIEW_TABLE_COLUMNS.reduce((total, column) => total + widths[column.key], 0);
+
+  return { widths, totalWidth, beginResize, moveResize, finishResize, resetColumn };
+}
 
 function display(value: unknown, digits = 0): string {
   if (value == null || value === "") return "—";
@@ -99,6 +209,7 @@ export function ReviewPage({ projectId }: { projectId: string }) {
   const takeoffRevision = useDemoStore((state) => [state.openings, state.walls, state.floorZones, state.ceilingZones, state.roofZones].map(items => items.map(item => `${item.id}:${item.status}`).join("|")).join("/"));
   const structureRevision = useStructuralStore((state) => [state.columns, state.beams, state.slabPlates].map(items => items.map(item => `${item.id}:${item.status}`).join("|")).join("/"));
   const specialRevision = useSpecialStore((state)=>state.flights.map(item=>`${item.id}:${item.status}`).join("|"));
+  const columnResize = useReviewColumnWidths(projectId);
 
   const activeQueryKey = [...queryKey(projectId, floorId, category), takeoffRevision, structureRevision, specialRevision] as const;
   const query = useQuery({
@@ -163,6 +274,149 @@ export function ReviewPage({ projectId }: { projectId: string }) {
     if (saved) setConfirmationMessage(count ? `${count} item${count === 1 ? "" : "s"} confirmed and sent to the BOQ.` : "All available items are already confirmed.");
   }
 
+  const floorsPanel = (
+    <aside className="h-full border-r border-slate-200 bg-white p-4">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Floors</p>
+      <button
+        type="button"
+        onClick={() => setFloorId(null)}
+        className={!floorId ? "w-full rounded-lg border border-blue-200 bg-blue-50 p-3 text-left" : "w-full rounded-lg border border-slate-200 p-3 text-left transition hover:border-slate-300 hover:bg-slate-50"}
+      >
+        <div className="flex justify-between gap-2"><span className="text-sm font-semibold">All Floors</span><span className="text-xs text-slate-500">{totals.all}</span></div>
+        <p className="mt-2 text-xs text-slate-500">{totals.needsReview} need review</p>
+      </button>
+      <div className="mt-2 space-y-2">
+        {state?.floors.map((floor) => (
+          <button
+            key={floor.id}
+            type="button"
+            onClick={() => setFloorId(floor.id)}
+            className={floorId === floor.id ? "w-full rounded-lg border border-blue-200 bg-blue-50 p-3 text-left" : "w-full rounded-lg border border-slate-200 p-3 text-left transition hover:border-slate-300 hover:bg-slate-50"}
+          >
+            <div className="flex justify-between gap-2"><span className="text-sm font-semibold">{floor.name}</span><span className="text-xs text-slate-500">{floor.total}</span></div>
+            <p className="mt-2 text-xs text-slate-500">{floor.ready || 0} ready · {floor.needs_review} review</p>
+          </button>
+        ))}
+      </div>
+    </aside>
+  );
+
+  const reviewTablePanel = (
+    <main className="flex h-full min-w-0 flex-col border-r border-slate-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+        <div className="flex flex-wrap gap-1.5">
+          {categories.map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setCategory(item)}
+              className={category === item ? "rounded-lg bg-blue-50 px-3 py-2 text-sm font-semibold capitalize text-blue-800" : "rounded-lg px-3 py-2 text-sm font-medium capitalize text-slate-600 hover:bg-slate-50"}
+            >
+              {item === "floor_finish" ? "Floor finish" : item === "wall_finish" ? "Wall finish" : item.replace("_", " ")} <span className="ml-1 text-xs opacity-70">{state?.counts[item] || 0}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button className="h-10" variant={checked.size ? "default" : "outline"} disabled={!checked.size || editQueue.saving} onClick={() => void confirmSelected()}>
+            {editQueue.saving && checked.size ? "Confirming…" : `Confirm selected${checked.size ? ` (${checked.size})` : ""}`}
+          </Button>
+          <Button className="h-10" variant={checked.size ? "outline" : "default"} disabled={editQueue.saving || scopeRemaining <= 0} onClick={() => void confirmAll()}>
+            {editQueue.saving ? "Confirming…" : scopeRemaining <= 0 ? "All confirmed ✓" : "Confirm all"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto">
+        <table
+          className="table-fixed border-collapse text-left text-sm"
+          style={{ width: `${columnResize.totalWidth}px`, minWidth: "100%" }}
+        >
+          <colgroup>
+            {REVIEW_TABLE_COLUMNS.map((column) => (
+              <col key={column.key} style={{ width: `${columnResize.widths[column.key]}px` }} />
+            ))}
+          </colgroup>
+          <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
+            <tr>
+              {REVIEW_TABLE_COLUMNS.map((column) => (
+                <th key={column.key} className={`relative px-4 py-3 ${column.key === "measure" ? "text-right" : ""}`}>
+                  <span className="block truncate">{column.label}</span>
+                  <button
+                    type="button"
+                    aria-label={`Resize ${column.label || "selection"} column`}
+                    title="Drag to resize · Double-click to reset"
+                    className="group absolute inset-y-0 right-0 z-20 flex w-3 cursor-col-resize touch-none items-center justify-center outline-none"
+                    onPointerDown={(event) => columnResize.beginResize(event, column.key)}
+                    onPointerMove={columnResize.moveResize}
+                    onPointerUp={columnResize.finishResize}
+                    onPointerCancel={columnResize.finishResize}
+                    onDoubleClick={() => columnResize.resetColumn(column.key)}
+                  >
+                    <span className="h-5 w-px rounded-full bg-slate-300 transition group-hover:bg-blue-500 group-focus-visible:bg-blue-600 group-active:bg-blue-700" />
+                  </button>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {state?.items.map((item) => (
+              <tr
+                key={item.id}
+                onClick={() => setSelectedId(item.id)}
+                className={item.id === selectedId ? "cursor-pointer border-t border-slate-200 bg-blue-50 transition-colors hover:bg-blue-100/70" : "cursor-pointer border-t border-slate-200 transition-colors hover:bg-blue-100/70"}
+              >
+                <td className="px-4 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={checked.has(item.id)}
+                    disabled={item.critical || item.status === "confirmed" || editQueue.saving}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) => setChecked((current) => {
+                      const next = new Set(current);
+                      event.target.checked ? next.add(item.id) : next.delete(item.id);
+                      return next;
+                    })}
+                  />
+                </td>
+                <td className="px-4 py-2.5">
+                  <p className="truncate font-semibold text-slate-900">{item.display_number || item.title}</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="truncate text-xs text-slate-500">{String(item.data.floor || "")}</span>
+                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold capitalize ${statusClass(item.status)}`}>{item.status.replace("_", " ")}</span>
+                  </div>
+                </td>
+                <td className="px-4 py-2.5">
+                  <p className="truncate font-medium capitalize text-slate-800">{item.entity_type.replaceAll("_", " ")}</p>
+                  <p className="mt-1 truncate text-xs text-slate-500">{itemCode(item)}</p>
+                </td>
+                <td className="truncate px-4 py-2.5 text-right font-medium tabular-nums text-slate-800">{itemMeasure(item)}</td>
+                <td className="truncate px-4 py-2.5 text-slate-600">{itemFinish(item)}</td>
+                <td className="truncate px-4 py-2.5 text-xs font-medium text-slate-500">{itemSource(item)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {state && !state.items.length ? <div className="p-12 text-center text-sm text-slate-500">No items match this view.</div> : null}
+      </div>
+    </main>
+  );
+
+  const detailsPanel = (
+    <aside className="h-full overflow-y-auto bg-white p-5">
+      {selected ? (
+        <ReviewDetails
+          item={selected}
+          saving={false}
+          onEdit={(field, value) => queueEdit(
+            () => updateReviewField(projectId, selected.id, field, value),
+            (current) => ({...current,items:current.items.map((item)=>item.id===selected.id?{...item,data:{...item.data,[field]:value},status:"confirmed"}:item)}),
+          ).then(() => undefined)}
+        />
+      ) : <p className="text-sm text-slate-500">Select an item to review its current saved details.</p>}
+      {error ? <div className="mt-4"><ErrorMessage message={error} /></div> : null}
+    </aside>
+  );
+
   return (
     <WorkflowStepPage projectId={projectId} stepKey="review">
       <div className="flex justify-end border-b border-slate-200 bg-white px-5 py-3">
@@ -174,127 +428,34 @@ export function ReviewPage({ projectId }: { projectId: string }) {
         {confirmationMessage ? <p role="status" className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">✓ {confirmationMessage}</p> : null}
       </div>
 
-      <div className="grid min-h-[690px] grid-cols-[210px_minmax(0,1fr)_340px] overflow-hidden">
-        <aside className="border-r border-slate-200 bg-white p-4">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Floors</p>
-          <button
-            type="button"
-            onClick={() => setFloorId(null)}
-            className={!floorId ? "w-full rounded-xl border border-blue-200 bg-blue-50 p-3 text-left" : "w-full rounded-xl border border-slate-200 p-3 text-left hover:border-blue-200"}
-          >
-            <div className="flex justify-between gap-2"><span className="text-sm font-semibold">All Floors</span><span className="text-xs text-slate-500">{totals.all}</span></div>
-            <p className="mt-2 text-xs text-slate-500">{totals.needsReview} need review</p>
-          </button>
-          <div className="mt-2 space-y-2">
-            {state?.floors.map((floor) => (
-              <button
-                key={floor.id}
-                type="button"
-                onClick={() => setFloorId(floor.id)}
-                className={floorId === floor.id ? "w-full rounded-xl border border-blue-200 bg-blue-50 p-3 text-left" : "w-full rounded-xl border border-slate-200 p-3 text-left hover:border-blue-200"}
-              >
-                <div className="flex justify-between gap-2"><span className="text-sm font-semibold">{floor.name}</span><span className="text-xs text-slate-500">{floor.total}</span></div>
-                <p className="mt-2 text-xs text-slate-500">{floor.ready || 0} ready · {floor.needs_review} review</p>
-              </button>
-            ))}
-          </div>
-        </aside>
+      <div className="hidden h-[690px] overflow-hidden lg:block">
+        <ResizablePanelGroup
+          direction="horizontal"
+          autoSaveId={`${REVIEW_PANEL_STORAGE_PREFIX}:panels:${projectId}`}
+          className="h-full min-h-0"
+        >
+          <ResizablePanel id="floors" defaultSize="210px" minSize="160px" maxSize="320px" groupResizeBehavior="preserve-pixel-size">
+            {floorsPanel}
+          </ResizablePanel>
+          <ResizableHandle withHandle className="bg-slate-200" />
+          <ResizablePanel id="table" defaultSize="60%" minSize="520px">
+            {reviewTablePanel}
+          </ResizablePanel>
+          <ResizableHandle withHandle className="bg-slate-200" />
+          <ResizablePanel id="details" defaultSize="340px" minSize="260px" maxSize="520px" groupResizeBehavior="preserve-pixel-size">
+            {detailsPanel}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
 
-        <main className="min-w-0 border-r border-slate-200 bg-white">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
-            <div className="flex flex-wrap gap-1.5">
-              {categories.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => setCategory(item)}
-                  className={category === item ? "rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold capitalize text-white" : "rounded-lg px-3 py-2 text-sm font-semibold capitalize text-slate-600 hover:bg-slate-50"}
-                >
-                  {item === "floor_finish" ? "Floor finish" : item === "wall_finish" ? "Wall finish" : item.replace("_", " ")} <span className="ml-1 text-xs opacity-70">{state?.counts[item] || 0}</span>
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" disabled={!checked.size || editQueue.saving} onClick={() => void confirmSelected()}>
-                {editQueue.saving && checked.size ? "Confirming…" : `Confirm selected${checked.size ? ` (${checked.size})` : ""}`}
-              </Button>
-              <Button disabled={editQueue.saving || scopeRemaining <= 0} onClick={() => void confirmAll()}>
-                {editQueue.saving ? "Confirming…" : scopeRemaining <= 0 ? "All confirmed ✓" : "Confirm all"}
-              </Button>
-            </div>
-          </div>
-
-          <div className="max-h-[640px] overflow-auto">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="w-12 px-4 py-3"></th>
-                  <th className="px-4 py-3">Item</th>
-                  <th className="px-4 py-3">Element</th>
-                  <th className="px-4 py-3">Size / quantity</th>
-                  <th className="px-4 py-3">Material / finish</th>
-                  <th className="px-4 py-3">Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state?.items.map((item) => (
-                  <tr
-                    key={item.id}
-                    onClick={() => setSelectedId(item.id)}
-                    className={item.id === selectedId ? "cursor-pointer border-t border-slate-200 bg-blue-50" : "cursor-pointer border-t border-slate-200 hover:bg-slate-50"}
-                  >
-                    <td className="px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={checked.has(item.id)}
-                        disabled={item.critical || item.status === "confirmed" || editQueue.saving}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => setChecked((current) => {
-                          const next = new Set(current);
-                          event.target.checked ? next.add(item.id) : next.delete(item.id);
-                          return next;
-                        })}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-slate-900">{item.display_number || item.title}</p>
-                      <div className="mt-1 flex items-center gap-2">
-                        <span className="text-xs text-slate-500">{String(item.data.floor || "")}</span>
-                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold capitalize ${statusClass(item.status)}`}>{item.status.replace("_", " ")}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium capitalize text-slate-800">{item.entity_type.replaceAll("_", " ")}</p>
-                      <p className="mt-1 text-xs text-slate-500">{itemCode(item)}</p>
-                    </td>
-                    <td className="px-4 py-3 font-medium text-slate-800">{itemMeasure(item)}</td>
-                    <td className="px-4 py-3 text-slate-600">{itemFinish(item)}</td>
-                    <td className="px-4 py-3 text-xs font-medium text-slate-500">{itemSource(item)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {state && !state.items.length ? <div className="p-12 text-center text-sm text-slate-500">No items match this view.</div> : null}
-          </div>
-        </main>
-
-        <aside className="overflow-y-auto bg-white p-5">
-          {selected ? (
-            <ReviewDetails
-              item={selected}
-              saving={false}
-              onEdit={(field, value) => queueEdit(
-                () => updateReviewField(projectId, selected.id, field, value),
-                (current) => ({...current,items:current.items.map((item)=>item.id===selected.id?{...item,data:{...item.data,[field]:value},status:"confirmed"}:item)}),
-              ).then(() => undefined)}
-            />
-          ) : <p className="text-sm text-slate-500">Select an item to review its current saved details.</p>}
-          {error ? <div className="mt-4"><ErrorMessage message={error} /></div> : null}
-        </aside>
+      <div className="grid min-h-[690px] grid-rows-[auto_minmax(420px,1fr)_auto] overflow-hidden lg:hidden">
+        {floorsPanel}
+        {reviewTablePanel}
+        {detailsPanel}
       </div>
 
       <div className="flex items-center justify-end border-t border-slate-200 bg-white px-6 py-4">
-        <Link className="inline-flex h-11 items-center rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white" href={appRoutes.workflowStep(projectId, "boq")}>Continue to BOQ</Link>
+        <Button asChild className="h-10 px-5"><Link href={appRoutes.workflowStep(projectId, "boq")}>Continue to BOQ</Link></Button>
       </div>
     </WorkflowStepPage>
   );
@@ -307,7 +468,7 @@ function Summary({ label, value, tone = "slate" }: { label: string; value: numbe
     amber: "bg-amber-50 text-amber-800",
     green: "bg-emerald-50 text-emerald-800",
   };
-  return <div className={`rounded-xl border border-slate-200 px-4 py-3 ${tones[tone]}`}><p className="text-xs font-semibold uppercase tracking-wide opacity-65">{label}</p><p className="mt-1 text-2xl font-semibold">{value}</p></div>;
+  return <div className={`rounded-lg border border-slate-200 px-4 py-3 ${tones[tone]}`}><p className="text-xs font-semibold uppercase tracking-wide opacity-65">{label}</p><p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p></div>;
 }
 
 function ReviewDetails({ item, saving, onEdit }: { item: ReviewItem; saving: boolean; onEdit: (field: string, value: unknown) => Promise<void> }) {
@@ -331,7 +492,7 @@ function ReviewDetails({ item, saving, onEdit }: { item: ReviewItem; saving: boo
         <h3 className="mt-1 text-xl font-semibold">{item.display_number || item.title}</h3>
         <p className="mt-1 text-sm capitalize text-slate-500">{item.entity_type} · {itemCode(item)}</p>
       </div>
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
         <div className="flex justify-between gap-3"><span className="text-slate-500">Floor</span><strong>{String(item.data.floor || "—")}</strong></div>
         <div className="mt-2 flex justify-between gap-3"><span className="text-slate-500">Measure</span><strong className="text-right">{itemMeasure(item)}</strong></div>
         <div className="mt-2 flex justify-between gap-3"><span className="text-slate-500">Material / finish</span><strong className="text-right">{itemFinish(item)}</strong></div>
@@ -339,12 +500,12 @@ function ReviewDetails({ item, saving, onEdit }: { item: ReviewItem; saving: boo
         {item.data.drawing_tag ? <div className="mt-2 flex justify-between gap-3"><span className="text-slate-500">Drawing tag</span><strong>{String(item.data.drawing_tag)}</strong></div> : null}
       </div>
       {missing.length || warnings.length ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
           {missing.length ? <p><strong>Missing:</strong> {missing.map((value) => value.replaceAll("_", " ")).join(", ")}</p> : null}
           {warnings.map((warning) => <p key={warning} className="mt-1">{warning}</p>)}
         </div>
       ) : null}
-      {Array.isArray(item.data.nrm2_work_items)&&item.data.nrm2_work_items.length?<div className="rounded-xl border border-blue-200 bg-blue-50 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Generated NRM2 work items</p><ul className="mt-2 space-y-1 text-sm text-slate-700">{item.data.nrm2_work_items.map(value=><li key={String(value)}>• {String(value)}</li>)}</ul></div>:null}
+      {Array.isArray(item.data.nrm2_work_items)&&item.data.nrm2_work_items.length?<div className="rounded-lg border border-blue-200 bg-blue-50 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Generated NRM2 work items</p><ul className="mt-2 space-y-1 text-sm text-slate-700">{item.data.nrm2_work_items.map(value=><li key={String(value)}>• {String(value)}</li>)}</ul></div>:null}
       <div className="space-y-3">
         {editable.map((field) => {
           const backendField = field === "room_name" ? "name" : field;

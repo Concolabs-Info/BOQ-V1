@@ -8,7 +8,8 @@ export const appRoutes = {
   projects: "/projects",
   boqGeneration: "/workspace/demo/pre/upload",
   pdfGeneration: "/workspace/demo/pre/upload",
-  workspace: (projectId: string) => `/workspace/${projectId}/pre/upload`,
+  workspace: (projectId: string) => `/workspace/${projectId}`,
+  projectOverview: (projectId: string) => `/workspace/${projectId}`,
   pre: (projectId: string, step: string) => `/workspace/${projectId}/pre/${step}`,
   takeoff: (projectId: string, element: string, view: string = "dimension") => `/workspace/${projectId}/takeoff/${element}/${view}`,
   workflowStep: (projectId: string, step: string) => {

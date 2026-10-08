@@ -79,7 +79,7 @@ export function QuantoWorkflowNav({ projectId, office = false }: { projectId: st
   }
 
   return (
-    <nav aria-label="Quanto workflow" className={office ? "flex min-w-0 flex-1 items-stretch" : "flex min-w-0 flex-1 items-center gap-2"}>
+    <nav aria-label="Quanto workflow" className={office ? "flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : "flex min-w-0 flex-1 items-center gap-2"}>
       <MainLink
         href={appRoutes.pre(projectId, "upload")}
         label="Pre"
@@ -141,7 +141,7 @@ export function QuantoWorkflowNav({ projectId, office = false }: { projectId: st
       />
       {showPlansGuard ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="plans-confirm-title">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 text-left shadow-2xl">
+          <div className="w-full max-w-lg rounded-lg bg-white p-6 text-left shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-blue-600">Plans review</p>
@@ -150,7 +150,7 @@ export function QuantoWorkflowNav({ projectId, office = false }: { projectId: st
               </div>
               <button type="button" onClick={() => setShowPlansGuard(false)} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100" aria-label="Close">×</button>
             </div>
-            <div className="mt-5 max-h-56 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-2">
+            <div className="mt-5 max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-2">
               {pendingPlans.map((viewport) => {
                 const invalid = !viewport.name.trim() || viewport.bbox[2] <= viewport.bbox[0] || viewport.bbox[3] <= viewport.bbox[1];
                 return <div key={viewport.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm"><span className="min-w-0 truncate font-medium text-slate-700">{viewport.name || "Unnamed drawing"}</span><span className={invalid ? "shrink-0 text-xs font-semibold text-red-600" : "shrink-0 text-xs font-semibold text-amber-600"}>{invalid ? "Needs details" : "Not confirmed"}</span></div>;
@@ -158,9 +158,9 @@ export function QuantoWorkflowNav({ projectId, office = false }: { projectId: st
             </div>
             {invalidPlans.length ? <p className="mt-3 text-xs text-red-600">Complete the missing drawing details before confirming all.</p> : null}
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <button type="button" onClick={() => setShowPlansGuard(false)} className="h-11 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50">Review drawings</button>
-              <button type="button" onClick={continueWithoutConfirming} className="h-11 rounded-xl border border-amber-300 bg-amber-50 px-3 text-sm font-semibold text-amber-800 hover:bg-amber-100">Continue without confirming</button>
-              <button type="button" disabled={Boolean(invalidPlans.length)} onClick={confirmAllAndContinue} className="h-11 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-slate-300 sm:col-span-2">Confirm all and continue</button>
+              <button type="button" onClick={() => setShowPlansGuard(false)} className="h-10 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50">Review drawings</button>
+              <button type="button" onClick={continueWithoutConfirming} className="h-10 rounded-lg border border-amber-300 bg-amber-50 px-3 text-sm font-semibold text-amber-800 hover:bg-amber-100">Continue without confirming</button>
+              <button type="button" disabled={Boolean(invalidPlans.length)} onClick={confirmAllAndContinue} className="h-10 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-slate-300 sm:col-span-2">Confirm all and continue</button>
             </div>
           </div>
         </div>
@@ -194,33 +194,33 @@ function MainLink({
 }) {
   const className = office
     ? state === "current"
-      ? "flex h-full shrink-0 items-center border-b-2 border-blue-600 bg-white px-4 text-[11px] font-bold uppercase tracking-wide text-blue-700"
+      ? "flex h-full shrink-0 items-center border-b-2 border-blue-600 bg-blue-50/50 px-4 text-xs font-semibold uppercase text-blue-800"
       : state === "complete"
-        ? "flex h-full shrink-0 items-center gap-1.5 border-b-2 border-transparent px-4 text-[11px] font-bold uppercase tracking-wide text-emerald-700 transition hover:bg-white"
-        : "flex h-full shrink-0 items-center border-b-2 border-transparent px-4 text-[11px] font-bold uppercase tracking-wide text-slate-600 transition hover:bg-white hover:text-blue-700"
+        ? "flex h-full shrink-0 items-center gap-1.5 border-b-2 border-transparent px-4 text-xs font-medium uppercase text-emerald-700 transition hover:bg-slate-50"
+        : "flex h-full shrink-0 items-center border-b-2 border-transparent px-4 text-xs font-medium uppercase text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
     :
     state === "current"
-      ? "flex h-9 shrink-0 items-center rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm"
+      ? "flex h-9 shrink-0 items-center rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm"
       : state === "complete"
-        ? "flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
-        : "flex h-9 shrink-0 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700";
+        ? "flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
+        : "flex h-9 shrink-0 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700";
 
   const content = <>{state === "complete" ? <CheckIcon /> : null}{label}{onCurrentClick ? <ChevronIcon expanded={Boolean(expanded)} /> : null}</>;
 
   if (state === "current" && onCurrentClick) {
-    return <button type="button" className={`${className} gap-1.5`} aria-expanded={expanded} onClick={onCurrentClick}>{content}</button>;
+    return <button type="button" className={`${className} gap-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 focus-visible:outline-offset-[-2px]`} aria-current="step" aria-expanded={expanded} onClick={onCurrentClick}>{content}</button>;
   }
 
-  return <Link href={href} className={className}>{content}</Link>;
+  return <Link href={href} className={`${className} focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 focus-visible:outline-offset-[-2px]`} aria-current={state === "current" ? "step" : undefined}>{content}</Link>;
 }
 
 function SubLink({ href, label, state, onClick, office = false }: { href: string; label: string; state: ProgressState; onClick?: (event: MouseEvent<HTMLAnchorElement>) => void; office?: boolean }) {
   const className = office
     ? state === "current"
-      ? "flex h-full shrink-0 items-center border-b-2 border-blue-600 bg-white px-3 text-[11px] font-bold text-blue-700"
+      ? "flex h-full shrink-0 items-center border-b-2 border-blue-600 bg-blue-50/50 px-3 text-xs font-semibold text-blue-800"
       : state === "complete"
-        ? "flex h-full shrink-0 items-center gap-1 border-b-2 border-transparent px-3 text-[11px] font-semibold text-emerald-700 transition hover:bg-white"
-        : "flex h-full shrink-0 items-center border-b-2 border-transparent px-3 text-[11px] font-semibold text-slate-600 transition hover:bg-white hover:text-blue-700"
+        ? "flex h-full shrink-0 items-center gap-1 border-b-2 border-transparent px-3 text-xs font-medium text-emerald-700 transition hover:bg-slate-50"
+        : "flex h-full shrink-0 items-center border-b-2 border-transparent px-3 text-xs font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
     :
     state === "current"
       ? "flex h-8 shrink-0 items-center rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white shadow-sm"
@@ -229,7 +229,7 @@ function SubLink({ href, label, state, onClick, office = false }: { href: string
         : "flex h-8 shrink-0 items-center rounded-lg px-3 text-xs font-semibold text-slate-500 transition hover:bg-blue-50 hover:text-blue-700";
 
   return (
-    <Link href={href} className={className} onClick={onClick}>
+    <Link href={href} className={`${className} focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 focus-visible:outline-offset-[-2px]`} aria-current={state === "current" ? "step" : undefined} onClick={onClick}>
       {state === "complete" ? <CheckIcon small /> : null}
       {label}
     </Link>

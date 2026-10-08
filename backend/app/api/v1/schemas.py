@@ -16,6 +16,7 @@ class CreateProject(ApiModel):
     client_name: str | None = Field(default=None, max_length=160)
     location: str | None = Field(default=None, max_length=240)
     description: str | None = Field(default=None, max_length=2000)
+    status: Literal["active", "on_hold", "completed", "archived"] | None = None
 
 
 class UpdateProject(ApiModel):

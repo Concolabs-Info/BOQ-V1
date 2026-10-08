@@ -1,8 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { WorkflowStepPage } from "@/features/workflow/components/WorkflowStepPage";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { appRoutes } from "@/shared/constants/appRoutes";
@@ -42,6 +48,119 @@ const categoryOptions: Array<{ value: ElementCategory; label: string }> = [
   { value: "roof_plane", label: "Roofs" },
   { value: "ceiling_zone", label: "Ceilings" },
 ];
+
+const ALL_FLOORS_VALUE = "all";
+const TYPE_SUMMARY_STORAGE_PREFIX = "quanto:review-classifications";
+
+const TYPE_SUMMARY_COLUMNS = [
+  { key: "type", label: "Type", defaultWidth: 250, minWidth: 170, maxWidth: 440 },
+  { key: "measure", label: "Size / classification", defaultWidth: 230, minWidth: 170, maxWidth: 420 },
+  { key: "material", label: "Material / finish", defaultWidth: 240, minWidth: 170, maxWidth: 440 },
+  { key: "floors", label: "Floors", defaultWidth: 190, minWidth: 130, maxWidth: 340 },
+  { key: "qty", label: "Qty", defaultWidth: 110, minWidth: 90, maxWidth: 160 },
+  { key: "status", label: "Status", defaultWidth: 170, minWidth: 130, maxWidth: 260 },
+] as const;
+
+type TypeSummaryColumnKey = typeof TYPE_SUMMARY_COLUMNS[number]["key"];
+type TypeSummaryColumnWidths = Record<TypeSummaryColumnKey, number>;
+type TypeSummaryColumnDragState = {
+  pointerId: number;
+  key: TypeSummaryColumnKey;
+  startX: number;
+  startWidth: number;
+};
+
+const DEFAULT_TYPE_SUMMARY_COLUMN_WIDTHS = TYPE_SUMMARY_COLUMNS.reduce((widths, column) => {
+  widths[column.key] = column.defaultWidth;
+  return widths;
+}, {} as TypeSummaryColumnWidths);
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function typeColumnConfig(key: TypeSummaryColumnKey) {
+  return TYPE_SUMMARY_COLUMNS.find((column) => column.key === key) ?? TYPE_SUMMARY_COLUMNS[0];
+}
+
+function useTypeSummaryColumnWidths(projectId: string) {
+  const storageKey = `${TYPE_SUMMARY_STORAGE_PREFIX}:columns:${projectId}`;
+  const dragRef = useRef<TypeSummaryColumnDragState | null>(null);
+  const [widths, setWidths] = useState<TypeSummaryColumnWidths>(DEFAULT_TYPE_SUMMARY_COLUMN_WIDTHS);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+      if (!saved) {
+        setWidths(DEFAULT_TYPE_SUMMARY_COLUMN_WIDTHS);
+        return;
+      }
+      const parsed = JSON.parse(saved) as Partial<TypeSummaryColumnWidths>;
+      setWidths({
+        ...DEFAULT_TYPE_SUMMARY_COLUMN_WIDTHS,
+        ...Object.fromEntries(
+          TYPE_SUMMARY_COLUMNS.map((column) => [
+            column.key,
+            Number.isFinite(parsed[column.key])
+              ? clamp(Number(parsed[column.key]), column.minWidth, column.maxWidth)
+              : column.defaultWidth,
+          ])
+        ),
+      } as TypeSummaryColumnWidths);
+    } catch {
+      setWidths(DEFAULT_TYPE_SUMMARY_COLUMN_WIDTHS);
+    }
+  }, [storageKey]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(widths));
+    } catch {
+      // Column resizing remains available for the current visit without storage.
+    }
+  }, [storageKey, widths]);
+
+  function beginResize(event: ReactPointerEvent<HTMLButtonElement>, key: TypeSummaryColumnKey) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      key,
+      startX: event.clientX,
+      startWidth: widths[key],
+    };
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  }
+
+  function moveResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const config = typeColumnConfig(drag.key);
+    setWidths((current) => ({
+      ...current,
+      [drag.key]: clamp(drag.startWidth + event.clientX - drag.startX, config.minWidth, config.maxWidth),
+    }));
+  }
+
+  function finishResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      dragRef.current = null;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    }
+  }
+
+  function resetColumn(key: TypeSummaryColumnKey) {
+    setWidths((current) => ({ ...current, [key]: typeColumnConfig(key).defaultWidth }));
+  }
+
+  const totalWidth = TYPE_SUMMARY_COLUMNS.reduce((total, column) => total + widths[column.key], 0);
+
+  return { widths, totalWidth, beginResize, moveResize, finishResize, resetColumn };
+}
 
 function text(value: unknown): string {
   return value == null ? "" : String(value).trim();
@@ -223,6 +342,8 @@ export function ReviewClassificationPage({ projectId }: { projectId: string }) {
   const [category, setCategory] = useState<ElementCategory>("column");
   const [floorId, setFloorId] = useState<string>("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const columnResize = useTypeSummaryColumnWidths(projectId);
   const takeoffRevision = useDemoStore((state) => [state.openings, state.walls, state.floorZones, state.ceilingZones, state.roofZones].map(items => items.map(item => `${item.id}:${item.status}`).join("|")).join("/"));
   const structureRevision = useStructuralStore((state) => [state.columns, state.beams, state.slabPlates].map(items => items.map(item => `${item.id}:${item.status}`).join("|")).join("/"));
   const specialRevision = useSpecialStore((state)=>state.flights.map(item=>`${item.id}:${item.status}`).join("|"));
@@ -239,7 +360,23 @@ export function ReviewClassificationPage({ projectId }: { projectId: string }) {
 
   const state = query.data;
   const groups = useMemo(() => buildGroups(state?.items || [], category), [category, state?.items]);
-  const selected = groups.find((group) => group.key === selectedKey) || groups[0] || null;
+  const filteredGroups = useMemo(() => {
+    const queryText = search.trim().toLowerCase();
+    if (!queryText) return groups;
+    return groups.filter((group) => {
+      const statusText = group.needsReview ? `${group.needsReview} need review` : "confirmed";
+      return [
+        group.code,
+        group.label,
+        group.measure,
+        group.material,
+        group.floorNames.join(" "),
+        statusText,
+        categoryLabel(group.elementType),
+      ].join(" ").toLowerCase().includes(queryText);
+    });
+  }, [groups, search]);
+  const selected = filteredGroups.find((group) => group.key === selectedKey) || filteredGroups[0] || null;
 
   const categoryStats = useMemo(() => {
     const items = state?.items || [];
@@ -268,22 +405,182 @@ export function ReviewClassificationPage({ projectId }: { projectId: string }) {
     setSelectedKey(null);
   }
 
+  const tablePanel = (
+    <main className="flex h-full min-w-0 flex-col border-r border-slate-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+        <div>
+          <h3 className="text-base font-semibold text-slate-950">{categoryLabel(category)} by type</h3>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {filteredGroups.length} visible · {groups.length} classifications · {categoryStats[category].items} items
+          </p>
+        </div>
+        <div className="relative w-full sm:w-72">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setSelectedKey(null);
+            }}
+            placeholder="Search classifications"
+            className="h-10 rounded-lg border-slate-200 bg-white pl-9 shadow-sm focus-visible:ring-blue-200"
+          />
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto">
+        <table
+          className="table-fixed border-collapse text-left text-sm"
+          style={{ width: `${columnResize.totalWidth}px`, minWidth: "100%" }}
+        >
+          <colgroup>
+            {TYPE_SUMMARY_COLUMNS.map((column) => (
+              <col key={column.key} style={{ width: `${columnResize.widths[column.key]}px` }} />
+            ))}
+          </colgroup>
+          <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
+            <tr>
+              {TYPE_SUMMARY_COLUMNS.map((column) => (
+                <th key={column.key} className={column.key === "qty" ? "relative px-5 py-3 text-right" : "relative px-5 py-3"}>
+                  <span className="block truncate">{column.label}</span>
+                  <button
+                    type="button"
+                    aria-label={`Resize ${column.label} column`}
+                    title="Drag to resize · Double-click to reset"
+                    className="group absolute inset-y-0 right-0 z-20 flex w-3 cursor-col-resize touch-none items-center justify-center outline-none"
+                    onPointerDown={(event) => columnResize.beginResize(event, column.key)}
+                    onPointerMove={columnResize.moveResize}
+                    onPointerUp={columnResize.finishResize}
+                    onPointerCancel={columnResize.finishResize}
+                    onDoubleClick={() => columnResize.resetColumn(column.key)}
+                  >
+                    <span className="h-5 w-px rounded-full bg-slate-300 transition group-hover:bg-blue-500 group-focus-visible:bg-blue-600 group-active:bg-blue-700" />
+                  </button>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filteredGroups.map((group) => (
+              <tr
+                key={group.key}
+                onClick={() => setSelectedKey(group.key)}
+                className={
+                  selected?.key === group.key
+                    ? "cursor-pointer border-t border-slate-200 bg-blue-50 transition-colors hover:bg-blue-100/70"
+                    : "cursor-pointer border-t border-slate-200 transition-colors hover:bg-blue-100/70"
+                }
+              >
+                <td className="px-5 py-3">
+                  <p className={group.code === "UNCLASSIFIED" ? "truncate font-semibold text-amber-700" : "truncate font-semibold text-slate-950"}>
+                    {group.code === "UNCLASSIFIED" ? "Not classified" : group.code}
+                  </p>
+                  <p className="mt-1 truncate text-xs text-slate-500">{group.label}</p>
+                </td>
+                <td className="truncate px-5 py-3 font-medium text-slate-700">{group.measure}</td>
+                <td className="truncate px-5 py-3 text-slate-600">{group.material}</td>
+                <td className="truncate px-5 py-3 text-slate-600">{group.floorNames.join(", ") || "—"}</td>
+                <td className="px-5 py-3 text-right tabular-nums">
+                  <p className="font-semibold text-slate-950">{group.items.length}</p>
+                  {group.totalAreaM2 != null ? (
+                    <p className="mt-1 truncate text-xs text-slate-500">{group.totalAreaM2.toFixed(2)} m²</p>
+                  ) : null}
+                </td>
+                <td className="px-5 py-3">
+                  <Badge variant="outline" className={statusClass(group.needsReview)}>
+                    {group.needsReview ? `${group.needsReview} need review` : "Confirmed"}
+                  </Badge>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {!query.isPending && !filteredGroups.length ? (
+          <div className="p-12 text-center text-sm text-slate-500">
+            No {categoryLabel(category).toLowerCase()} match the current filters.
+          </div>
+        ) : null}
+      </div>
+    </main>
+  );
+
+  const detailsPanel = (
+    <aside className="h-full overflow-y-auto bg-white p-5">
+      {selected ? (
+        <div>
+          <div className="sticky -top-5 z-10 border-b border-slate-100 bg-white pb-4 pt-1">
+            <p className="text-xs font-semibold uppercase tracking-[.14em] text-slate-400">Selected classification</p>
+            <h3 className="mt-1 text-xl font-semibold text-slate-950">
+              {selected.code === "UNCLASSIFIED" ? "Not classified" : selected.code}
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">{selected.label}</p>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <MiniStat label="Items" value={selected.items.length} />
+            <MiniStat label="Need review" value={selected.needsReview} tone={selected.needsReview ? "amber" : "slate"} />
+          </div>
+
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+            <DetailRow label="Measure" value={selected.measure} />
+            <DetailRow label="Material / finish" value={selected.material} />
+            <DetailRow label="Floors" value={selected.floorNames.join(", ") || "—"} />
+            {selected.totalAreaM2 != null ? <DetailRow label="Total area" value={`${selected.totalAreaM2.toFixed(2)} m²`} /> : null}
+          </div>
+
+          <div className="mt-5">
+            <p className="text-xs font-semibold uppercase tracking-[.14em] text-slate-400">Items in this type</p>
+            <div className="mt-2 space-y-2">
+              {selected.items.map((item) => (
+                <div key={item.id} className="rounded-lg border border-slate-200 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900">{item.display_number || item.title}</p>
+                      <p className="mt-1 text-xs text-slate-500">{text(item.data.floor)} · {itemMeasure(item)}</p>
+                    </div>
+                    <Badge variant="outline" className={`shrink-0 ${statusClass(item.status === "needs_review" ? 1 : 0)}`}>
+                      {item.status === "needs_review" ? "Review" : "Confirmed"}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <Link
+            href={appRoutes.workflowStep(projectId, "review")}
+            className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Open detailed review
+          </Link>
+        </div>
+      ) : (
+        <p className="text-sm text-slate-500">Select a classification to see its items.</p>
+      )}
+    </aside>
+  );
+
   return (
     <WorkflowStepPage projectId={projectId} stepKey="review">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-3">
         <ReviewViewTabs projectId={projectId} active="types" />
-        <select
-          value={floorId}
-          onChange={(event) => chooseFloor(event.target.value)}
-          className="h-10 min-w-[180px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none focus:border-blue-400"
+        <Select
+          value={floorId || ALL_FLOORS_VALUE}
+          onValueChange={(value) => chooseFloor(value === ALL_FLOORS_VALUE ? "" : value)}
         >
-          <option value="">All floors</option>
-          {state?.floors.map((floor) => (
-            <option key={floor.id} value={floor.id}>
-              {floor.name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger className="h-10 min-w-[180px] rounded-lg border-slate-200 bg-white shadow-sm focus:ring-blue-200">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_FLOORS_VALUE}>All floors</SelectItem>
+            {state?.floors.map((floor) => (
+              <SelectItem key={floor.id} value={floor.id}>
+                {floor.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="border-b border-slate-200 bg-white px-5 py-3">
@@ -298,20 +595,20 @@ export function ReviewClassificationPage({ projectId }: { projectId: string }) {
                 onClick={() => chooseCategory(option.value)}
                 className={
                   active
-                    ? "rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-left ring-1 ring-blue-100"
-                    : "rounded-lg border border-slate-200 bg-white px-3 py-2 text-left hover:border-blue-200 hover:bg-slate-50"
+                    ? "rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-left"
+                    : "rounded-lg border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-slate-300 hover:bg-slate-50"
                 }
               >
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{option.label}</p>
                   {stats.needsReview ? (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                    <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
                       {stats.needsReview} review
-                    </span>
+                    </Badge>
                   ) : null}
                 </div>
                 <div className="mt-1 flex items-baseline justify-between gap-2">
-                  <p className="text-xl font-semibold leading-none text-slate-950">{stats.items}</p>
+                  <p className="text-xl font-semibold leading-none tabular-nums text-slate-950">{stats.items}</p>
                   <p className="text-[11px] text-slate-500">{stats.groups} classifications</p>
                 </div>
               </button>
@@ -326,139 +623,34 @@ export function ReviewClassificationPage({ projectId }: { projectId: string }) {
         </div>
       ) : null}
 
-      <div className="grid min-h-[620px] grid-cols-[minmax(0,1fr)_330px] overflow-hidden bg-white">
-        <main className="min-w-0 border-r border-slate-200">
-          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-            <div>
-              <h3 className="text-base font-semibold text-slate-950">{categoryLabel(category)} by type</h3>
-              <p className="mt-0.5 text-xs text-slate-500">
-                {groups.length} classifications · {categoryStats[category].items} items
-              </p>
-            </div>
-          </div>
+      <div className="hidden h-[620px] overflow-hidden bg-white lg:block">
+        <ResizablePanelGroup
+          direction="horizontal"
+          autoSaveId={`${TYPE_SUMMARY_STORAGE_PREFIX}:panels:${projectId}`}
+          className="h-full min-h-0"
+        >
+          <ResizablePanel id="classifications-table" defaultSize="65%" minSize="520px">
+            {tablePanel}
+          </ResizablePanel>
+          <ResizableHandle withHandle className="bg-slate-200" />
+          <ResizablePanel id="classification-details" defaultSize="380px" minSize="300px" maxSize="600px" groupResizeBehavior="preserve-pixel-size">
+            {detailsPanel}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
 
-          <div className="max-h-[620px] overflow-auto">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-5 py-3">Type</th>
-                  <th className="px-5 py-3">Size / classification</th>
-                  <th className="px-5 py-3">Material / finish</th>
-                  <th className="px-5 py-3">Floors</th>
-                  <th className="px-5 py-3 text-right">Qty</th>
-                  <th className="px-5 py-3">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groups.map((group) => (
-                  <tr
-                    key={group.key}
-                    onClick={() => setSelectedKey(group.key)}
-                    className={
-                      selected?.key === group.key
-                        ? "cursor-pointer border-t border-slate-200 bg-blue-50"
-                        : "cursor-pointer border-t border-slate-200 hover:bg-slate-50"
-                    }
-                  >
-                    <td className="px-5 py-4">
-                      <p className={group.code === "UNCLASSIFIED" ? "font-semibold text-amber-700" : "font-semibold text-slate-950"}>
-                        {group.code === "UNCLASSIFIED" ? "Not classified" : group.code}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">{group.label}</p>
-                    </td>
-                    <td className="px-5 py-4 font-medium text-slate-700">{group.measure}</td>
-                    <td className="px-5 py-4 text-slate-600">{group.material}</td>
-                    <td className="px-5 py-4 text-slate-600">{group.floorNames.join(", ") || "—"}</td>
-                    <td className="px-5 py-4 text-right">
-                      <p className="font-semibold text-slate-950">{group.items.length}</p>
-                      {group.totalAreaM2 != null ? (
-                        <p className="mt-1 text-xs text-slate-500">{group.totalAreaM2.toFixed(2)} m²</p>
-                      ) : null}
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(group.needsReview)}`}>
-                        {group.needsReview ? `${group.needsReview} need review` : "Confirmed"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {!query.isPending && !groups.length ? (
-              <div className="p-12 text-center text-sm text-slate-500">
-                No {categoryLabel(category).toLowerCase()} are available for this floor selection.
-              </div>
-            ) : null}
-          </div>
-        </main>
-
-        <aside className="max-h-[680px] overflow-y-auto bg-white p-5">
-          {selected ? (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[.14em] text-slate-400">Selected classification</p>
-              <h3 className="mt-1 text-xl font-semibold text-slate-950">
-                {selected.code === "UNCLASSIFIED" ? "Not classified" : selected.code}
-              </h3>
-              <p className="mt-1 text-sm text-slate-500">{selected.label}</p>
-
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <MiniStat label="Items" value={selected.items.length} />
-                <MiniStat label="Need review" value={selected.needsReview} tone={selected.needsReview ? "amber" : "slate"} />
-              </div>
-
-              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
-                <DetailRow label="Measure" value={selected.measure} />
-                <DetailRow label="Material / finish" value={selected.material} />
-                <DetailRow label="Floors" value={selected.floorNames.join(", ") || "—"} />
-                {selected.totalAreaM2 != null ? <DetailRow label="Total area" value={`${selected.totalAreaM2.toFixed(2)} m²`} /> : null}
-              </div>
-
-              <div className="mt-5">
-                <p className="text-xs font-semibold uppercase tracking-[.14em] text-slate-400">Items in this type</p>
-                <div className="mt-2 space-y-2">
-                  {selected.items.map((item) => (
-                    <div key={item.id} className="rounded-xl border border-slate-200 p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{item.display_number || item.title}</p>
-                          <p className="mt-1 text-xs text-slate-500">{text(item.data.floor)} · {itemMeasure(item)}</p>
-                        </div>
-                        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClass(item.status === "needs_review" ? 1 : 0)}`}>
-                          {item.status === "needs_review" ? "Review" : "Confirmed"}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <Link
-                href={appRoutes.workflowStep(projectId, "review")}
-                className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Open detailed review
-              </Link>
-            </div>
-          ) : (
-            <p className="text-sm text-slate-500">Select a classification to see its items.</p>
-          )}
-        </aside>
+      <div className="grid min-h-[620px] grid-rows-[minmax(420px,1fr)_auto] overflow-hidden bg-white lg:hidden">
+        {tablePanel}
+        {detailsPanel}
       </div>
 
       <div className="flex items-center justify-between border-t border-slate-200 bg-white px-6 py-4">
-        <Link
-          className="inline-flex h-11 items-center rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-700"
-          href={appRoutes.workflowStep(projectId, "review")}
-        >
-          Back to detailed review
-        </Link>
-        <Link
-          className="inline-flex h-11 items-center rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white"
-          href={appRoutes.workflowStep(projectId, "boq")}
-        >
-          Continue to BOQ
-        </Link>
+        <Button asChild variant="outline" className="h-10 px-5">
+          <Link href={appRoutes.workflowStep(projectId, "review")}>Back to detailed review</Link>
+        </Button>
+        <Button asChild className="h-10 px-5">
+          <Link href={appRoutes.workflowStep(projectId, "boq")}>Continue to BOQ</Link>
+        </Button>
       </div>
     </WorkflowStepPage>
   );
@@ -474,7 +666,7 @@ function MiniStat({
   tone?: "slate" | "amber";
 }) {
   return (
-    <div className={tone === "amber" ? "rounded-xl bg-amber-50 p-3 text-amber-800" : "rounded-xl bg-slate-50 p-3 text-slate-800"}>
+    <div className={tone === "amber" ? "rounded-lg bg-amber-50 p-3 text-amber-800" : "rounded-lg bg-slate-50 p-3 text-slate-800"}>
       <p className="text-[11px] font-semibold uppercase tracking-wide opacity-65">{label}</p>
       <p className="mt-1 text-xl font-semibold">{value}</p>
     </div>

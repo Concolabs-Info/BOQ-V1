@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { PlatformShell } from "@/features/platform/components/PlatformShell";
+import { ProjectHeaderActions } from "@/features/projects/components/ProjectHeaderActions";
 import { QuantoWorkflowNav } from "./navigation";
 import { useTakeoffWorkspacePersistence } from "./persistence/useTakeoffWorkspacePersistence";
 
@@ -23,6 +24,7 @@ export function QuantoPageShell({
       title="Quanto"
       eyebrow="Automated BOQ"
       headerNavigation={<QuantoWorkflowNav projectId={projectId} office />}
+      headerActions={<ProjectHeaderActions projectId={projectId} />}
       lockContent
       flushContent
       officeHeader

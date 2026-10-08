@@ -29,6 +29,7 @@ export type ProjectCreateInput = {
   client_name?: string | null;
   location?: string | null;
   description?: string | null;
+  status?: ProjectStatus;
 };
 
 export type ProjectUpdateInput = Partial<ProjectCreateInput> & {

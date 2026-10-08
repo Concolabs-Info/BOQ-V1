@@ -1,6 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Button } from "@/shared/components/Button";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import type { BoqExport } from "../types";
@@ -8,6 +15,7 @@ import { BoqDrawer } from "./BoqDrawer";
 import { BoqExportHistory } from "./BoqExportHistory";
 
 export type BoqExportMode = "combined" | "floor_breakdown" | "selected_floor";
+const SELECT_FLOOR_VALUE = "select-floor";
 
 export function BoqExportDrawer({
   open,
@@ -43,19 +51,29 @@ export function BoqExportDrawer({
           <div className="grid gap-4 sm:grid-cols-2">
             <label>
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Layout</span>
-              <select className="input mt-2 w-full" value={mode} onChange={(event) => setMode(event.target.value as BoqExportMode)}>
-                <option value="combined">Combined project</option>
-                <option value="floor_breakdown">Floor breakdown</option>
-                <option value="selected_floor">Selected floor only</option>
-              </select>
+              <Select value={mode} onValueChange={(value) => setMode(value as BoqExportMode)}>
+                <SelectTrigger className="mt-2 bg-white">
+                  <SelectValue placeholder="Select layout" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="combined">Combined project</SelectItem>
+                  <SelectItem value="floor_breakdown">Floor breakdown</SelectItem>
+                  <SelectItem value="selected_floor">Selected floor only</SelectItem>
+                </SelectContent>
+              </Select>
             </label>
             {mode === "selected_floor" ? (
               <label>
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Floor</span>
-                <select className="input mt-2 w-full" value={floorId || ""} onChange={(event) => setFloorId(event.target.value || null)}>
-                  <option value="">Select floor</option>
-                  {floors.map((floor) => <option key={floor.id} value={floor.id}>{floor.name}</option>)}
-                </select>
+                <Select value={floorId || SELECT_FLOOR_VALUE} onValueChange={(value) => setFloorId(value === SELECT_FLOOR_VALUE ? null : value)}>
+                  <SelectTrigger className="mt-2 bg-white">
+                    <SelectValue placeholder="Select floor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SELECT_FLOOR_VALUE}>Select floor</SelectItem>
+                    {floors.map((floor) => <SelectItem key={floor.id} value={floor.id}>{floor.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </label>
             ) : null}
           </div>

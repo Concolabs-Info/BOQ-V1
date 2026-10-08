@@ -4,7 +4,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/shared/components/Button";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ErrorMessage } from "@/shared/components/ErrorMessage";
 import { ModalDialog } from "@/shared/components/ModalDialog";
 import { listRateFiles, listRateItems } from "@/features/rate-files/api";
@@ -37,6 +45,8 @@ import { BoqTemplateCreateDialog } from "./BoqTemplateCreateDialog";
 import { BoqToolbar } from "./BoqToolbar";
 
 export type BoqPanel = "settings" | "exports" | null;
+const ALL_FLOORS_VALUE = "all-floors";
+const NO_RATE_FILE_VALUE = "no-rate-file";
 
 function sleep(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -110,12 +120,16 @@ export function BoqDashboard({ projectId, initialPanel = null }: { projectId: st
     if (persisted !== selectedRateFileId) setSelectedRateFileId(persisted);
   }, [mappingsQuery.data?.selection.rate_file_id, selectedRateFileId]);
 
+  const stateRows = state?.rows;
+  const rateItems = rateItemsQuery.data;
+  const rememberedMappings = mappingsQuery.data?.mappings;
+
   const rateMatches = useMemo(() => {
-    const items = rateItemsQuery.data || [];
-    const remembered = mappingsQuery.data?.mappings || [];
-    if (!state?.rows.length || !selectedRateFileId || !items.length) return {};
-    return Object.fromEntries(state.rows.map((row) => [row.id, matchBoqRow(row, items, remembered)]));
-  }, [mappingsQuery.data?.mappings, rateItemsQuery.data, selectedRateFileId, state?.rows]);
+    const items = rateItems || [];
+    const remembered = rememberedMappings || [];
+    if (!stateRows?.length || !selectedRateFileId || !items.length) return {};
+    return Object.fromEntries(stateRows.map((row) => [row.id, matchBoqRow(row, items, remembered)]));
+  }, [rememberedMappings, rateItems, selectedRateFileId, stateRows]);
 
   const displayRows = useMemo(() => (state?.rows || []).map((row) => {
     const match = rateMatches[row.id];
@@ -258,54 +272,69 @@ export function BoqDashboard({ projectId, initialPanel = null }: { projectId: st
         onSettings={() => { setError(null); setPanel("settings"); }}
       />
 
-      <div className="space-y-5 bg-slate-50 p-5 lg:p-6">
+      <div className="space-y-5 bg-[#f7f9fb] p-5 lg:p-6">
         {error ? <ErrorMessage message={error} /> : null}
         {state?.production_error ? <ErrorMessage message={`Production takeoff quantities could not be refreshed. Existing BOQ rows were preserved. ${state.production_error}`} /> : null}
 
-        <main className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <main className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white">
           <div className="border-b border-slate-200 px-5 py-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="font-semibold text-slate-950">BOQ items</h3>
               </div>
               <p className="text-sm text-slate-600">Estimated total <strong className="ml-1 text-base text-slate-950">{state?.setup.currency || "Rs"} {totalAmount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></p>
-              <div className="flex gap-2"><Button variant="secondary" onClick={() => { setError(null); setManualOpen(true); }}>Add item</Button></div>
+              <div className="flex gap-2"><Button className="h-10" variant="outline" onClick={() => { setError(null); setManualOpen(true); }}>Add item</Button></div>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_180px_190px_220px]">
-              <input className="input" placeholder="Search BOQ" value={search} onChange={(event) => setSearch(event.target.value)} />
-              <select className="input" value={floorId || ""} onChange={(event) => setFloorId(event.target.value || null)}>
-                <option value="">All floors</option>
-                {state?.floors.map((floor) => <option key={floor.id} value={floor.id}>{floor.name}</option>)}
-              </select>
-              <select className="input" value={elementFilter} onChange={(event) => setElementFilter(event.target.value)}>
-                <option value="all">All elements</option>
-                <option value="structure">Concrete and formwork</option>
-                <option value="door">Doors ({summary.doors})</option>
-                <option value="window">Windows ({summary.windows})</option>
-                <option value="wall">Walls ({summary.walls})</option>
-                <option value="wall_finish">Wall finishes ({summary.wall_finishes || 0})</option>
-                <option value="floor_finish">Floor finishes ({summary.floors})</option>
-                <option value="floor_work">Floor works ({summary.floor_works || 0})</option>
-                <option value="roof">Roofs ({summary.roofs || 0})</option>
-                <option value="ceiling">Ceilings ({summary.ceilings || 0})</option>
-                <option value="manual">Manual ({summary.manual})</option>
-              </select>
-              <select
-                className="input"
-                value={selectedRateFileId || ""}
-                onChange={(event) => {
-                  const next = event.target.value || null;
+              <Input className="h-10 rounded-lg border-slate-200 bg-white" aria-label="Search BOQ" placeholder="Search BOQ" value={search} onChange={(event) => setSearch(event.target.value)} />
+              <Select value={floorId || ALL_FLOORS_VALUE} onValueChange={(value) => setFloorId(value === ALL_FLOORS_VALUE ? null : value)}>
+                <SelectTrigger className="h-10 rounded-lg bg-white">
+                  <SelectValue placeholder="All floors" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_FLOORS_VALUE}>All floors</SelectItem>
+                  {state?.floors.map((floor) => <SelectItem key={floor.id} value={floor.id}>{floor.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={elementFilter} onValueChange={setElementFilter}>
+                <SelectTrigger className="h-10 rounded-lg bg-white">
+                  <SelectValue placeholder="All elements" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All elements</SelectItem>
+                  <SelectItem value="structure">Concrete and formwork</SelectItem>
+                  <SelectItem value="door">Doors ({summary.doors})</SelectItem>
+                  <SelectItem value="window">Windows ({summary.windows})</SelectItem>
+                  <SelectItem value="wall">Walls ({summary.walls})</SelectItem>
+                  <SelectItem value="wall_finish">Wall finishes ({summary.wall_finishes || 0})</SelectItem>
+                  <SelectItem value="floor_finish">Floor finishes ({summary.floors})</SelectItem>
+                  <SelectItem value="floor_work">Floor works ({summary.floor_works || 0})</SelectItem>
+                  <SelectItem value="roof">Roofs ({summary.roofs || 0})</SelectItem>
+                  <SelectItem value="ceiling">Ceilings ({summary.ceilings || 0})</SelectItem>
+                  <SelectItem value="manual">Manual ({summary.manual})</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={selectedRateFileId || NO_RATE_FILE_VALUE}
+                onValueChange={(value) => {
+                  const next = value === NO_RATE_FILE_VALUE ? null : value;
                   setSelectedRateFileId(next);
                   void selectionMutation.mutateAsync(next).catch((cause) => setError(cause instanceof Error ? cause.message : "Rate file selection could not be saved."));
                 }}
               >
-                <option value="">No rate file</option>
-                {(rateFilesQuery.data || []).map((file) => <option key={file.id} value={file.id}>{file.name}</option>)}
-              </select>
+                <SelectTrigger className="h-10 rounded-lg bg-white">
+                  <SelectValue placeholder="No rate file" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_RATE_FILE_VALUE}>No rate file</SelectItem>
+                  {(rateFilesQuery.data || []).map((file) => <SelectItem key={file.id} value={file.id}>{file.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
           <BoqReportTable
+            projectId={projectId}
             rows={rows}
             showRates={Boolean(state?.setup.include_rates)}
             showAmounts={Boolean(state?.setup.include_amounts)}
@@ -317,13 +346,13 @@ export function BoqDashboard({ projectId, initialPanel = null }: { projectId: st
           />
         </main>
 
-        <details className="rounded-2xl border border-slate-200 bg-white">
+        <details className="rounded-lg border border-slate-200 bg-white">
           <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-900">Information required for unmeasured NRM2 work ({NRM2_INFORMATION_REQUIRED.length})</summary>
           <div className="border-t border-slate-200"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-5 py-3">Section</th><th className="px-5 py-3">Work item</th><th className="px-5 py-3">Reason not priced</th></tr></thead><tbody>{NRM2_INFORMATION_REQUIRED.map(item=><tr key={item.item} className="border-t border-slate-200"><td className="px-5 py-3 font-medium">{item.section}</td><td className="px-5 py-3">{item.item}</td><td className="px-5 py-3 text-slate-600">{item.reason}</td></tr>)}</tbody></table></div>
         </details>
 
-        <div className="flex items-center justify-start rounded-2xl border border-slate-200 bg-white px-5 py-4">
-          <Link className="inline-flex h-10 items-center rounded-md border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50" href={appRoutes.workflowStep(projectId, "review")}>Back to Review</Link>
+        <div className="flex items-center justify-start border-t border-slate-200 py-4">
+          <Button asChild variant="outline" className="h-10 px-4"><Link href={appRoutes.workflowStep(projectId, "review")}>Back to Review</Link></Button>
         </div>
       </div>
 
@@ -442,7 +471,7 @@ function BoqRatePickerDialog({
       ariaLabel="Select BOQ rate"
       maxWidth="max-w-5xl"
       onClose={onClose}
-      footer={<Button variant="secondary" disabled={saving} onClick={onClose}>Close</Button>}
+      footer={<Button variant="outline" disabled={saving} onClick={onClose}>Close</Button>}
     >
       <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm">
         <span className="font-semibold text-blue-950">Rate file</span>
@@ -452,7 +481,7 @@ function BoqRatePickerDialog({
         <input className="input w-full" placeholder="Search material, supplier, unit" value={search} onChange={(event) => onSearch(event.target.value)} />
       </div>
       {!rateFileName ? (
-        <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">Select a rate file above the BOQ table first.</div>
+        <div className="rounded-lg border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">Select a rate file above the BOQ table first.</div>
       ) : (
         <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-200">
           <table className="w-full border-collapse text-left text-sm">
