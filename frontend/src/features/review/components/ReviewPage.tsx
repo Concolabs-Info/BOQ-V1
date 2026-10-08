@@ -488,20 +488,20 @@ function ReviewDetails({ item, saving, onEdit }: { item: ReviewItem; saving: boo
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[.14em] text-slate-400">Selected item</p>
+        <p className="text-xs uppercase tracking-[.14em] text-slate-400">Selected item</p>
         <h3 className="mt-1 text-xl font-semibold">{item.display_number || item.title}</h3>
-        <p className="mt-1 text-sm capitalize text-slate-500">{item.entity_type} · {itemCode(item)}</p>
+        <p className="mt-1 text-sm font-semibold capitalize text-slate-500">{item.entity_type} · {itemCode(item)}</p>
       </div>
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
-        <div className="flex justify-between gap-3"><span className="text-slate-500">Floor</span><strong>{String(item.data.floor || "—")}</strong></div>
-        <div className="mt-2 flex justify-between gap-3"><span className="text-slate-500">Measure</span><strong className="text-right">{itemMeasure(item)}</strong></div>
-        <div className="mt-2 flex justify-between gap-3"><span className="text-slate-500">Material / finish</span><strong className="text-right">{itemFinish(item)}</strong></div>
-        <div className="mt-2 flex justify-between gap-3"><span className="text-slate-500">Resolved from</span><strong className="text-right">{itemSource(item)}</strong></div>
-        {item.data.drawing_tag ? <div className="mt-2 flex justify-between gap-3"><span className="text-slate-500">Drawing tag</span><strong>{String(item.data.drawing_tag)}</strong></div> : null}
+        <div className="flex justify-between gap-3"><span className="font-semibold text-slate-600">Floor</span><span className="text-right text-slate-800">{String(item.data.floor || "—")}</span></div>
+        <div className="mt-2 flex justify-between gap-3"><span className="font-semibold text-slate-600">Measure</span><span className="text-right text-slate-800">{itemMeasure(item)}</span></div>
+        <div className="mt-2 flex justify-between gap-3"><span className="font-semibold text-slate-600">Material / finish</span><span className="text-right text-slate-800">{itemFinish(item)}</span></div>
+        <div className="mt-2 flex justify-between gap-3"><span className="font-semibold text-slate-600">Resolved from</span><span className="text-right text-slate-800">{itemSource(item)}</span></div>
+        {item.data.drawing_tag ? <div className="mt-2 flex justify-between gap-3"><span className="font-semibold text-slate-600">Drawing tag</span><span className="text-right text-slate-800">{String(item.data.drawing_tag)}</span></div> : null}
       </div>
       {missing.length || warnings.length ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          {missing.length ? <p><strong>Missing:</strong> {missing.map((value) => value.replaceAll("_", " ")).join(", ")}</p> : null}
+          {missing.length ? <p>Missing: {missing.map((value) => value.replaceAll("_", " ")).join(", ")}</p> : null}
           {warnings.map((warning) => <p key={warning} className="mt-1">{warning}</p>)}
         </div>
       ) : null}
@@ -510,8 +510,8 @@ function ReviewDetails({ item, saving, onEdit }: { item: ReviewItem; saving: boo
         {editable.map((field) => {
           const backendField = field === "room_name" ? "name" : field;
           return (
-            <label key={field} className="block text-sm font-medium capitalize">
-              {field.replaceAll("_", " ")}
+            <label key={field} className="block text-sm capitalize">
+              <span className="font-semibold">{field.replaceAll("_", " ")}</span>
               <input
                 className="input mt-1 w-full"
                 defaultValue={item.data[field] == null ? "" : String(item.data[field])}

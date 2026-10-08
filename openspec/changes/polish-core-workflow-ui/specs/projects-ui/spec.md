@@ -19,9 +19,10 @@ The system SHALL present the Projects list, create form, and editable overview w
 #### Scenario: Read a project card
 - **GIVEN** the Projects list contains project cards
 - **WHEN** a user scans a card
-- **THEN** description and metadata are separated by restrained neutral dividers
+- **THEN** the project name and code lead the card, with status and last-updated date grouped in the header
+- **AND** the description and client, location, and organization metadata are separated by one restrained neutral divider
 - **AND** Create Project and Continue Project remain stronger than secondary details links
 
 ## Implementation Notes
 
-The create form and overview retain their existing fields, validation, status controls, and destinations. Their primary save actions use the same control height as the Projects list action.
+The create form and overview retain their existing fields, validation, status controls, and destinations. Their primary save actions use the same control height as the Projects list action. Project cards no longer reserve a large minimum height, and the loading skeleton mirrors the compact layout.

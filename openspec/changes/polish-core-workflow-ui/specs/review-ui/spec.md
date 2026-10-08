@@ -23,6 +23,12 @@ The system SHALL present Review and Type Summary as compact, readable production
 - **THEN** the relevant confirmation or Continue to BOQ action is prominent
 - **AND** secondary actions remain visible and keyboard accessible
 
+#### Scenario: Read selected item details
+- **GIVEN** a user selects a Review table row
+- **WHEN** the details panel displays its title, values, warnings, and editable fields
+- **THEN** the item name, summary field labels, Generated NRM2 work items heading, and editable field names are bold
+- **AND** the corresponding values and warning copy remain regular weight
+
 ## Implementation Notes
 
 Review gives Confirm selected primary emphasis when rows are checked and Confirm all primary emphasis otherwise. Type Summary keeps category cards and a prominent Continue to BOQ action. Both tables retain their existing panel and column resize behavior, with numeric quantities aligned right and compact row spacing. The shared resizable wrapper restores browser-local layouts after hydration so server and client markup agree.

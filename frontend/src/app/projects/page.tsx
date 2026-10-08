@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { MoreHorizontal, Search, X } from "lucide-react";
+import { Clock3, MoreHorizontal, Search, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -315,40 +315,45 @@ function ProjectCard({
   onStatusChange: (status: ProjectStatus) => void;
 }) {
   return (
-    <Card className="flex min-h-[250px] flex-col border-slate-200 bg-white transition-shadow hover:shadow-md">
-      <CardHeader className="pb-4">
-        <div className="flex items-start justify-between gap-4">
+    <Card className="flex flex-col border-slate-200 bg-white transition-[border-color,box-shadow] hover:border-slate-300 hover:shadow-md">
+      <CardHeader className="px-5 pb-0 pt-5">
+        <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <CardTitle className="text-lg leading-6 tracking-normal">
-              <Link href={appRoutes.workspace(project.id)} className="block truncate text-slate-950 hover:text-blue-700">
+              <Link href={appRoutes.workspace(project.id)} title={project.name} className="block truncate text-slate-950 hover:text-blue-700 focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600">
                 {project.name}
               </Link>
             </CardTitle>
             <p className="mt-1 truncate text-sm text-slate-500">{project.project_number || "No project number"}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Badge variant="outline" className={STATUS_BADGE_STYLES[project.status]}>
-              {statusLabel(project.status)}
-            </Badge>
+          <div className="flex shrink-0 items-start gap-1">
+            <div className="flex flex-col items-end gap-1">
+              <Badge variant="outline" className={STATUS_BADGE_STYLES[project.status]}>
+                {statusLabel(project.status)}
+              </Badge>
+              <span className="flex items-center gap-1 whitespace-nowrap text-xs text-slate-400" title="Last updated" aria-label={`Updated ${formatDate(project.updated_at)}`}>
+                <Clock3 className="size-3" aria-hidden="true" />
+                {formatDate(project.updated_at)}
+              </span>
+            </div>
             <ProjectCardActions project={project} disabled={isMutating} onDelete={onDelete} onStatusChange={onStatusChange} />
           </div>
         </div>
       </CardHeader>
 
-      <CardContent className="flex-1">
-        <p className="mb-5 line-clamp-2 min-h-[2.5rem] text-sm leading-5 text-slate-500">
+      <CardContent className="flex-1 px-5 pb-4 pt-3">
+        <p className="line-clamp-2 text-sm leading-5 text-slate-600">
           {project.description || "No project description added."}
         </p>
-        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-100 pt-4 text-sm xl:grid-cols-3">
           <ProjectDetail label="Client" value={project.client_name || "Not set"} />
           <ProjectDetail label="Location" value={project.location || "Not set"} />
           <ProjectDetail label="Organization" value={project.organization_name || "Workspace"} />
-          <ProjectDetail label="Updated" value={formatDate(project.updated_at)} />
         </dl>
       </CardContent>
 
-      <CardFooter className="flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
-        <Link href={appRoutes.workspace(project.id)} className="text-sm font-semibold text-slate-700 hover:text-blue-700">
+      <CardFooter className="flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-4">
+        <Link href={appRoutes.workspace(project.id)} className="rounded-sm text-sm font-medium text-slate-500 hover:text-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600">
           Project details
         </Link>
         <Button asChild className="h-10 px-4">
@@ -415,36 +420,40 @@ function ProjectCardActions({
 
 function ProjectDetail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 border-t border-slate-100 pt-3">
+    <div className="min-w-0">
       <dt className="text-xs text-slate-500">{label}</dt>
-      <dd className="mt-1 truncate font-medium text-slate-900">{value}</dd>
+      <dd className="mt-1 truncate font-medium text-slate-900" title={value}>{value}</dd>
     </div>
   );
 }
 
 function ProjectCardSkeleton() {
   return (
-    <Card className="min-h-[250px] border-slate-200 bg-white">
-      <CardHeader className="pb-4">
-        <div className="flex items-start justify-between gap-4">
+    <Card className="border-slate-200 bg-white">
+      <CardHeader className="px-5 pb-0 pt-5">
+        <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <Skeleton className="h-5 w-3/4" />
-            <Skeleton className="mt-3 h-4 w-1/2" />
+            <Skeleton className="mt-2 h-4 w-1/2" />
           </div>
-          <Skeleton className="h-6 w-20 rounded-lg" />
+          <div className="flex flex-col items-end gap-2">
+            <Skeleton className="h-6 w-16 rounded-lg" />
+            <Skeleton className="h-3 w-24" />
+          </div>
         </div>
       </CardHeader>
-      <CardContent>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <div key={index} className="border-t border-slate-100 pt-3">
+      <CardContent className="px-5 pb-4 pt-3">
+        <Skeleton className="h-4 w-5/6" />
+        <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-100 pt-4 xl:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={index}>
               <Skeleton className="h-3 w-16" />
-              <Skeleton className="mt-3 h-4 w-24" />
+              <Skeleton className="mt-2 h-4 w-24 max-w-full" />
             </div>
           ))}
         </div>
       </CardContent>
-      <CardFooter className="flex justify-between border-t border-slate-100 pt-5">
+      <CardFooter className="flex justify-between border-t border-slate-100 px-5 py-4">
         <Skeleton className="h-4 w-24" />
         <Skeleton className="h-10 w-32 rounded-lg" />
       </CardFooter>
